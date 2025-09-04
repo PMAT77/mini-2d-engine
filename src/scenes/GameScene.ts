@@ -6,11 +6,10 @@ import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { ParticleSystem } from "../objects/ParticleSystem";
 import { Player } from "../objects/Player";
+
 // 导入光照系统相关类
 import { LightSource } from "../core/LightSource";
 import { LightingSystem } from "../core/LightingSystem";
-
-// 导入光照系统相关类
 
 /**
  * 游戏主场景类，负责管理游戏的核心逻辑、渲染和交互
@@ -43,8 +42,11 @@ export class GameScene extends Scene {
     // 初始化游戏地图，设置为1000x1000的大小
     this.map = new TileMap(100, 100);
 
+    // 获取设备像素比，默认为1
+    const dpr = window.devicePixelRatio || 1;
+
     // 初始化相机，设置视口大小为窗口的两倍，死区为800x500，缓动系数为5
-    this.camera = new Camera(window.innerWidth * 2, window.innerHeight * 2, 800, 500, 5);
+    this.camera = new Camera(window.innerWidth * dpr, window.innerHeight * dpr, 800, 500, 5);
 
     // 初始化粒子系统
     this.particleSystem = new ParticleSystem();
@@ -104,6 +106,29 @@ export class GameScene extends Scene {
     const width = this.camera.width;
     const height = this.camera.height;
     this.lightingSystem.initialize(width * dpr, height * dpr);
+  }
+
+  /**
+   * 重置相机尺寸以适应窗口大小变化
+   */
+  private resizeCamera(): void {
+    const dpr = window.devicePixelRatio || 1;
+    // 更新相机视口大小为窗口的两倍
+    this.camera.width = window.innerWidth * dpr;
+    this.camera.height = window.innerHeight * dpr;
+    // 重置相机位置以保持玩家在视野中央
+    const playerCenterX = this.player.x + this.player.getSize() / 2;
+    const playerCenterY = this.player.y + this.player.getSize() / 2;
+    this.camera.x = playerCenterX - this.camera.width / 2;
+    this.camera.y = playerCenterY - this.camera.height / 2;
+  }
+
+  /**
+   * 处理窗口大小变化的回调函数
+   */
+  private handleResize(): void {
+    this.resizeCamera();
+    this.initLightingSystem();
   }
 
   /**
@@ -171,8 +196,8 @@ export class GameScene extends Scene {
     // 初始化光照系统尺寸
     this.initLightingSystem();
 
-    // 监听窗口大小变化，更新光照系统
-    window.addEventListener('resize', () => this.initLightingSystem());
+    // 监听窗口大小变化，同时更新相机和光照系统
+    window.addEventListener('resize', () => this.handleResize());
   }
 
   /**
@@ -180,7 +205,7 @@ export class GameScene extends Scene {
    */
   onExit() {
     // 移除窗口大小变化的事件监听，避免内存泄漏
-    window.removeEventListener('resize', () => this.initLightingSystem());
+    window.removeEventListener('resize', () => this.handleResize());
   }
 
 

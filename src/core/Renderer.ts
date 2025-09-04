@@ -42,6 +42,7 @@ export class Renderer {
   public resize(): void {
     // 获取设备像素比，默认为1
     const dpr = window.devicePixelRatio || 1;
+
     // 获取窗口的CSS像素尺寸
     const cssWidth = window.innerWidth;
     const cssHeight = window.innerHeight;
@@ -58,8 +59,8 @@ export class Renderer {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     // 保存实际像素尺寸
-    this.width = cssWidth * dpr;
-    this.height = cssHeight * dpr;
+    // this.width = cssWidth * dpr;
+    // this.height = cssHeight * dpr;
   }
 
   /**
