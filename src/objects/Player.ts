@@ -29,9 +29,9 @@ export class Player extends Entities {
 
   private bulletSpeed: number = 800; // 子弹速度 
 
-  private maxShootingTime: number = 3.0; // 最长持续射击时间（秒）
+  private maxShootingTime: number = 3.5; // 最长持续射击时间（秒）
   private shootingTimeRemaining: number = this.maxShootingTime; // 当前剩余可射击时间
-  private maxOverheatCooldownTime: number = 2.0; // 最长过热冷却时间（秒）
+  private maxOverheatCooldownTime: number = 1.0; // 最长过热冷却时间（秒）
   private overheatCooldownRemaining: number = this.maxOverheatCooldownTime; // 当前过热后的冷却时间（秒）
   private isOverheated: boolean = false; // 是否处于过热状态
 
@@ -146,6 +146,62 @@ export class Player extends Entities {
     } else {
       this.idleTime = 0;
     }
+  }
+
+  /**
+  * 绘制竖向冷却进度条
+  * @param ctx Canvas渲染上下文
+  * @param offsetX 绘制偏移X
+  * @param offsetY 绘制偏移Y
+  */
+  private drawCooldownBar(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
+    ctx.save();
+
+    const drawX = this.x - offsetX;
+    const drawY = this.y - offsetY;
+
+    // 进度条配置
+    const barWidth = 10; // 进度条宽度
+    const barHeight = this.size * 1.5; // 进度条高度
+    const barOffset = this.size / 2 + 40; // 与玩家的距离
+    const barX = drawX + barOffset; // 进度条X坐标（玩家右侧）
+    const barY = drawY - barHeight / 2 + this.size / 2; // 进度条Y坐标（居中对齐玩家）
+
+    // 绘制进度条背景
+    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barWidth, barHeight);
+
+    // 根据状态绘制进度条填充
+    if (this.isOverheated) {
+      // 过热冷却状态 - 显示冷却进度（从满格向下消退）
+      const coolDownProgress = 1 - this.getOverheatCooldownProgress(); // 反转进度值
+      const fillHeight = barHeight * coolDownProgress;
+
+      // 创建渐变效果（上热下冷）
+      const gradient = ctx.createLinearGradient(barX, barY, barX, barY + barHeight);
+      gradient.addColorStop(1, "#33ff33"); // 红色（热）
+      gradient.addColorStop(0, "#ff3333"); // 橙色（冷却中）
+
+      ctx.fillStyle = gradient;
+      ctx.fillRect(barX, barY + barHeight - fillHeight, barWidth, fillHeight); // 从顶部开始填充
+    } else {
+      // 正常状态 - 显示射击热量（绿色到红色渐变）
+      const heatProgress = this.getHeatPercentage();
+      const fillHeight = barHeight * heatProgress;
+
+      // 创建渐变效果
+      const gradient = ctx.createLinearGradient(barX, barY, barX, barY + barHeight);
+      gradient.addColorStop(1, "#33ff33"); // 绿色（冷）
+      gradient.addColorStop(0, "#ff3333"); // 红色（热）
+
+      ctx.fillStyle = gradient;
+      ctx.fillRect(barX, barY + barHeight - fillHeight, barWidth, fillHeight);
+    }
+
+    ctx.restore();
   }
 
   /**
@@ -384,5 +440,8 @@ export class Player extends Entities {
     }
 
     ctx.restore();
+
+    // 调用单独的方法绘制冷却进度条
+    this.drawCooldownBar(ctx, offsetX, offsetY);
   }
 }

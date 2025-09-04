@@ -82,8 +82,8 @@ export class Bullet {
           this.particleSystem.createExplosion(
             hitPos,
             8,
-            150,
-            5,
+            400,
+            10,
             0.2,
             this.color === "yellow" ? ["yellow", "orange", "red"] : [this.color]
           );

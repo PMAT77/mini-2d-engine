@@ -73,7 +73,7 @@ export class Camera {
    * @param decayMode 震动衰减模式（默认二次方衰减）
    */
   public shake(
-    magnitude: number = 3,
+    magnitude: number = 5,
     duration: number = 0.1,
     angle: number = Math.random() * Math.PI * 2,
     frequency: number = 20,
