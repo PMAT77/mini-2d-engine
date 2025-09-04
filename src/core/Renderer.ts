@@ -57,10 +57,6 @@ export class Renderer {
 
     // 重置变换矩阵，保持坐标系与CSS像素一致
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-    // 保存实际像素尺寸
-    // this.width = cssWidth * dpr;
-    // this.height = cssHeight * dpr;
   }
 
   /**

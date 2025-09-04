@@ -187,7 +187,7 @@ export class Camera {
     ctx.save();
 
     // 绘制死区矩形
-    ctx.strokeStyle = "rgba(255,0,0,0.7)";
+    ctx.strokeStyle = "rgba(255, 0, 0, 0.4)";
     ctx.lineWidth = 2;
     ctx.strokeRect(dzLeft, dzTop, this.deadZoneWidth, this.deadZoneHeight);
 
