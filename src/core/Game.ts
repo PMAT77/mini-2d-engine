@@ -19,6 +19,15 @@ export class Game {
   /** 上一帧的时间戳，用于计算时间增量 */
   private lastTime = 0;
 
+  /** 当前帧率 */
+  private fps = 0;
+
+  /** 用于计算FPS的帧数计数器 */
+  private frameCount = 0;
+
+  /** 上次计算FPS的时间戳 */
+  private lastFpsUpdate = 0;
+
   /**
    * 构造函数
    * @param canvas 游戏画布元素
@@ -35,6 +44,7 @@ export class Game {
    */
   start(): void {
     this.lastTime = performance.now();
+    this.lastFpsUpdate = this.lastTime;
     requestAnimationFrame(this.loop.bind(this));
   }
 
@@ -49,12 +59,23 @@ export class Game {
     const delta = (now - this.lastTime) / 1000;
     this.lastTime = now;
 
+    // 计算FPS
+    this.frameCount++;
+    if (now - this.lastFpsUpdate >= 1000) {
+      this.fps = Math.round((this.frameCount * 1000) / (now - this.lastFpsUpdate));
+      this.frameCount = 0;
+      this.lastFpsUpdate = now;
+    }
+
     // 更新当前场景
     this.sceneManager.update(delta, this.input);
 
     // 清空画布并绘制当前场景
     this.renderer.clear("lightblue");
     this.sceneManager.draw(this.renderer.ctx);
+
+    // 绘制FPS信息
+    this.renderer.drawFPS(this.fps);
 
     // 请求下一帧动画，继续游戏循环
     requestAnimationFrame(this.loop.bind(this));

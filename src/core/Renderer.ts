@@ -70,4 +70,36 @@ export class Renderer {
     this.ctx.fillStyle = color;
     this.ctx.fillRect(0, 0, this.width, this.height);
   }
+
+  /**
+   * 在右上角绘制FPS信息
+   * @param fps 当前帧数
+   */
+  public drawFPS(fps: number): void {
+    // 保存当前渲染状态
+    this.ctx.save();
+
+    // 计算实际像素位置（考虑设备像素比）
+    const dpr = window.devicePixelRatio || 1;
+
+    // 设置字体和样式
+    this.ctx.font = `${14 * dpr}px Arial`;
+    this.ctx.fillStyle = "white";
+    this.ctx.strokeStyle = "black";
+    this.ctx.lineWidth = 2 * dpr;
+
+    // 计算文本位置（右上角，留出边距）
+    const margin = 10 * dpr;
+    const text = `FPS: ${fps}`;
+    const textMetrics = this.ctx.measureText(text);
+    const x = this.width - textMetrics.width - margin;
+    const y = 14 * dpr + margin;
+
+    // 绘制文本描边和填充
+    this.ctx.strokeText(text, x, y);
+    this.ctx.fillText(text, x, y);
+
+    // 恢复渲染状态
+    this.ctx.restore();
+  }
 }

@@ -361,8 +361,8 @@ export class Player extends Entities {
     if (lookDir.length() > 0) {
       this.shoot(lookDir);
 
-      console.log('获取当前射击热量百分比', this.getHeatPercentage() * 100 + '%')
-      console.log('获取当前射击过热冷却进度', this.getOverheatCooldownProgress())
+      // console.log('获取当前射击热量百分比', this.getHeatPercentage() * 100 + '%')
+      // console.log('获取当前射击过热冷却进度', this.getOverheatCooldownProgress())
     }
 
     // 根据当前状态切换状态机状态

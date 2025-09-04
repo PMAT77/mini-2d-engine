@@ -95,6 +95,19 @@ export class Bullet {
         this.isDestroyed = true;
         return;
       }
+
+      // 检查子弹是否超出地图范围
+      const mapPixelWidth = map.width * map.tileSize;
+      const mapPixelHeight = map.height * map.tileSize;
+
+      // 当子弹完全离开地图区域时销毁
+      if (newX + this.size < 0 ||
+        newX > mapPixelWidth ||
+        newY + this.size < 0 ||
+        newY > mapPixelHeight) {
+        this.destroy();
+        return;
+      }
     }
 
     // 更新子弹位置
