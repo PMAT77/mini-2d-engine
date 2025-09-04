@@ -23,9 +23,17 @@ export class Player extends Entities {
   // 射击相关属性
   private isShooting: boolean = false; // 玩家是否正在开火
   private bullets: Bullet[] = []; // 存储玩家发射的子弹
+
   private fireRate: number = 0.1; // 射速（秒/发）
-  private fireCooldown: number = 0; // 开火冷却计时器
-  private bulletSpeed: number = 800; // 子弹速度
+  private fireCooldown: number = 0; // 开火冷却计时器（控制射速）
+
+  private bulletSpeed: number = 800; // 子弹速度 
+
+  private maxShootingTime: number = 3.0; // 最长持续射击时间（秒）
+  private shootingTimeRemaining: number = this.maxShootingTime; // 当前剩余可射击时间
+  private maxOverheatCooldownTime: number = 2.0; // 最长过热冷却时间（秒）
+  private overheatCooldownRemaining: number = this.maxOverheatCooldownTime; // 当前过热后的冷却时间（秒）
+  private isOverheated: boolean = false; // 是否处于过热状态
 
   // 回调函数定义
   private onShootCallback?: (shootDir: Vector2) => void; // 射击回调，用于触发摄像机震动等效果
@@ -217,13 +225,26 @@ export class Player extends Entities {
    * @param inputDir 射击方向
    * @param damage 子弹伤害值
    */
+  // 在shoot方法中添加新的逻辑
   shoot(inputDir: Vector2, damage: number = 10): void {
     // 验证射击方向
     if (!inputDir || inputDir.length() === 0) return;
 
+    // 检查是否过热
+    if (this.isOverheated) return;
+
+    // 检查剩余射击时间
+    if (this.shootingTimeRemaining <= 0) {
+      this.startOverheat();
+      return;
+    }
+
     // 检查射击冷却
     if (this.fireCooldown > 0) return;
     this.fireCooldown = this.fireRate;
+
+    // 减少剩余射击时间
+    this.shootingTimeRemaining -= this.fireRate;
 
     // 生成子弹
     const bulletPos = new Vector2(this.x + this.size / 2, this.y + this.size / 2);
@@ -239,25 +260,53 @@ export class Player extends Entities {
     this.isShooting = true;
   }
 
-  /**
-   * 更新玩家状态
-   * @param delta 时间增量
-   * @param input 输入系统引用
-   * @param map 地图引用（可选）
-   */
+  // 添加过热处理方法
+  private startOverheat(): void {
+    this.isOverheated = true;
+    this.shootingTimeRemaining = 0;
+    this.fireCooldown = 0;
+    // 可以在这里添加过热特效或音效
+  }
+
+  // 修改update方法，添加过热冷却逻辑
   update(delta: number, input: Input, map?: TileMap): void {
     // 调用父类的移动逻辑
     super.update(delta, input, map);
 
-    // 更新射击冷却
-    if (this.fireCooldown > 0) {
-      this.fireCooldown -= delta;
+    // 更新射击冷却和过热状态
+    if (this.isOverheated) {
+      // 过热冷却倒计时
+      this.overheatCooldownRemaining -= delta;
+      if (this.overheatCooldownRemaining <= 0) {
+        // 过热冷却完成
+        this.isOverheated = false;
+        this.shootingTimeRemaining = this.maxShootingTime;
+        this.overheatCooldownRemaining = this.maxOverheatCooldownTime; // 重置过热冷却时间
+      }
+    } else {
+      // 常规射击冷却
+      if (this.fireCooldown > 0) {
+        this.fireCooldown -= delta;
+      }
+
+      // 当玩家停止射击时，缓慢恢复射击时间
+      if (!this.isShooting && this.shootingTimeRemaining < this.maxShootingTime) {
+        // 每秒恢复20%的最大射击时间
+        this.shootingTimeRemaining += delta * this.maxShootingTime * 0.2;
+        // 确保不超过最大值
+        if (this.shootingTimeRemaining > this.maxShootingTime) {
+          this.shootingTimeRemaining = this.maxShootingTime;
+        }
+      }
     }
 
     // 处理射击逻辑
     const lookDir = this.getLookDirection(input);
     if (lookDir.length() > 0) {
       this.shoot(lookDir);
+
+      console.log('获取当前射击热量百分比', this.getHeatPercentage() * 100 + '%')
+      console.log('获取当前射击过热冷却进度', this.getOverheatCooldownProgress())
     }
 
     // 根据当前状态切换状态机状态
@@ -276,6 +325,32 @@ export class Player extends Entities {
     // 更新子弹并清理已销毁的子弹
     this.bullets.forEach(bullet => bullet.update(delta, map));
     this.bullets = this.bullets.filter(bullet => !bullet.getIsDestroyed());
+  }
+
+  // 添加获取射击状态的方法（可选，用于UI显示）
+  /**
+   * 获取当前射击热量百分比（0-1）
+   * @returns 射击热量百分比
+   */
+  getHeatPercentage(): number {
+    return 1 - (this.shootingTimeRemaining / this.maxShootingTime);
+  }
+
+  /**
+   * 获取是否处于过热状态
+   * @returns 是否过热
+   */
+  getIsOverheated(): boolean {
+    return this.isOverheated;
+  }
+
+  /**
+   * 获取过热冷却进度（0-1）
+   * @returns 过热冷却进度
+   */
+  getOverheatCooldownProgress(): number {
+    if (!this.isOverheated) return 0;
+    return 1 - (this.overheatCooldownRemaining / this.maxOverheatCooldownTime);
   }
 
   /**
