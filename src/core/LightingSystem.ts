@@ -82,17 +82,11 @@ export class LightingSystem {
   prepareLightingMask(
     cameraX: number,
     cameraY: number,
-    screenWidth: number,
-    screenHeight: number,
-    dpr: number = 1
   ): void {
     if (!this.initialized || !this.shadowCtx || !this.shadowCanvas) {
       return;
     }
 
-    // 移除这两行，因为尺寸在initialize时已经设置过了
-    // this.shadowCanvas.width = screenWidth * dpr;
-    // this.shadowCanvas.height = screenHeight * dpr;
     const ctx = this.shadowCtx;
 
     // 清空阴影画布，使用环境光作为基础

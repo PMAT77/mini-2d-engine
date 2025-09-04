@@ -35,7 +35,7 @@ export class LoadingScene extends Scene {
    * 模拟加载的总资源数量
    * @private
    */
-  private readonly totalFake = 20;
+  private readonly totalFake = 50;
 
   /**
    * 构造函数
@@ -69,12 +69,13 @@ export class LoadingScene extends Scene {
       console.error("资源加载异常", e);
     }
 
-    // 加载完成后切换到目标场景
-    if (this.targetScene) {
-      // 注意：注释中提到的0.8秒过渡时间与实际代码中的0秒不一致
-      // 根据实际代码逻辑，这里使用0秒过渡时间（即无过渡）
-      this.game.sceneManager.changeScene(this.targetScene, 0);
-    }
+    const timer = setTimeout(() => {
+      // 加载完成后切换到目标场景
+      if (this.targetScene) {
+        clearTimeout(timer);
+        this.game.sceneManager.changeScene(this.targetScene, 0);
+      }
+    }, 1000);
   }
 
   /**
@@ -114,7 +115,7 @@ export class LoadingScene extends Scene {
     ctx.font = "28px sans-serif";
     ctx.textAlign = "left";
     ctx.fillText(
-      `加载中... ${Math.floor(this.progress * 100)}%`,
+      `${this.progress === 1 ? '加载完成...' : '加载中...'} ${Math.floor(this.progress * 100)}%`,
       50,
       (ctx.canvas.height - 200)
     );

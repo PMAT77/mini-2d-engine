@@ -281,9 +281,6 @@ export class GameScene extends Scene {
     this.lightingSystem.prepareLightingMask(
       cameraX,
       cameraY,
-      this.camera.width,
-      this.camera.height,
-      dpr
     );
 
     // 应用光照效果到主画布
