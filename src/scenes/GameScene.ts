@@ -6,6 +6,11 @@ import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { ParticleSystem } from "../objects/ParticleSystem";
 import { Player } from "../objects/Player";
+// 导入光照系统相关类
+import { LightSource } from "../core/LightSource";
+import { LightingSystem } from "../core/LightingSystem";
+
+// 导入光照系统相关类
 
 /**
  * 游戏主场景类，负责管理游戏的核心逻辑、渲染和交互
@@ -18,11 +23,16 @@ export class GameScene extends Scene {
   private loaded: boolean = false;
   private deltaSinceLastFrame: number = 0;
 
+  // 添加玩家光源引用
+  private playerLight: LightSource;
+
   // 常量定义
   private static readonly PLAYER_SIZE = 49;
 
   // 粒子系统
   private particleSystem: ParticleSystem;
+  // 光照系统
+  private lightingSystem: LightingSystem;
 
   /**
    * 构造函数
@@ -39,6 +49,9 @@ export class GameScene extends Scene {
     // 初始化粒子系统
     this.particleSystem = new ParticleSystem();
 
+    // 初始化光照系统
+    this.lightingSystem = new LightingSystem();
+
     // 获取摄像头死区范围，用于在其中生成玩家初始位置
     const deadZoneLeft = this.camera.x + (this.camera.width - this.camera.deadZoneWidth) / 2;
     const deadZoneTop = this.camera.y + (this.camera.height - this.camera.deadZoneHeight) / 2;
@@ -48,6 +61,17 @@ export class GameScene extends Scene {
     // 在死区内生成可行走位置作为玩家出生点
     const spawn = this.getSpawnPositionInArea(deadZoneLeft, deadZoneTop, deadZoneWidth, deadZoneHeight, GameScene.PLAYER_SIZE);
     this.player = new Player(spawn.x, spawn.y, undefined, this.particleSystem);
+
+    const playerCenterX = this.player.x + this.player.getSize() / 2;
+    const playerCenterY = this.player.y + this.player.getSize() / 2;
+    const playerCenter = new Vector2(playerCenterX, playerCenterY);
+
+    // 设置玩家光源（位置跟随玩家中心，半径600，白色，强度1） 
+    this.playerLight = new LightSource(playerCenter, 600, "#FFFFFF", 1.0);
+    this.lightingSystem.addLightSource(this.playerLight);
+
+    // 设置环境光（深色背景，带有微弱的环境光）
+    this.lightingSystem.setAmbientLight("rgba(30, 30, 40, 0.8)");
 
     // 设置射击回调，配置震动参数
     this.player.setOnShootCallback((shootDir?: Vector2) => {
@@ -72,6 +96,36 @@ export class GameScene extends Scene {
   }
 
   /**
+   * 初始化光照系统
+   */
+  private initLightingSystem(): void {
+    const dpr = window.devicePixelRatio || 1;
+    // 使用相机的实际尺寸而不是窗口尺寸
+    const width = this.camera.width;
+    const height = this.camera.height;
+    this.lightingSystem.initialize(width * dpr, height * dpr);
+  }
+
+  /**
+   * 动态调整环境光亮度
+   * @param brightness 亮度值 (0-2)
+   * @param color 基础颜色
+   */
+  public adjustAmbientLight(brightness: number, color: string = "#111118") {
+    // 确保亮度值在有效范围内
+    brightness = Math.max(0, Math.min(2, brightness));
+
+    // 将十六进制颜色转换为RGB
+    const hex = color.replace("#", "");
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+
+    // 设置新的环境光
+    this.lightingSystem.setAmbientLight(`rgba(${r}, ${g}, ${b}, ${brightness})`);
+  }
+
+  /**
    * 在指定矩形区域内随机寻找可行走位置
    * @param x 左上角 x 坐标
    * @param y 左上角 y 坐标
@@ -81,7 +135,7 @@ export class GameScene extends Scene {
    * @returns 找到的可行走位置坐标
    * @throws 当在指定次数尝试后仍未找到可行走位置时抛出错误
    */
-  getSpawnPositionInArea(x: number, y: number, width: number, height: number, size: number): { x: number; y: number } {
+  public getSpawnPositionInArea(x: number, y: number, width: number, height: number, size: number): { x: number; y: number } {
     const MAX_ATTEMPTS = 1000;
     let attempts = 0;
 
@@ -113,7 +167,22 @@ export class GameScene extends Scene {
     // 尝试播放背景音乐
     const bgm = this.loader.getAudio("bgm");
     bgm?.play();
+
+    // 初始化光照系统尺寸
+    this.initLightingSystem();
+
+    // 监听窗口大小变化，更新光照系统
+    window.addEventListener('resize', () => this.initLightingSystem());
   }
+
+  /**
+   * 场景退出时的清理逻辑
+   */
+  onExit() {
+    // 移除窗口大小变化的事件监听，避免内存泄漏
+    window.removeEventListener('resize', () => this.initLightingSystem());
+  }
+
 
   /**
    * 场景更新逻辑，每帧调用
@@ -131,10 +200,15 @@ export class GameScene extends Scene {
     // 更新粒子系统
     this.particleSystem.update(delta);
 
+    // 更新光照系统
+    this.lightingSystem.update(delta);
+
     // 相机跟随玩家中心位置
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
+
     this.camera.follow(playerCenterX, playerCenterY, delta);
+    this.playerLight.setPosition(new Vector2(playerCenterX, playerCenterY));
   }
 
   /**
@@ -167,5 +241,41 @@ export class GameScene extends Scene {
 
     // 绘制相机死区（调试用）
     this.camera.drawDebug(ctx);
+
+    // 应用光照效果
+    this.applyLighting(ctx, cameraOffset.x, cameraOffset.y);
+  }
+
+  /**
+   * 应用光照效果
+   */
+  private applyLighting(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number) {
+    // 准备光照遮罩
+    const dpr = window.devicePixelRatio || 1;
+    // 使用相机的实际尺寸
+    this.lightingSystem.prepareLightingMask(
+      cameraX,
+      cameraY,
+      this.camera.width,
+      this.camera.height,
+      dpr
+    );
+
+    // 应用光照效果到主画布
+    this.lightingSystem.applyLighting(ctx);
+  }
+
+  /**
+   * 添加其他光源（例如环境光源、互动光源等）
+   */
+  public addLightSource(lightSource: LightSource): void {
+    this.lightingSystem.addLightSource(lightSource);
+  }
+
+  /**
+   * 设置环境光
+   */
+  public setAmbientLight(color: string): void {
+    this.lightingSystem.setAmbientLight(color);
   }
 }

@@ -70,8 +70,8 @@ export class Game {
     // 更新当前场景
     this.sceneManager.update(delta, this.input);
 
-    // 清空画布并绘制当前场景
-    this.renderer.clear("lightblue");
+    // 清空画布并绘制当前场景 
+    this.renderer.clear("#1a1a1a"); // 修改为更适合光照系统的深色背景
     this.sceneManager.draw(this.renderer.ctx);
 
     // 绘制FPS信息
@@ -79,5 +79,12 @@ export class Game {
 
     // 请求下一帧动画，继续游戏循环
     requestAnimationFrame(this.loop.bind(this));
+  }
+
+  /**
+ * 调整光照系统大小（如果场景中有光照系统）
+ */
+  public resizeLightingSystem(): void {
+    // 这里我们会在Renderer中实现对光照系统的调整
   }
 }

@@ -115,11 +115,16 @@ export class ParticleSystem {
   }
 
   /**
-   * 获取当前活跃的粒子数量
-   * @returns 活跃粒子数量
+   * 获取性能统计信息
    */
-  getParticleCount(): number {
-    return this.particles.length;
+  getPerformanceStats(): {
+    activeParticles: number;
+    poolSize: number;
+  } {
+    return {
+      activeParticles: this.particles.length,
+      poolSize: this.particlePool.length
+    };
   }
 
   /**
