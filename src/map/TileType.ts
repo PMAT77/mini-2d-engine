@@ -48,7 +48,7 @@ export const TILE_TYPES: Record<TileTypeId, TileType> = {
     isDestructible: false,
   },
   [TileTypeId.MINERAL]: {
-    color: 'gold',
+    color: '#ffd700',
     speedFactor: 0,
     isDestructible: true,
     durability: 100

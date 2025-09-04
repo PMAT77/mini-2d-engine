@@ -154,11 +154,12 @@ export class Player extends Entities {
   }
 
   /**
-  * 绘制竖向冷却进度条
-  * @param ctx Canvas渲染上下文
-  * @param offsetX 绘制偏移X
-  * @param offsetY 绘制偏移Y
-  */
+   * 绘制竖向冷却进度条
+   * @param ctx Canvas渲染上下文
+   * @param offsetX 绘制偏移X
+   * @param offsetY 绘制偏移Y
+   * @returns 
+   */
   private drawCooldownBar(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
     // 如果透明度为0，不绘制进度条
     if (this.cooldownBarAlpha <= 0) {
@@ -183,7 +184,7 @@ export class Player extends Entities {
     // 绘制进度条背景
     ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
     ctx.fillRect(barX, barY, barWidth, barHeight);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
     ctx.lineWidth = 1;
     ctx.strokeRect(barX, barY, barWidth, barHeight);
 
@@ -294,7 +295,6 @@ export class Player extends Entities {
    * @param inputDir 射击方向
    * @param damage 子弹伤害值
    */
-  // 在shoot方法中添加新的逻辑
   shoot(inputDir: Vector2, damage: number = 10): void {
     // 验证射击方向
     if (!inputDir || inputDir.length() === 0) return;

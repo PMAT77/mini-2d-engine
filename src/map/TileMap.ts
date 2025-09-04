@@ -3,6 +3,8 @@
  * 负责生成、存储和管理游戏中的瓦片地图数据
  */
 import { TILE_TYPES, TileTypeId, getTileSpeedFactor, getTileType } from "./TileType";
+// 在文件顶部添加导入语句
+import { blendColorWithWhite } from '../utils/colorUtils';
 
 /**
  * 简单噪声生成函数（占位实现，可替换为Perlin或Simplex噪声）
@@ -218,22 +220,25 @@ export class TileMap {
 
         // 获取瓦片颜色
         let fillStyle = TILE_TYPES[tileTypeId]?.color ?? "#ccc";
+        // 保存原始瓦片颜色用于高亮
+        const originalColor = fillStyle;
 
         // 根据墙块血量显示不同颜色
         if (!terrain.walkable && terrain.maxHp) {
           const hp = this.tileHp[row][col];
           const ratio = hp / terrain.maxHp;
-          if (ratio > 0.75) fillStyle = TILE_TYPES[tileTypeId]?.color ?? "#ccc";
-          else if (ratio > 0.5) fillStyle = "blue";
-          else if (ratio > 0.25) fillStyle = "orange";
-          else fillStyle = "red";
+          // if (ratio > 0.75) fillStyle = TILE_TYPES[tileTypeId]?.color ?? "#ccc";
+          // else if (ratio > 0.5) fillStyle = "#0000ff";
+          // else if (ratio > 0.25) fillStyle = "#ffa500";
+          // else fillStyle = "#ff0000";
         }
 
         // 应用高亮效果
         const highlight = this.tileHighlight[row][col];
         if (highlight > 0) {
           const alpha = Math.min(highlight / this.highlightDuration, 1);
-          fillStyle = `rgba(255,255,255,${alpha})`;
+          // 实现瓦片自身颜色和白色的混合高亮
+          fillStyle = blendColorWithWhite(originalColor, alpha);
           this.tileHighlight[row][col] -= delta;
           if (this.tileHighlight[row][col] < 0) this.tileHighlight[row][col] = 0;
         }
