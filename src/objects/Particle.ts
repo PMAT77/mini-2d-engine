@@ -136,4 +136,27 @@ export class Particle {
   isAlive(): boolean {
     return this.isActive;
   }
+
+  /**
+   * 重置粒子状态，用于对象池复用
+   */
+  reset(pos: Vector2, velocity: Vector2, size: number, life: number, color: string): void {
+    this.pos = pos.clone();
+    this.velocity = velocity.clone();
+    this.size = size;
+    this.initialSize = size;
+    this.life = life;
+    this.maxLife = life;
+    this.color = color;
+    this.isActive = true;
+
+    // 随机旋转角度和速度
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotationSpeed = (Math.random() - 0.5) * 10;
+
+    // 设置透明度和尺寸衰减
+    this.alpha = 1;
+    this.alphaDecay = 1 / life;
+    this.sizeDecay = this.size / life;
+  }
 }

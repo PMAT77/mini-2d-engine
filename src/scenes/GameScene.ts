@@ -31,7 +31,7 @@ export class GameScene extends Scene {
     super();
 
     // 初始化游戏地图，设置为1000x1000的大小
-    this.map = new TileMap(1000, 1000);
+    this.map = new TileMap(100, 100);
 
     // 初始化相机，设置视口大小为窗口的两倍，死区为800x500，缓动系数为5
     this.camera = new Camera(window.innerWidth * 2, window.innerHeight * 2, 800, 500, 5);

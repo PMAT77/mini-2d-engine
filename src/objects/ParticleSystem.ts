@@ -8,14 +8,14 @@ export class ParticleSystem {
   /** 粒子列表 */
   private particles: Particle[] = [];
 
+  /** 粒子对象池 */
+  private particlePool: Particle[] = [];
+
+  /** 最大粒子数量限制 */
+  private maxParticles: number = 1000;
+
   /**
    * 创建爆炸效果
-   * @param pos 爆炸中心位置
-   * @param count 粒子数量
-   * @param speed 粒子最大速度
-   * @param size 粒子初始尺寸
-   * @param life 粒子生命周期
-   * @param colors 粒子颜色列表
    */
   createExplosion(
     pos: Vector2,
@@ -25,7 +25,11 @@ export class ParticleSystem {
     life: number = 0.3,
     colors: string[] = ["yellow", "orange", "red"]
   ): void {
-    for (let i = 0; i < count; i++) {
+    // 计算实际可创建的粒子数（受最大粒子数限制）
+    const availableSlots = Math.max(0, this.maxParticles - this.particles.length);
+    const actualCount = Math.min(count, availableSlots);
+
+    for (let i = 0; i < actualCount; i++) {
       // 随机方向
       const angle = Math.random() * Math.PI * 2;
       const velocity = new Vector2(
@@ -40,21 +44,33 @@ export class ParticleSystem {
       const particleSize = size * (0.8 + Math.random() * 0.4);
       const particleLife = life * (0.8 + Math.random() * 0.4);
 
-      // 创建粒子
-      const particle = new Particle(pos, velocity, particleSize, particleLife, color);
+      // 从对象池获取粒子或创建新粒子
+      let particle: Particle;
+      if (this.particlePool.length > 0) {
+        particle = this.particlePool.pop()!;
+        particle.reset(pos, velocity, particleSize, particleLife, color);
+      } else {
+        particle = new Particle(pos, velocity, particleSize, particleLife, color);
+      }
       this.particles.push(particle);
     }
   }
 
   /**
    * 更新所有活跃的粒子
-   * @param delta 时间增量（毫秒）
    */
   update(delta: number): void {
     // 更新粒子并过滤掉不活跃的粒子
     this.particles = this.particles.filter(particle => {
       particle.update(delta);
-      return particle.isAlive();
+      if (!particle.isAlive()) {
+        // 不活跃的粒子放回对象池
+        if (this.particlePool.length < 200) { // 限制对象池大小
+          this.particlePool.push(particle);
+        }
+        return false;
+      }
+      return true;
     });
   }
 
