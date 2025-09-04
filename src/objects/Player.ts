@@ -35,6 +35,11 @@ export class Player extends Entities {
   private overheatCooldownRemaining: number = this.maxOverheatCooldownTime; // 当前过热后的冷却时间（秒）
   private isOverheated: boolean = false; // 是否处于过热状态
 
+  // 进度条可见性相关属性
+  private cooldownBarAlpha: number = 0; // 进度条透明度（0-1）
+  private isBarVisible: boolean = false; // 进度条是否应该可见
+  private fadeSpeed: number = 5; // 淡入淡出速度系数
+
   // 回调函数定义
   private onShootCallback?: (shootDir: Vector2) => void; // 射击回调，用于触发摄像机震动等效果
 
@@ -155,6 +160,11 @@ export class Player extends Entities {
   * @param offsetY 绘制偏移Y
   */
   private drawCooldownBar(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
+    // 如果透明度为0，不绘制进度条
+    if (this.cooldownBarAlpha <= 0) {
+      return;
+    }
+
     ctx.save();
 
     const drawX = this.x - offsetX;
@@ -166,6 +176,9 @@ export class Player extends Entities {
     const barOffset = this.size / 2 + 40; // 与玩家的距离
     const barX = drawX + barOffset; // 进度条X坐标（玩家右侧）
     const barY = drawY - barHeight / 2 + this.size / 2; // 进度条Y坐标（居中对齐玩家）
+
+    // 设置透明度
+    ctx.globalAlpha = this.cooldownBarAlpha;
 
     // 绘制进度条背景
     ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
@@ -356,13 +369,24 @@ export class Player extends Entities {
       }
     }
 
+    // 管理进度条可见性
+    if (this.isShooting || this.isOverheated || this.shootingTimeRemaining < this.maxShootingTime) {
+      this.isBarVisible = true;
+    } else {
+      this.isBarVisible = false;
+    }
+
+    // 更新进度条透明度
+    if (this.isBarVisible) {
+      this.cooldownBarAlpha = Math.min(1, this.cooldownBarAlpha + delta * this.fadeSpeed);
+    } else {
+      this.cooldownBarAlpha = Math.max(0, this.cooldownBarAlpha - delta * this.fadeSpeed);
+    }
+
     // 处理射击逻辑
     const lookDir = this.getLookDirection(input);
     if (lookDir.length() > 0) {
       this.shoot(lookDir);
-
-      // console.log('获取当前射击热量百分比', this.getHeatPercentage() * 100 + '%')
-      // console.log('获取当前射击过热冷却进度', this.getOverheatCooldownProgress())
     }
 
     // 根据当前状态切换状态机状态
