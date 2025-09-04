@@ -71,7 +71,7 @@ export class Player extends Entities {
   }
 
   /**
-   * 获取移动方向（基于WASD按键）
+   * 获取移动方向（基于WADS按键）
    * @param input 输入系统引用
    * @returns 归一化的移动方向向量
    */
