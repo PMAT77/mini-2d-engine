@@ -39,6 +39,7 @@ export class Player extends Entities {
   private cooldownBarAlpha: number = 0; // 进度条透明度（0-1）
   private isBarVisible: boolean = false; // 进度条是否应该可见
   private fadeSpeed: number = 5; // 淡入淡出速度系数
+  private overheatBorderPulse: number = 0; // 用于控制过热状态下边框闪烁的脉冲值
 
   // 回调函数定义
   private onShootCallback?: (shootDir: Vector2) => void; // 射击回调，用于触发摄像机震动等效果
@@ -184,8 +185,23 @@ export class Player extends Entities {
     // 绘制进度条背景
     ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
     ctx.fillRect(barX, barY, barWidth, barHeight);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-    ctx.lineWidth = 1;
+
+    // 根据状态设置边框样式
+    if (this.isOverheated) {
+      // 过热状态：红色高亮闪烁边框
+      // 计算边框亮度（根据脉冲值在0.5到1之间变化）
+      const borderIntensity = 0.5 + this.overheatBorderPulse * 0.5;
+      // 计算边框宽度（根据脉冲值在1到3之间变化）
+      const borderWidth = 1 + Math.round(this.overheatBorderPulse * 2);
+
+      ctx.strokeStyle = `rgba(255, ${Math.round(100 * borderIntensity)}, ${Math.round(100 * borderIntensity)}, 1)`;
+      ctx.lineWidth = borderWidth;
+    } else {
+      // 正常状态：普通边框
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+      ctx.lineWidth = 1;
+    }
+
     ctx.strokeRect(barX, barY, barWidth, barHeight);
 
     // 根据状态绘制进度条填充
@@ -352,6 +368,9 @@ export class Player extends Entities {
         this.shootingTimeRemaining = this.maxShootingTime;
         this.overheatCooldownRemaining = this.maxOverheatCooldownTime; // 重置过热冷却时间
       }
+
+      // 更新过热边框闪烁脉冲值（使用正弦函数创建周期性变化）
+      this.overheatBorderPulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
     } else {
       // 常规射击冷却
       if (this.fireCooldown > 0) {
