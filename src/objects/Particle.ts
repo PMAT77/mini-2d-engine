@@ -159,4 +159,9 @@ export class Particle {
     this.alphaDecay = 1 / life;
     this.sizeDecay = this.size / life;
   }
+  // 添加getter方法
+  getColor(): string { return this.color; }
+  getPosition(): Vector2 { return this.pos; }
+  getSize(): number { return this.size; }
+  getAlpha(): number { return this.alpha; }
 }

@@ -75,14 +75,42 @@ export class ParticleSystem {
   }
 
   /**
-   * 渲染所有活跃的粒子
-   * @param ctx Canvas渲染上下文
-   * @param offsetX 水平偏移量
-   * @param offsetY 垂直偏移量
+   * 渲染所有活跃的粒子（批处理优化版本）
    */
   draw(ctx: CanvasRenderingContext2D, offsetX: number, offsetY: number): void {
+    // 按颜色分组粒子以减少fillStyle切换
+    const particlesByColor: { [key: string]: Particle[] } = {};
+
+    // 分组
     this.particles.forEach(particle => {
-      particle.draw(ctx, offsetX, offsetY);
+      if (!particle.isAlive()) return;
+      if (!particlesByColor[particle.getColor()]) {
+        particlesByColor[particle.getColor()] = [];
+      }
+      particlesByColor[particle.getColor()].push(particle);
+    });
+
+    // 按颜色批次绘制
+    Object.entries(particlesByColor).forEach(([color, particles]) => {
+      ctx.save();
+      ctx.fillStyle = color;
+
+      particles.forEach(particle => {
+        const pos = particle.getPosition();
+        const size = particle.getSize();
+        const alpha = particle.getAlpha();
+
+        ctx.globalAlpha = alpha;
+        // 使用简单的位置计算替代translate和rotate
+        ctx.fillRect(
+          pos.x - offsetX - size / 2,
+          pos.y - offsetY - size / 2,
+          size,
+          size
+        );
+      });
+
+      ctx.restore();
     });
   }
 
