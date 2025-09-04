@@ -347,8 +347,8 @@ export class Player extends Entities {
 
       // 当玩家停止射击时，缓慢恢复射击时间
       if (!this.isShooting && this.shootingTimeRemaining < this.maxShootingTime) {
-        // 每秒恢复20%的最大射击时间
-        this.shootingTimeRemaining += delta * this.maxShootingTime * 0.2;
+        // 每秒恢复50%的最大射击时间
+        this.shootingTimeRemaining += delta * this.maxShootingTime * 0.5;
         // 确保不超过最大值
         if (this.shootingTimeRemaining > this.maxShootingTime) {
           this.shootingTimeRemaining = this.maxShootingTime;
