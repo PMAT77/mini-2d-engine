@@ -23,7 +23,8 @@ export interface TileType {
 export enum TileTypeId {
   DEFAULT = 'default',
   WATER = 'water',
-  WALL = 'wall'
+  WALL = 'wall',
+  MINERAL = 'mineral'
 }
 
 /**
@@ -43,6 +44,11 @@ export const TILE_TYPES: Record<TileTypeId, TileType> = {
   },
   [TileTypeId.WALL]: {
     color: '#555555',
+    speedFactor: 0,
+    isDestructible: false,
+  },
+  [TileTypeId.MINERAL]: {
+    color: 'gold',
     speedFactor: 0,
     isDestructible: true,
     durability: 100

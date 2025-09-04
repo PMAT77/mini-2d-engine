@@ -42,8 +42,9 @@ export class TileMap {
 
   /** 地形配置数组 */
   terrainConfigs: TerrainConfig[] = [
-    { type: TileTypeId.DEFAULT, walkable: true, baseProbability: 0.95, inheritProbability: 0.8 },
-    { type: TileTypeId.WALL, walkable: false, baseProbability: 0.05, inheritProbability: 0.8, maxHp: 100 },
+    { type: TileTypeId.DEFAULT, walkable: true, baseProbability: 0.90, inheritProbability: 0.8 },
+    { type: TileTypeId.WALL, walkable: false, baseProbability: 0.05, inheritProbability: 0.8 },
+    { type: TileTypeId.MINERAL, walkable: false, baseProbability: 0.05, inheritProbability: 0.8, maxHp: 100 },
     // 可以根据需要添加其他地形类型，如WATER
   ];
 
@@ -222,7 +223,7 @@ export class TileMap {
         if (!terrain.walkable && terrain.maxHp) {
           const hp = this.tileHp[row][col];
           const ratio = hp / terrain.maxHp;
-          if (ratio > 0.75) fillStyle = "#555555";
+          if (ratio > 0.75) fillStyle = TILE_TYPES[tileTypeId]?.color ?? "#ccc";
           else if (ratio > 0.5) fillStyle = "blue";
           else if (ratio > 0.25) fillStyle = "orange";
           else fillStyle = "red";
