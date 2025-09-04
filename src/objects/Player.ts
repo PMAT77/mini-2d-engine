@@ -7,6 +7,7 @@ import { ShootingState } from "../status/ShootingState";
 import { StateMachine } from "../status/StateMachine";
 import { Bullet } from "./Bullet";
 import { Entities } from "./Entities";
+import { ParticleSystem } from "./ParticleSystem";
 
 /**
  * 玩家类 - 处理玩家的移动、射击和状态管理
@@ -32,13 +33,22 @@ export class Player extends Entities {
   // 状态机系统
   private stateMachine: StateMachine<Player>;
 
+  // 粒子系统
+  private particleSystem?: ParticleSystem;
+
   /**
    * 构造函数
    * @param x 初始X坐标
    * @param y 初始Y坐标
    * @param sprite 玩家精灵图像
+   * @param particleSystem 可选的粒子系统引用
    */
-  constructor(x: number, y: number, sprite?: HTMLImageElement) {
+  constructor(
+    x: number,
+    y: number,
+    sprite?: HTMLImageElement,
+    particleSystem?: ParticleSystem
+  ) {
     super(x, y, sprite);
 
     // 初始化状态机
@@ -47,6 +57,17 @@ export class Player extends Entities {
     this.stateMachine.addState(MovingState);
     this.stateMachine.addState(ShootingState);
     this.stateMachine.changeState("idle"); // 默认进入空闲状态
+
+    // 设置粒子系统
+    this.particleSystem = particleSystem;
+  }
+
+  /**
+   * 设置粒子系统
+   * @param system 粒子系统引用
+   */
+  setParticleSystem(system: ParticleSystem): void {
+    this.particleSystem = system;
   }
 
   /**
@@ -207,7 +228,7 @@ export class Player extends Entities {
     // 生成子弹
     const bulletPos = new Vector2(this.x + this.size / 2, this.y + this.size / 2);
     const bulletVel = inputDir.clone().scale(this.bulletSpeed);
-    const bullet = new Bullet(bulletPos, bulletVel, damage);
+    const bullet = new Bullet(bulletPos, bulletVel, damage, this.particleSystem);
     this.bullets.push(bullet);
 
     // 触发射击回调（用于摄像机震动等效果）

@@ -4,33 +4,29 @@ import { Input } from "../core/Input";
 import { Scene } from "../core/Scene";
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
+import { ParticleSystem } from "../objects/ParticleSystem";
 import { Player } from "../objects/Player";
 
 /**
  * 游戏主场景类，负责管理游戏的核心逻辑、渲染和交互
  */
 export class GameScene extends Scene {
-  /** 游戏地图实例 */
-  private map: TileMap;
+  private player!: Player;
+  private map!: TileMap;
+  private camera!: Camera;
+  private loader!: AssetLoader;
+  private loaded: boolean = false;
+  private deltaSinceLastFrame: number = 0;
 
-  /** 资源加载器实例 */
-  private loader: AssetLoader;
-
-  /** 玩家角色实例 */
-  private player: Player;
-
-  /** 游戏摄像机实例 */
-  private camera: Camera;
-
-  /** 资源是否加载完成的标志 */
-  private loaded = false;
-
-  /** 上一帧到当前帧的时间间隔（毫秒） */
-  private deltaSinceLastFrame = 0;
-
-  /** 玩家角色大小常量 */
+  // 常量定义
   private static readonly PLAYER_SIZE = 49;
 
+  // 粒子系统
+  private particleSystem: ParticleSystem;
+
+  /**
+   * 构造函数
+   */
   constructor() {
     super();
 
@@ -40,6 +36,9 @@ export class GameScene extends Scene {
     // 初始化相机，设置视口大小为窗口的两倍，死区为800x500，缓动系数为5
     this.camera = new Camera(window.innerWidth * 2, window.innerHeight * 2, 800, 500, 5);
 
+    // 初始化粒子系统
+    this.particleSystem = new ParticleSystem();
+
     // 获取摄像头死区范围，用于在其中生成玩家初始位置
     const deadZoneLeft = this.camera.x + (this.camera.width - this.camera.deadZoneWidth) / 2;
     const deadZoneTop = this.camera.y + (this.camera.height - this.camera.deadZoneHeight) / 2;
@@ -48,7 +47,7 @@ export class GameScene extends Scene {
 
     // 在死区内生成可行走位置作为玩家出生点
     const spawn = this.getSpawnPositionInArea(deadZoneLeft, deadZoneTop, deadZoneWidth, deadZoneHeight, GameScene.PLAYER_SIZE);
-    this.player = new Player(spawn.x, spawn.y);
+    this.player = new Player(spawn.x, spawn.y, undefined, this.particleSystem);
 
     // 设置射击回调，配置震动参数
     this.player.setOnShootCallback((shootDir?: Vector2) => {
@@ -129,6 +128,9 @@ export class GameScene extends Scene {
     // 更新玩家状态
     this.player.update(delta, input, this.map);
 
+    // 更新粒子系统
+    this.particleSystem.update(delta);
+
     // 相机跟随玩家中心位置
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
@@ -157,7 +159,10 @@ export class GameScene extends Scene {
       bullet.draw(ctx, this.camera.x, this.camera.y);
     });
 
-    // 绘制玩家（在子弹上方），使用带震动偏移的相机位置
+    // 绘制粒子（在子弹上方，玩家下方）
+    this.particleSystem.draw(ctx, cameraOffset.x, cameraOffset.y);
+
+    // 绘制玩家（在所有元素上方），使用带震动偏移的相机位置
     this.player.draw(ctx, cameraOffset.x, cameraOffset.y);
 
     // 绘制相机死区（调试用）

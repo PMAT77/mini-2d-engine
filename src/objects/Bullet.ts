@@ -1,5 +1,6 @@
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
+import { ParticleSystem } from "./ParticleSystem";
 
 /**
  * 子弹类，负责处理子弹的物理运动、碰撞检测和渲染逻辑
@@ -23,13 +24,22 @@ export class Bullet {
   /** 子弹造成的伤害值 */
   private damage: number;
 
+  /** 粒子系统引用 */
+  private particleSystem?: ParticleSystem;
+
   /**
    * 构造一个新的子弹实例
    * @param pos 子弹初始位置
    * @param velocity 子弹初始速度向量
    * @param damage 子弹造成的伤害值（默认10）
+   * @param particleSystem 可选的粒子系统引用
    */
-  constructor(pos: Vector2, velocity: Vector2, damage = 10) {
+  constructor(
+    pos: Vector2,
+    velocity: Vector2,
+    damage = 10,
+    particleSystem?: ParticleSystem
+  ) {
     // 克隆位置向量以避免引用同一对象
     this.pos = pos.clone();
 
@@ -42,6 +52,7 @@ export class Bullet {
     // 克隆速度向量以避免引用同一对象
     this.velocity = velocity.clone();
     this.damage = damage;
+    this.particleSystem = particleSystem;
   }
 
   /**
@@ -61,6 +72,23 @@ export class Bullet {
     if (map) {
       const hit = map.getTileAtRect(newX, newY, this.size);
       if (hit) {
+        // 创建爆炸效果
+        if (this.particleSystem) {
+          const hitPos = new Vector2(
+            this.pos.x + this.size / 2,
+            this.pos.y + this.size / 2
+          );
+          // 根据子弹颜色生成相应的爆炸效果
+          this.particleSystem.createExplosion(
+            hitPos,
+            8,
+            150,
+            5,
+            0.2,
+            this.color === "yellow" ? ["yellow", "orange", "red"] : [this.color]
+          );
+        }
+
         // 对命中的瓦片造成伤害
         map.damageTile(hit.col, hit.row, this.damage);
         // 标记子弹为已销毁
@@ -117,6 +145,22 @@ export class Bullet {
    * 设置子弹为已销毁状态
    */
   destroy(): void {
+    // 创建爆炸效果
+    if (this.particleSystem) {
+      const hitPos = new Vector2(
+        this.pos.x + this.size / 2,
+        this.pos.y + this.size / 2
+      );
+      this.particleSystem.createExplosion(
+        hitPos,
+        6,
+        100,
+        4,
+        0.15,
+        this.color === "yellow" ? ["yellow", "orange", "red"] : [this.color]
+      );
+    }
+
     this.isDestroyed = true;
   }
 
