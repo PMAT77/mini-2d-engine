@@ -32,7 +32,7 @@ export enum TileTypeId {
  */
 export const TILE_TYPES: Record<TileTypeId, TileType> = {
   [TileTypeId.DEFAULT]: {
-    color: '#1c1c1c',
+    color: '#111111',
     speedFactor: 1,
     isDestructible: false
   },

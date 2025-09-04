@@ -240,6 +240,10 @@ export class TileMap {
         // 绘制瓦片
         ctx.fillStyle = fillStyle;
         ctx.fillRect(col * this.tileSize - cameraX, row * this.tileSize - cameraY, this.tileSize, this.tileSize);
+
+        ctx.fillStyle = fillStyle;
+        // 增加1像素的重叠来消除边框线
+        ctx.fillRect(col * this.tileSize - cameraX, row * this.tileSize - cameraY, this.tileSize + 1, this.tileSize + 1);
       }
     }
   }
