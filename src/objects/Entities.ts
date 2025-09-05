@@ -301,8 +301,13 @@ export abstract class Entities extends GameObject {
     const moveDir = this.getMoveDirection(input); // W/A/S/D 控制移动
     const lookDir = this.getLookDirection(input); // 方向键控制旋转
 
+    let maxSpeed = this.maxSpeed;
+    if ('getMaxSpeed' in this && typeof (this as any).getMaxSpeed === 'function') {
+      maxSpeed = (this as any).getMaxSpeed();
+    }
+
     // 计算目标速度，考虑地图速度因子
-    const baseVel = this.calculateTargetVelocity(moveDir);
+    const baseVel = moveDir.clone().scale(maxSpeed);
     const speedFactor = map?.getSpeedFactor(this.x, this.y) || 1;
     const targetVel = baseVel.scale(speedFactor);
 

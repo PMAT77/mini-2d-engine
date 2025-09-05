@@ -38,7 +38,7 @@ export const TILE_TYPES: Record<TileTypeId, TileType> = {
     isDestructible: false
   },
   [TileTypeId.WATER]: {
-    color: '#4da6ff',
+    color: '#4da6ff8a',
     speedFactor: 0.5,
     isDestructible: false
   },

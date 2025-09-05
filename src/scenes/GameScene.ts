@@ -11,6 +11,7 @@ import { Player } from "../objects/Player";
 import { ConfigLoader } from "../core/ConfigLoader";
 import { LightSource } from "../core/LightSource";
 import { LightingSystem } from "../core/LightingSystem";
+import { ModifierManager } from "../core/ModifierManager";
 
 /**
  * 游戏主场景类，负责管理游戏的核心逻辑、渲染和交互
@@ -34,6 +35,8 @@ export class GameScene extends Scene {
   private particleSystem: ParticleSystem;
   // 光照系统
   private lightingSystem: LightingSystem;
+  // 属性修改器
+  private modifierManager: ModifierManager;
 
   /**
    * 构造函数
@@ -55,6 +58,7 @@ export class GameScene extends Scene {
 
     // 初始化光照系统
     this.lightingSystem = new LightingSystem();
+
 
     // 获取摄像头死区范围，用于在其中生成玩家初始位置
     const deadZoneLeft = this.camera.x + (this.camera.width - this.camera.deadZoneWidth) / 2;
@@ -91,6 +95,13 @@ export class GameScene extends Scene {
 
       // 触发相机震动，使用线性衰减模式
       this.camera.shake(magnitude, duration, angle, frequency, 'linear');
+    });
+
+
+    this.modifierManager = new ModifierManager(this.player);
+    // 设置属性变化回调，用于更新UI
+    this.player.setOnStatsChangeCallback(() => {
+      this.updatePlayerStatsUI();
     });
 
     // 初始化资源加载器，配置需要加载的资源
@@ -183,6 +194,45 @@ export class GameScene extends Scene {
     throw new Error("无法在死区范围内生成可通行位置");
   }
 
+  applySpeedBoost(duration: number = 5, multiplier: number = 0.5): string {
+    return this.modifierManager.addModifier({
+      stat: 'maxSpeed',
+      value: multiplier,
+      duration: duration,
+      isMultiplier: true,
+      description: `速度提升 ${Math.round(multiplier * 100)}% (${duration}秒)`
+    });
+  }
+
+  applyFireRateBoost(duration: number = 5, multiplier: number = 0.3): string {
+    return this.modifierManager.addModifier({
+      stat: 'fireRate',
+      value: multiplier,
+      duration: duration,
+      isMultiplier: true,
+      description: `射速提升 ${Math.round(multiplier * 100)}% (${duration}秒)`
+    });
+  }
+
+  // 添加一个显示玩家状态的UI更新方法
+  private updatePlayerStatsUI(): void {
+    // 这里实现UI更新逻辑，例如显示当前的 buff 列表、属性值等
+    // 由于没有看到您的UI系统实现，这里仅提供一个框架
+    console.log('玩家属性已更新:');
+    console.log('- 最大速度:', this.player.getMaxSpeed());
+    console.log('- 射速:', this.player.getFireRate());
+    console.log('- 子弹速度:', this.player.getBulletSpeed());
+
+    // 显示当前激活的修改器
+    const activeModifiers = this.modifierManager.getActiveModifiers();
+    if (activeModifiers.length > 0) {
+      console.log('激活的属性修改:');
+      activeModifiers.forEach(mod => {
+        console.log(`- ${mod.description}`);
+      });
+    }
+  }
+
   /**
    * 场景进入时的初始化逻辑
    * 负责加载游戏资源并设置玩家精灵
@@ -241,6 +291,9 @@ export class GameScene extends Scene {
 
     // 更新光照系统
     this.lightingSystem.update(delta);
+
+    // 更新属性修改器
+    this.modifierManager.update(delta);
 
     // 相机跟随玩家中心位置
     const playerCenterX = this.player.x + this.player.getSize() / 2;
