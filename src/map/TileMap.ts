@@ -46,7 +46,8 @@ export class TileMap {
   terrainConfigs: TerrainConfig[] = [
     { type: TileTypeId.DEFAULT, walkable: true, baseProbability: 0.90, inheritProbability: 0.8 },
     { type: TileTypeId.WALL, walkable: false, baseProbability: 0.05, inheritProbability: 0.8 },
-    { type: TileTypeId.MINERAL, walkable: false, baseProbability: 0.05, inheritProbability: 0.8, maxHp: 100 },
+    { type: TileTypeId.MINERAL, walkable: false, baseProbability: 0.04, inheritProbability: 0.8, maxHp: 100 },
+    { type: TileTypeId.WATER, walkable: true, baseProbability: 0.01, inheritProbability: 0.2 },
     // 可以根据需要添加其他地形类型，如WATER
   ];
 
@@ -224,14 +225,14 @@ export class TileMap {
         const originalColor = fillStyle;
 
         // 根据墙块血量显示不同颜色
-        if (!terrain.walkable && terrain.maxHp) {
-          const hp = this.tileHp[row][col];
-          const ratio = hp / terrain.maxHp;
-          // if (ratio > 0.75) fillStyle = TILE_TYPES[tileTypeId]?.color ?? "#ccc";
-          // else if (ratio > 0.5) fillStyle = "#0000ff";
-          // else if (ratio > 0.25) fillStyle = "#ffa500";
-          // else fillStyle = "#ff0000";
-        }
+        // if (!terrain.walkable && terrain.maxHp) {
+        //   const hp = this.tileHp[row][col];
+        //   const ratio = hp / terrain.maxHp;
+        //   if (ratio > 0.75) fillStyle = TILE_TYPES[tileTypeId]?.color ?? "#ccc";
+        //   else if (ratio > 0.5) fillStyle = "#0000ff";
+        //   else if (ratio > 0.25) fillStyle = "#ffa500";
+        //   else fillStyle = "#ff0000";
+        // }
 
         // 应用高亮效果
         const highlight = this.tileHighlight[row][col];

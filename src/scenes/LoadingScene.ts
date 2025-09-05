@@ -11,7 +11,7 @@ export class LoadingScene extends Scene {
    * 资源加载器实例
    * @private
    */
-  private readonly loader: AssetLoader;
+  private readonly assetLoader: AssetLoader;
 
   /**
    * 当前加载进度（0-1之间的数值）
@@ -35,7 +35,7 @@ export class LoadingScene extends Scene {
    * 模拟加载的总资源数量
    * @private
    */
-  private readonly totalFake = 50;
+  private readonly totalFake = 20;
 
   /**
    * 构造函数
@@ -44,7 +44,13 @@ export class LoadingScene extends Scene {
    */
   constructor(assets: AssetMap, targetScene: Scene) {
     super();
-    this.loader = new AssetLoader(assets);
+    // this.loader = new AssetLoader(assets);
+    // 初始化资源加载器，配置需要加载的资源
+    this.assetLoader = new AssetLoader(assets);
+
+    // this.configLoader = new ConfigLoader({
+    //   "playerConfig": "/configs/playerConfig.json",
+    // });
     this.targetScene = targetScene;
   }
 
@@ -55,7 +61,7 @@ export class LoadingScene extends Scene {
   public async onEnter(): Promise<void> {
     try {
       // 注释掉的实际资源加载代码
-      // await this.loader.load((loaded, total) => {
+      // await this.assetLoader.load((loaded, total) => {
       //   this.progress = loaded / total;
       // });
 
@@ -75,7 +81,7 @@ export class LoadingScene extends Scene {
         clearTimeout(timer);
         this.game.sceneManager.changeScene(this.targetScene, 0);
       }
-    }, 1000);
+    }, 600);
   }
 
   /**

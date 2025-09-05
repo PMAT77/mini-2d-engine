@@ -32,7 +32,8 @@ const menuScene = new MenuScene();
  * @param targetScene 加载完成后要切换到的目标场景
  */
 const loadingScene = new LoadingScene(
-  {},
+  {
+  },
   menuScene // 加载完成后切换到主菜单场景
 );
 

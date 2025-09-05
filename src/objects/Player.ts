@@ -50,6 +50,9 @@ export class Player extends Entities {
   // 粒子系统
   private particleSystem?: ParticleSystem;
 
+  // 属性修改系统
+  private modifiers: Map<string, { value: number; duration: number; isMultiplier: boolean }> = new Map();
+
   /**
    * 构造函数
    * @param x 初始X坐标
@@ -125,6 +128,8 @@ export class Player extends Entities {
     if (dir.length() > 0) dir.normalize();
     return dir;
   }
+
+  private onStatsChangeCallback?: () => void;
 
   /**
    * 检查玩家是否处于空闲状态
@@ -328,6 +333,67 @@ export class Player extends Entities {
   }
 
   /**
+ * 添加属性修改器
+ * @param stat 属性名称
+ * @param value 修改值
+ * @param duration 持续时间（秒，0表示永久）
+ * @param isMultiplier 是否为乘数（true）或加数（false）
+ */
+  addModifier(stat: string, value: number, duration: number = 0, isMultiplier: boolean = false): void {
+    this.modifiers.set(stat, { value, duration, isMultiplier });
+    // 触发属性变化事件
+    this.onStatsChangeCallback?.();
+  }
+
+  /**
+ * 移除指定属性的修改器
+ * @param stat 属性名称
+ */
+  removeModifier(stat: string): void {
+    if (this.modifiers.has(stat)) {
+      this.modifiers.delete(stat);
+      // 触发属性变化事件
+      this.onStatsChangeCallback?.();
+    }
+  }
+
+  /**
+ * 清除所有属性修改器
+ */
+  clearModifiers(): void {
+    this.modifiers.clear();
+    // 触发属性变化事件
+    this.onStatsChangeCallback?.();
+  }
+
+  /**
+ * 获取应用了修改器后的属性值
+ * @param baseValue 基础属性值
+ * @param stat 属性名称
+ * @returns 应用了修改器后的最终属性值
+ */
+  getModifiedValue(baseValue: number, stat: string): number {
+    if (!this.modifiers.has(stat)) {
+      return baseValue;
+    }
+
+    const modifier = this.modifiers.get(stat)!;
+    if (modifier.isMultiplier) {
+      return baseValue * (1 + modifier.value);
+    } else {
+      return baseValue + modifier.value;
+    }
+  }
+
+  /**
+ * 设置属性变化回调函数
+ * @param callback 属性变化时触发的回调函数
+ */
+  setOnStatsChangeCallback(callback: () => void): void {
+    this.onStatsChangeCallback = callback;
+  }
+
+  /**
   * 获取玩家空闲时间
   * @returns 当前空闲时间（秒）
   */
@@ -383,12 +449,24 @@ export class Player extends Entities {
     return this.bullets.filter(bullet => !bullet.getIsDestroyed());
   }
 
+  // 修改getMaxSpeed方法（如果没有则添加）
+  getMaxSpeed(): number {
+    return this.getModifiedValue(this.maxSpeed, 'maxSpeed');
+  }
+
   /**
    * 获取武器的射速
    * @returns 弹射速度
    */
   getFireRate(): number {
-    return this.fireRate;
+    // 注意：射速是时间间隔，值越小射速越快，所以使用倒数来计算修改后的值
+    const modifiedRate = this.getModifiedValue(1 / this.fireRate, 'fireRate');
+    return 1 / modifiedRate; // 转换回时间间隔
+  }
+
+  // 修改getBulletSpeed方法（如果没有则添加）
+  getBulletSpeed(): number {
+    return this.getModifiedValue(this.bulletSpeed, 'bulletSpeed');
   }
 
   /**
@@ -426,7 +504,8 @@ export class Player extends Entities {
 
     // 生成子弹
     const bulletPos = new Vector2(this.x + this.size / 2, this.y + this.size / 2);
-    const bulletVel = inputDir.clone().scale(this.bulletSpeed);
+    // 使用修改后的子弹速度
+    const bulletVel = inputDir.clone().scale(this.getBulletSpeed());
     const bullet = new Bullet(bulletPos, bulletVel, damage, this.particleSystem);
     this.bullets.push(bullet);
 
@@ -508,6 +587,22 @@ export class Player extends Entities {
       this.stateMachine.changeState("moving");
     } else {
       this.stateMachine.changeState("idle");
+    }
+
+    // 处理属性修改器的时间衰减
+    const expiredModifiers: string[] = [];
+    this.modifiers.forEach((modifier, stat) => {
+      if (modifier.duration > 0) {
+        modifier.duration -= delta;
+        if (modifier.duration <= 0) {
+          expiredModifiers.push(stat);
+        }
+      }
+    });
+
+    // 移除过期的修改器
+    for (const stat of expiredModifiers) {
+      this.removeModifier(stat);
     }
 
     // 更新动画和状态机
