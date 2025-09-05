@@ -1,0 +1,21 @@
+{
+  "base": {
+    "size": 49,
+    "maxSpeed": 400,
+    "rotationSpeed": 12.5664,
+    "rotationStrategy": "auto"
+  },
+  "animation": {
+    "breathingAmplitude": 3,
+    "breathingSpeed": 2
+  },
+  "shooting": {
+    "fireRate": 0.1,
+    "bulletSpeed": 800,
+    "maxShootingTime": 3.5,
+    "maxOverheatCooldownTime": 1.0
+  },
+  "ui": {
+    "fadeSpeed": 5
+  }
+}

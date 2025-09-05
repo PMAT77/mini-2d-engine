@@ -77,14 +77,6 @@ export class Player extends Entities {
   }
 
   /**
-   * 设置粒子系统
-   * @param system 粒子系统引用
-   */
-  setParticleSystem(system: ParticleSystem): void {
-    this.particleSystem = system;
-  }
-
-  /**
    * 获取移动方向（基于WADS按键）
    * @param input 输入系统引用
    * @returns 归一化的移动方向向量
@@ -232,6 +224,107 @@ export class Player extends Entities {
     }
 
     ctx.restore();
+  }
+
+  /**
+ * 应用配置到玩家实例
+ * @param config 配置对象，包含基础属性、动画属性、射击属性和UI属性
+ */
+  applyConfig(config: {
+    base?: {
+      size?: number;
+      maxSpeed?: number;
+      accel?: number;
+      decel?: number;
+      nonlinearFactor?: number;
+    };
+    animation?: {
+      breathingAmplitude?: number;
+      breathingSpeed?: number;
+    };
+    shooting?: {
+      fireRate?: number;
+      bulletSpeed?: number;
+      maxShootingTime?: number;
+      maxOverheatCooldownTime?: number;
+    };
+    ui?: {
+      fadeSpeed?: number;
+    };
+  }): void {
+    // 应用基础属性
+    if (config.base) {
+      if (config.base.size !== undefined) {
+        this.setSize(config.base.size);
+      }
+      if (config.base.maxSpeed !== undefined) {
+        this.maxSpeed = config.base.maxSpeed;
+      }
+      if (config.base.accel !== undefined) {
+        this.accel = config.base.accel;
+      }
+      if (config.base.decel !== undefined) {
+        this.decel = config.base.decel;
+      }
+      if (config.base.nonlinearFactor !== undefined) {
+        this.nonlinearFactor = config.base.nonlinearFactor;
+      }
+    }
+
+    // 应用动画属性
+    if (config.animation) {
+      if (config.animation.breathingAmplitude !== undefined) {
+        this.breathingAmplitude = config.animation.breathingAmplitude;
+      }
+      if (config.animation.breathingSpeed !== undefined) {
+        this.breathingSpeed = config.animation.breathingSpeed;
+      }
+    }
+
+    // 应用射击属性
+    if (config.shooting) {
+      if (config.shooting.fireRate !== undefined) {
+        this.fireRate = config.shooting.fireRate;
+      }
+      if (config.shooting.bulletSpeed !== undefined) {
+        this.bulletSpeed = config.shooting.bulletSpeed;
+      }
+      if (config.shooting.maxShootingTime !== undefined) {
+        this.maxShootingTime = config.shooting.maxShootingTime;
+        // 同时更新剩余射击时间，确保一致性
+        if (!this.isOverheated) {
+          this.shootingTimeRemaining = Math.min(
+            this.shootingTimeRemaining,
+            this.maxShootingTime
+          );
+        }
+      }
+      if (config.shooting.maxOverheatCooldownTime !== undefined) {
+        this.maxOverheatCooldownTime = config.shooting.maxOverheatCooldownTime;
+        // 同时更新剩余冷却时间，确保一致性
+        if (this.isOverheated) {
+          this.overheatCooldownRemaining = Math.min(
+            this.overheatCooldownRemaining,
+            this.maxOverheatCooldownTime
+          );
+        }
+      }
+    }
+
+    // 应用UI属性
+    if (config.ui) {
+      if (config.ui.fadeSpeed !== undefined) {
+        this.fadeSpeed = config.ui.fadeSpeed;
+      }
+    }
+  }
+
+  /**
+   * 设置粒子系统
+   * @param system 粒子系统引用
+   */
+  setParticleSystem(system: ParticleSystem): void {
+    this.particleSystem = system;
   }
 
   /**

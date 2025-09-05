@@ -8,6 +8,7 @@ import { ParticleSystem } from "../objects/ParticleSystem";
 import { Player } from "../objects/Player";
 
 // 导入光照系统相关类
+import { ConfigLoader } from "../core/ConfigLoader";
 import { LightSource } from "../core/LightSource";
 import { LightingSystem } from "../core/LightingSystem";
 
@@ -18,7 +19,8 @@ export class GameScene extends Scene {
   private player!: Player;
   private map!: TileMap;
   private camera!: Camera;
-  private loader!: AssetLoader;
+  private assetLoader!: AssetLoader;
+  private configLoader!: ConfigLoader;
   private loaded: boolean = false;
   private deltaSinceLastFrame: number = 0;
 
@@ -92,8 +94,12 @@ export class GameScene extends Scene {
     });
 
     // 初始化资源加载器，配置需要加载的资源
-    this.loader = new AssetLoader({
-      "player": "/assets/avatar.png",
+    this.assetLoader = new AssetLoader({
+      "player": "/assets/images/avatar.png",
+    });
+
+    this.configLoader = new ConfigLoader({
+      "playerConfig": "/configs/playerConfig.json",
     });
   }
 
@@ -182,15 +188,23 @@ export class GameScene extends Scene {
    * 负责加载游戏资源并设置玩家精灵
    */
   async onEnter() {
-    await this.loader.load();
+    await this.assetLoader.load();
+    await this.configLoader.load();
     this.loaded = true;
 
+    // 获取并应用玩家配置
+    const playerConfig = this.configLoader.getConfig("playerConfig");
+    console.log("玩家配置:", playerConfig)
+    if (playerConfig) {
+      this.player.applyConfig(playerConfig);
+    }
+
     // 设置玩家精灵
-    const sprite = this.loader.getImage("player");
+    const sprite = this.assetLoader.getImage("player");
     if (sprite) this.player.setSprite(sprite);
 
     // 尝试播放背景音乐
-    const bgm = this.loader.getAudio("bgm");
+    const bgm = this.assetLoader.getAudio("bgm");
     bgm?.play();
 
     // 初始化光照系统尺寸
