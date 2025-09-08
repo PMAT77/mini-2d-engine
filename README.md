@@ -2,6 +2,8 @@
 
 一个基于 Canvas 的轻量级 2D 游戏引擎，使用 TypeScript 开发，提供完整的游戏开发框架，包括渲染系统、场景管理、输入处理、物理系统、状态机和配置系统等核心功能。
 
+<img src="https://cdn.jsdelivr.net/gh/PMAT77/PMAT77CDN@main/gif/demo.gif" width="100%" height="100%"></img>
+
 ## 🚀 技术栈
 
 - 编程语言 : TypeScript
