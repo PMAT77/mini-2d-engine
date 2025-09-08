@@ -140,7 +140,13 @@ export class Particle {
   /**
    * 重置粒子状态，用于对象池复用
    */
-  reset(pos: Vector2, velocity: Vector2, size: number, life: number, color: string): void {
+  reset(
+    pos: Vector2,
+    velocity: Vector2,
+    size: number,
+    life: number,
+    color: string
+  ): void {
     this.pos = pos.clone();
     this.velocity = velocity.clone();
     this.size = size;
@@ -152,11 +158,13 @@ export class Particle {
 
     // 随机旋转角度和速度
     this.rotation = Math.random() * Math.PI * 2;
-    this.rotationSpeed = (Math.random() - 0.5) * 10;
+    this.rotationSpeed = (Math.random() - 0.5) * 10; // -5 到 5 弧度/秒
 
-    // 设置透明度和尺寸衰减
+    // 设置透明度衰减
     this.alpha = 1;
-    this.alphaDecay = 1 / life;
+    this.alphaDecay = 1 / life; // 线性衰减
+
+    // 设置尺寸衰减
     this.sizeDecay = this.size / life;
   }
   // 添加getter方法

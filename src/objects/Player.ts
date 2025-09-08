@@ -43,6 +43,7 @@ export class Player extends Entities {
 
   // 回调函数定义
   private onShootCallback?: (shootDir: Vector2) => void; // 射击回调，用于触发摄像机震动等效果
+  private onStatsChangeCallback?: () => void; // 属性变化回调
 
   // 状态机系统
   private stateMachine: StateMachine<Player>;
@@ -51,7 +52,7 @@ export class Player extends Entities {
   private particleSystem?: ParticleSystem;
 
   // 属性修改系统
-  private modifiers: Map<string, { value: number; duration: number; isMultiplier: boolean }> = new Map();
+  private modifiers: Map<string, { value: number; isMultiplier: boolean }> = new Map();
 
   /**
    * 构造函数
@@ -114,13 +115,8 @@ export class Player extends Entities {
       input.isKeyDown("ArrowLeft") ||
       input.isKeyDown("ArrowRight")) {
       this.isShooting = true;
-    }
-
-    // 当所有方向键都松开时，取消射击状态
-    if (input.isKeyUp("ArrowUp") &&
-      input.isKeyUp("ArrowDown") &&
-      input.isKeyUp("ArrowLeft") &&
-      input.isKeyUp("ArrowRight")) {
+    } else {
+      // 当所有方向键都松开时，取消射击状态
       this.isShooting = false;
     }
 
@@ -128,8 +124,6 @@ export class Player extends Entities {
     if (dir.length() > 0) dir.normalize();
     return dir;
   }
-
-  private onStatsChangeCallback?: () => void;
 
   /**
    * 检查玩家是否处于空闲状态
@@ -156,7 +150,6 @@ export class Player extends Entities {
    * @param ctx Canvas渲染上下文
    * @param offsetX 绘制偏移X
    * @param offsetY 绘制偏移Y
-   * @returns 
    */
   private drawCooldownBar(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
     // 如果透明度为0，不绘制进度条
@@ -209,8 +202,8 @@ export class Player extends Entities {
 
       // 创建渐变效果（上热下冷）
       const gradient = ctx.createLinearGradient(barX, barY, barX, barY + barHeight);
-      gradient.addColorStop(1, "#33ff33"); // 红色（热）
-      gradient.addColorStop(0, "#ff3333"); // 橙色（冷却中）
+      gradient.addColorStop(1, "#33ff33"); // 绿色（冷却）
+      gradient.addColorStop(0, "#ff3333"); // 红色（热）
 
       ctx.fillStyle = gradient;
       ctx.fillRect(barX, barY + barHeight - fillHeight, barWidth, fillHeight); // 从顶部开始填充
@@ -232,9 +225,9 @@ export class Player extends Entities {
   }
 
   /**
- * 应用配置到玩家实例
- * @param config 配置对象，包含基础属性、动画属性、射击属性和UI属性
- */
+   * 应用配置到玩家实例
+   * @param config 配置对象，包含基础属性、动画属性、射击属性和UI属性
+   */
   applyConfig(config: {
     base?: {
       size?: number;
@@ -322,6 +315,9 @@ export class Player extends Entities {
         this.fadeSpeed = config.ui.fadeSpeed;
       }
     }
+
+    // 触发属性变化事件
+    this.onStatsChangeCallback?.();
   }
 
   /**
@@ -333,51 +329,52 @@ export class Player extends Entities {
   }
 
   /**
- * 添加属性修改器
- * @param stat 属性名称
- * @param value 修改值
- * @param duration 持续时间（秒，0表示永久）
- * @param isMultiplier 是否为乘数（true）或加数（false）
- */
+   * 添加属性修改器
+   * @param stat 属性名称
+   * @param value 修改值
+   * @param duration 持续时间（秒，0表示永久）
+   * @param isMultiplier 是否为乘数（true）或加数（false）
+   */
   addModifier(stat: string, value: number, duration: number = 0, isMultiplier: boolean = false): void {
-    this.modifiers.set(stat, { value, duration, isMultiplier });
+    this.modifiers.set(stat, { value, isMultiplier });
     // 触发属性变化事件
     this.onStatsChangeCallback?.();
   }
 
   /**
- * 移除指定属性的修改器
- * @param stat 属性名称
- */
+   * 移除指定属性的修改器
+   * @param stat 属性名称
+   */
   removeModifier(stat: string): void {
-    if (this.modifiers.has(stat)) {
-      this.modifiers.delete(stat);
+    if (this.modifiers.delete(stat)) {
       // 触发属性变化事件
       this.onStatsChangeCallback?.();
     }
   }
 
   /**
- * 清除所有属性修改器
- */
+   * 清除所有属性修改器
+   */
   clearModifiers(): void {
-    this.modifiers.clear();
-    // 触发属性变化事件
-    this.onStatsChangeCallback?.();
+    if (this.modifiers.size > 0) {
+      this.modifiers.clear();
+      // 触发属性变化事件
+      this.onStatsChangeCallback?.();
+    }
   }
 
   /**
- * 获取应用了修改器后的属性值
- * @param baseValue 基础属性值
- * @param stat 属性名称
- * @returns 应用了修改器后的最终属性值
- */
+   * 获取应用了修改器后的属性值
+   * @param baseValue 基础属性值
+   * @param stat 属性名称
+   * @returns 应用了修改器后的最终属性值
+   */
   getModifiedValue(baseValue: number, stat: string): number {
-    if (!this.modifiers.has(stat)) {
+    const modifier = this.modifiers.get(stat);
+    if (!modifier) {
       return baseValue;
     }
 
-    const modifier = this.modifiers.get(stat)!;
     if (modifier.isMultiplier) {
       return baseValue * (1 + modifier.value);
     } else {
@@ -386,60 +383,20 @@ export class Player extends Entities {
   }
 
   /**
- * 设置属性变化回调函数
- * @param callback 属性变化时触发的回调函数
- */
+   * 设置属性变化回调函数
+   * @param callback 属性变化时触发的回调函数
+   */
   setOnStatsChangeCallback(callback: () => void): void {
     this.onStatsChangeCallback = callback;
   }
 
-  /**
-  * 获取玩家空闲时间
-  * @returns 当前空闲时间（秒）
-  */
-  getIdleTime(): number {
-    return this.idleTime;
-  }
-
-  /**
-   * 设置玩家空闲时间
-   * @param time 新的空闲时间值（秒）
-   */
-  setIdleTime(time: number): void {
-    this.idleTime = time;
-  }
-
-  /**
-   * 获取玩家行走动画时间
-   * @returns 当前行走动画时间（秒）
-   */
-  getWalkTime(): number {
-    return this.walkTime;
-  }
-
-  /**
-   * 设置玩家行走动画时间
-   * @param time 新的行走动画时间值（秒）
-   */
-  setWalkTime(time: number): void {
-    this.walkTime = time;
-  }
-
-  /**
-   * 获取玩家缩放比例
-   * @returns 当前缩放比例
-   */
-  getScale(): number {
-    return this.scale;
-  }
-
-  /**
-   * 设置玩家缩放比例
-   * @param value 新的缩放比例值
-   */
-  setScale(value: number): void {
-    this.scale = value;
-  }
+  // Getter 和 Setter 方法
+  getIdleTime(): number { return this.idleTime; }
+  setIdleTime(time: number): void { this.idleTime = time; }
+  getWalkTime(): number { return this.walkTime; }
+  setWalkTime(time: number): void { this.walkTime = time; }
+  getScale(): number { return this.scale; }
+  setScale(value: number): void { this.scale = value; }
 
   /**
    * 获取有效的子弹列表（过滤掉已销毁的子弹）
@@ -449,14 +406,17 @@ export class Player extends Entities {
     return this.bullets.filter(bullet => !bullet.getIsDestroyed());
   }
 
-  // 修改getMaxSpeed方法（如果没有则添加）
+  /**
+   * 获取应用修改器后的最大速度
+   * @returns 修改后的最大速度
+   */
   getMaxSpeed(): number {
     return this.getModifiedValue(this.maxSpeed, 'maxSpeed');
   }
 
   /**
    * 获取武器的射速
-   * @returns 弹射速度
+   * @returns 修改后的射速（秒/发）
    */
   getFireRate(): number {
     // 注意：射速是时间间隔，值越小射速越快，所以使用倒数来计算修改后的值
@@ -464,7 +424,10 @@ export class Player extends Entities {
     return 1 / modifiedRate; // 转换回时间间隔
   }
 
-  // 修改getBulletSpeed方法（如果没有则添加）
+  /**
+   * 获取子弹速度
+   * @returns 修改后的子弹速度
+   */
   getBulletSpeed(): number {
     return this.getModifiedValue(this.bulletSpeed, 'bulletSpeed');
   }
@@ -497,10 +460,10 @@ export class Player extends Entities {
 
     // 检查射击冷却
     if (this.fireCooldown > 0) return;
-    this.fireCooldown = this.fireRate;
+    this.fireCooldown = this.getFireRate(); // 使用修改后的射速
 
     // 减少剩余射击时间
-    this.shootingTimeRemaining -= this.fireRate;
+    this.shootingTimeRemaining -= this.getFireRate();
 
     // 生成子弹
     const bulletPos = new Vector2(this.x + this.size / 2, this.y + this.size / 2);
@@ -517,7 +480,10 @@ export class Player extends Entities {
     this.isShooting = true;
   }
 
-  // 添加过热处理方法
+  /**
+   * 开始过热状态
+   * @private
+   */
   private startOverheat(): void {
     this.isOverheated = true;
     this.shootingTimeRemaining = 0;
@@ -525,7 +491,12 @@ export class Player extends Entities {
     // 可以在这里添加过热特效或音效
   }
 
-  // 修改update方法，添加过热冷却逻辑
+  /**
+   * 更新玩家状态
+   * @param delta 时间增量
+   * @param input 输入系统引用
+   * @param map 可选的地图引用，用于碰撞检测
+   */
   update(delta: number, input: Input, map?: TileMap): void {
     // 调用父类的移动逻辑
     super.update(delta, input, map);
@@ -589,32 +560,19 @@ export class Player extends Entities {
       this.stateMachine.changeState("idle");
     }
 
-    // 处理属性修改器的时间衰减
-    const expiredModifiers: string[] = [];
-    this.modifiers.forEach((modifier, stat) => {
-      if (modifier.duration > 0) {
-        modifier.duration -= delta;
-        if (modifier.duration <= 0) {
-          expiredModifiers.push(stat);
-        }
-      }
-    });
-
-    // 移除过期的修改器
-    for (const stat of expiredModifiers) {
-      this.removeModifier(stat);
-    }
-
     // 更新动画和状态机
     this.updateBreathAnimation(delta);
     this.stateMachine.update(delta);
 
-    // 更新子弹并清理已销毁的子弹
-    this.bullets.forEach(bullet => bullet.update(delta, map));
+    // 优化子弹更新和清理
+    // 首先更新所有子弹
+    for (let i = 0; i < this.bullets.length; i++) {
+      this.bullets[i].update(delta, map);
+    }
+    // 然后清理已销毁的子弹
     this.bullets = this.bullets.filter(bullet => !bullet.getIsDestroyed());
   }
 
-  // 添加获取射击状态的方法（可选，用于UI显示）
   /**
    * 获取当前射击热量百分比（0-1）
    * @returns 射击热量百分比

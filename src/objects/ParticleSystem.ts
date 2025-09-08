@@ -1,5 +1,5 @@
-import { Vector2 } from "../math/Vector2";
-import { Particle } from "./Particle";
+import { Vector2 } from '../math/Vector2';
+import { Particle } from './Particle';
 
 /**
  * 粒子系统类，负责创建和管理多个粒子
@@ -132,5 +132,48 @@ export class ParticleSystem {
    */
   clear(): void {
     this.particles = [];
+  }
+
+  // 在ParticleSystem类中添加以下方法
+  /**
+   * 添加单个粒子
+   */
+  addParticle(options: {
+    x: number;
+    y: number;
+    size: number;
+    color: string;
+    speed: number;
+    angle: number;
+    lifetime: number;
+    fadeOut?: boolean;
+  }): void {
+    // 检查是否达到最大粒子数量限制
+    if (this.particles.length >= this.maxParticles) {
+      return;
+    }
+
+    // 创建位置和速度向量
+    const pos = new Vector2(options.x, options.y);
+    const velocity = new Vector2(
+      Math.cos(options.angle) * options.speed,
+      Math.sin(options.angle) * options.speed
+    );
+
+    // 从对象池获取粒子或创建新粒子
+    let particle: Particle;
+    if (this.particlePool.length > 0) {
+      particle = this.particlePool.pop()!;
+      particle.reset(pos, velocity, options.size, options.lifetime, options.color);
+    } else {
+      particle = new Particle(pos, velocity, options.size, options.lifetime, options.color);
+    }
+
+    // 如果需要，设置特殊属性
+    if (options.fadeOut) {
+      // 已经在Particle构造函数中设置了透明度衰减
+    }
+
+    this.particles.push(particle);
   }
 }

@@ -77,6 +77,10 @@ export class Game {
     // 绘制FPS信息
     this.renderer.drawFPS(this.fps);
 
+    // 绘制玩家位置信息 
+    this.renderer.drawPos(this.sceneManager);
+
+
     // 请求下一帧动画，继续游戏循环
     requestAnimationFrame(this.loop.bind(this));
   }

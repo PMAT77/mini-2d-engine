@@ -97,6 +97,14 @@ export class SceneManager {
   }
 
   /**
+ * 获取当前激活的场景
+ * @returns 当前场景实例，如果没有则返回null
+ */
+  public getCurrentScene(): Scene | null {
+    return this.currentScene;
+  }
+
+  /**
    * 切换到新场景
    * @param scene 目标场景
    * @param duration 过渡动画持续时间（秒），默认为0.5秒
