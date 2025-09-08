@@ -1,3 +1,5 @@
+import { SceneManager } from "./Scene";
+
 /**
  * 渲染器类
  * 负责管理Canvas渲染上下文、处理窗口大小调整和基本绘制操作
@@ -57,6 +59,9 @@ export class Renderer {
 
     // 重置变换矩阵，保持坐标系与CSS像素一致
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    this.width = cssWidth * dpr;
+    this.height = cssHeight * dpr;
   }
 
   /**
@@ -66,6 +71,47 @@ export class Renderer {
   public clear(color: string = "black"): void {
     this.ctx.fillStyle = color;
     this.ctx.fillRect(0, 0, this.width, this.height);
+  }
+
+  /**
+   * 在FPS下方绘制玩家实时位置坐标
+   * @param x 玩家X坐标
+   * @param y 玩家Y坐标
+   */
+  public drawPlayerPosition(x: number, y: number): void {
+    // 保存当前渲染状态
+    this.ctx.save();
+
+    // 获取设备像素比
+    const dpr = window.devicePixelRatio || 1;
+
+    // 设置字体和样式
+    this.ctx.font = `${14 * dpr}px Arial`;
+    this.ctx.fillStyle = "white";
+    this.ctx.strokeStyle = "black";
+    this.ctx.lineWidth = 2 * dpr;
+
+    // 计算文本位置（右上角FPS下方，留出边距）
+    const margin = 10 * dpr;
+    const text = `[${Math.round(x)}, ${Math.round(y)}]`;
+    const textMetrics = this.ctx.measureText(text);
+    const xPos = this.width - textMetrics.width - margin;
+    const yPos = 18 * dpr * 2 + margin; // 位置文本在FPS下方
+
+    // 绘制文本描边和填充
+    this.ctx.strokeText(text, xPos, yPos);
+    this.ctx.fillText(text, xPos, yPos);
+
+    // 恢复渲染状态
+    this.ctx.restore();
+  }
+
+  public drawPos(sceneManager: SceneManager): void {
+    // 检查场景管理器和当前场景
+    if (sceneManager && sceneManager.getCurrentScene() && typeof (sceneManager.getCurrentScene() as any).getPlayerPosition === 'function') {
+      const playerPos = (sceneManager.getCurrentScene() as any).getPlayerPosition();
+      this.drawPlayerPosition(playerPos.x, playerPos.y);
+    }
   }
 
   /**
