@@ -19,18 +19,18 @@ export enum PickupType {
 export class PickupItem extends GameObject {
   public static DEFAULT_SIZE: number = 40;
 
-  private type: PickupType;        // 道具类型
-  private size: number = PickupItem.DEFAULT_SIZE;       // 道具大小
-  private effectRadius: number = 15; // 效果半径
-  private pulseRate: number = 2;   // 脉冲动画频率（秒）
-  private pulseOffset: number = Math.random() * Math.PI * 2; // 随机初始脉冲相位
-  private particleEmitRate: number = 5; // 粒子发射频率（每帧粒子数）
-  private emitTimer: number = 0;   // 粒子发射计时器
+  private type: PickupType;  // 道具类型
+  private size: number = PickupItem.DEFAULT_SIZE;  // 道具大小
+  private effectRadius: number = 15;  // 效果半径
+  private pulseRate: number = 2;  // 脉冲动画频率（秒）
+  private pulseOffset: number = Math.random() * Math.PI * 2;  // 随机初始脉冲相位
+  private particleEmitRate: number = 5;  // 粒子发射频率（每帧粒子数）
+  private emitTimer: number = 0;  // 粒子发射计时器
   private lifetime: number = 0;   // 道具生命周期（秒，0表示无限）
   private isExpiring: boolean = false; // 是否正在过期
-  private expiryTimer: number = 0; // 过期动画计时器
-  private expiryDuration: number = 2; // 过期动画持续时间（秒）
-  private particleSystem?: any;    // 粒子系统引用
+  private expiryTimer: number = 0;     // 过期动画计时器
+  private expiryDuration: number = 2;  // 过期动画持续时间（秒）
+  private particleSystem?: any;        // 粒子系统引用
 
   /**
    * 构造函数
@@ -63,8 +63,7 @@ export class PickupItem extends GameObject {
    * 获取道具的修改器效果
    */
   getModifierEffect(): Omit<Modifier, 'id'> {
-    const baseDuration = 5 + Math.random() * 3; // 5-8秒随机持续时间
-    // const baseDuration = 0;
+    const baseDuration = 5 + Math.random() * 3; // 5-8秒随机持续时间 
 
     switch (this.type) {
       case PickupType.HEALTH:
