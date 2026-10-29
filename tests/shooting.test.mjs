@@ -26,7 +26,7 @@ test('mouse fire is independent of body facing and arrow keys no longer shoot', 
   assert.equal(p.getBullets().length, 0);
   p.update(0, idle, undefined, aim());
   assert.equal(p.getBullets().length, 1); near(p.currentRotation, rotation);
-  near(p.getBullets()[0].velocity.x, 800); near(p.getBullets()[0].velocity.y, 0);
+  near(p.getBullets()[0].velocity.x, 2600); near(p.getBullets()[0].velocity.y, 0);
 });
 
 test('right button reuses turn speed and strategy, remains active while stationary, and release resumes movement facing', () => {
@@ -34,7 +34,7 @@ test('right button reuses turn speed and strategy, remains active while stationa
     const p = makePlayer(); p.applyConfig({ base: { rotationSpeed: 1, rotationStrategy: strategy } });
     p.update(.1, idle, undefined, aim(825, 225, false, true));
     near(p.currentRotation, strategy === 'ccw' ? -.1 : .1);
-    assert.equal(p.getBullets().length, 0); near(p.getHeatPercentage(), 0);
+    assert.equal(p.getBullets().length, 0); near(p.getReloadProgress(), 0);
     const before = p.currentRotation; p.update(.1, idle); near(p.currentRotation, before);
   }
   const p = makePlayer();
@@ -43,24 +43,70 @@ test('right button reuses turn speed and strategy, remains active while stationa
   p.update(.5, keys('d')); near(Math.abs(p.currentRotation), Math.PI);
 });
 
-test('right-only aim permits heat recovery; center and invalid targets never emit a shot', () => {
-  const p = makePlayer(); p.setDebugState({ heatPercentage: 50 });
+test('right-only aim spends no ammo; center and invalid targets never emit a shot', () => {
+  const p = makePlayer(); p.setDebugState({ magazineAmmo: 3 });
   p.update(.2, idle, undefined, aim(500, 300, false, true));
-  near(p.getHeatPercentage(), .4);
+  assert.equal(p.getMagazineAmmo(), 3);
   const rotation = p.currentRotation;
   p.update(.1, idle, undefined, aim(225, 225, true, true)); near(p.currentRotation, rotation);
   for (const target of [{ x: NaN, y: 0 }, { x: 0, y: Infinity }, { x: 225, y: 225 }]) p.shootAt(target);
   assert.equal(p.getBullets().length, 0); near(p.getRecoilState().intensity, 0);
+  assert.equal(p.getMagazineAmmo(), 3);
 });
 
-test('holding left fires at the configured interval, overheats, and resumes toward the latest target', () => {
-  const p = makePlayer(); p.applyConfig({ shooting: { fireRate: .1, maxShootingTime: .2, maxOverheatCooldownTime: .1 } });
+test('holding left empties the magazine, auto-reloads, and resumes toward the latest target', () => {
+  const p = makePlayer(); p.applyConfig({ shooting: { fireRate: .1, magazineSize: 1, reloadDuration: .2 } });
+  p.setAutoReload(true);
+  // 高速子弹会在一帧内飞完射程并被清理，用射击回调计数比数子弹可靠。
+  let shots = 0; p.setOnShootCallback(() => shots++);
   p.update(0, idle, undefined, aim()); p.update(.1, idle, undefined, aim());
-  assert.equal(p.getBullets().length, 2);
-  p.update(.1, idle, undefined, aim()); assert.equal(p.getIsOverheated(), true);
+  assert.equal(shots, 2);
+  assert.equal(p.getMagazineAmmo(), 0); assert.equal(p.getChambered(), false);
+  assert.equal(p.getIsReloading(), true);
+  // 换弹中途不发射：进度推进、余弹仍为 0。
+  p.update(.1, idle, undefined, aim());
+  assert.equal(shots, 2); near(p.getReloadProgress(), .5);
   p.update(.1, idle, undefined, aim(225, 825));
-  assert.equal(p.getIsOverheated(), false);
-  near(p.getBullets().at(-1).velocity.x, 0); near(p.getBullets().at(-1).velocity.y, 800);
+  assert.equal(shots, 3);
+  assert.equal(p.getIsReloading(), false);
+  assert.equal(p.getMagazineAmmo(), 0); assert.equal(p.getChambered(), true);
+  near(p.getBullets().at(-1).velocity.x, 0); near(p.getBullets().at(-1).velocity.y, 2600);
+});
+
+test('R refills the whole magazine, and firing interrupts a reload and clears its progress', () => {
+  const p = makePlayer(); p.applyConfig({ shooting: { fireRate: .05, reloadDuration: .5 } });
+  p.setDebugState({ magazineAmmo: 3 });
+  p.requestReload();
+  assert.equal(p.getIsReloading(), true); near(p.getReloadProgress(), 0);
+  assert.equal(p.getMagazineAmmo(), 3);
+  // 左键在换弹中开火：先打断换弹，再消耗一发。
+  p.update(.2, idle, undefined, aim(825, 225));
+  assert.equal(p.getIsReloading(), false); near(p.getReloadProgress(), 0);
+  assert.equal(p.getMagazineAmmo(), 2); assert.equal(p.getBullets().length, 1);
+  p.requestReload();
+  p.update(.5, idle, undefined, aim(825, 225, false, false));
+  assert.equal(p.getIsReloading(), false);
+  assert.equal(p.getMagazineAmmo(), 6); assert.equal(p.getChambered(), true);
+});
+
+test('an empty magazine waits for R unless auto reload is enabled', () => {
+  const p = makePlayer();
+  assert.equal(p.getAutoReload(), false);
+  p.setDebugState({ magazineAmmo: 0, chambered: false });
+  p.update(.2, idle);
+  assert.equal(p.getIsReloading(), false);
+  p.shootAt({ x: 825, y: 225 });
+  assert.equal(p.getBullets().length, 0);
+  p.requestReload();
+  assert.equal(p.getIsReloading(), true);
+  p.update(1.5, idle);
+  assert.equal(p.getIsReloading(), false);
+  assert.equal(p.getMagazineAmmo(), 6); assert.equal(p.getChambered(), true);
+  // 勾选调试开关后，打空即开始换弹。
+  p.setAutoReload(true);
+  p.setDebugState({ magazineAmmo: 0, chambered: false });
+  p.update(.01, idle);
+  assert.equal(p.getIsReloading(), true);
 });
 
 test('bullets freeze their world endpoint and finish exactly there for diagonal and near shots', () => {
@@ -123,10 +169,10 @@ test('two-axis spread is symmetric, scales with distance, and changes only on su
   near(center(c).y, 225 + 250 * Math.tan(.4 * Math.PI / 180));
 });
 
-test('continuous fire saturates spread, overheat does not add recoil, and recovery has an exact delay', () => {
+test('continuous fire saturates spread, an empty magazine does not add recoil, and recovery has an exact delay', () => {
   const p = makePlayer();
   for (let i = 0; i < 7; i++) { p.update(i ? .2 : 0, idle); p.shootAt({ x: 825, y: 225 }); }
-  near(p.getRecoilState().intensity, 1); p.setDebugState({ heatPercentage: 100 }); p.shootAt({ x: 825, y: 225 });
+  near(p.getRecoilState().intensity, 1); p.setDebugState({ magazineAmmo: 0, chambered: false }); p.shootAt({ x: 825, y: 225 });
   near(p.getRecoilState().intensity, 1); p.update(.25, idle); near(p.getRecoilState().intensity, 1);
   p.update(.4, idle); near(p.getRecoilState().intensity, .5); p.update(.4, idle); near(p.getRecoilState().intensity, 0);
 });
@@ -144,16 +190,23 @@ test('30/60/144 FPS preserve turning, movement, shot count and recoil recovery',
   for (const result of results) { assert.equal(result.shots, 6); near(result.rotation, results[0].rotation, .003); assert.ok(result.rotation < -.9); near(result.recoil, 0); near(result.x, results[0].x, .05); }
 });
 
-test('ballistic defaults match shipped JSON; partial edits validate atomically and old fields remain inert', () => {
+test('ballistic defaults match shipped JSON; partial edits validate atomically and old fields are rejected', () => {
   const config = JSON.parse(readFileSync('public/configs/playerConfig.json', 'utf8')), p = new Player(0, 0);
   for (const [key, value] of Object.entries(DEFAULT_BALLISTICS)) { near(config.shooting[key], value); near(p.getConfigSnapshot().shooting[key], value); }
+  near(config.shooting.magazineSize, 6); near(config.shooting.reloadDuration, 1.4);
+  near(config.shooting.bulletSpeed, 2600);
+  near(p.getConfigSnapshot().shooting.magazineSize, 6); near(p.getConfigSnapshot().shooting.reloadDuration, 1.4);
+  near(p.getConfigSnapshot().shooting.bulletSpeed, 2600);
   const before = p.getConfigSnapshot();
-  for (const shooting of [{ maxRange: 0 }, { maxRange: NaN }, { spreadHorizontal: 4 }, { spreadVertical: -1 }, { maxSpreadHorizontal: 45 }, { recoilPerShot: 2 }, { recoilRecoveryDuration: 0 }]) {
+  for (const shooting of [{ maxRange: 0 }, { maxRange: NaN }, { spreadHorizontal: 4 }, { spreadVertical: -1 }, { maxSpreadHorizontal: 45 }, { recoilPerShot: 2 }, { recoilRecoveryDuration: 0 }, { magazineSize: 2.5 }, { reloadDuration: 0 }]) {
     assert.throws(() => p.applyConfig({ base: { maxSpeed: 999 }, shooting })); assert.deepEqual(p.getConfigSnapshot(), before);
   }
   p.applyConfig({ shooting: { aimTurnDuration: 0, aimContinuityWindow: .18 } }); assert.deepEqual(p.getConfigSnapshot(), before);
   assert.throws(() => parsePlayerConfig({ shooting: { aimTurnDuration: -1 } }));
   assert.throws(() => parsePlayerConfig({ shooting: { spreadHorizontal: 2, maxSpreadHorizontal: 1 } }));
+  // 热量/过热字段已经删除，旧配置文件不能再静默通过。
+  assert.throws(() => parsePlayerConfig({ shooting: { maxShootingTime: 3.5 } }));
+  assert.throws(() => parsePlayerConfig({ shooting: { maxOverheatCooldownTime: 1 } }));
   const snapshot = p.getConfigSnapshot(); snapshot.shooting.maxRange = 99; near(p.getConfigSnapshot().shooting.maxRange, 1000);
 });
 

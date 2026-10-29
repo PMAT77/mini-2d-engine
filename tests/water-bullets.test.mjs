@@ -43,8 +43,8 @@ test('each water depth applies linear drag and emits one white annihilation burs
       assert.equal(bursts.length, 1); assert.equal(damage, 0);
       const [pos, count, spreadSpeed, size, life, colors] = bursts[0];
       near(pos.x, center(bullet)); near(pos.y, 225);
-      assert.equal(count, 4); assert.ok(spreadSpeed <= 40 && size <= 2 && life <= .25);
-      assert.deepEqual(colors, ['#ffffff']);
+      assert.equal(count, 4); assert.ok(spreadSpeed <= 60 && size <= 4 && life <= .35);
+      assert.deepEqual(colors, ['#ffffff', '#e8e8e8', '#cfcfcf', '#b5b5b5']);
     }
     const long = shot(); long.update(3, map);
     assert.equal(long.getIsDestroyed(), true);
@@ -73,7 +73,7 @@ test('firing snapshots partial body contact, independently of the bullet footpri
   assert.ok(wet.terrainWaterCoverage.fraction > 1e-6 && wet.terrainWaterCoverage.fraction < 1);
   wet.x = 200; wet.update(0, idle, map);
   wetBullet.update(.1, map);
-  assert.ok(wetBullet.velocity.length() < 800);
+  assert.ok(wetBullet.velocity.length() < 2600);
 
   const dry = playerAt(350 - 24.5, 225 - 24.5);
   dry.update(0, idle, map, aimRight(dry));
@@ -81,12 +81,12 @@ test('firing snapshots partial body contact, independently of the bullet footpri
   const dryStart = center(dryBullet);
   dry.x = 425; dry.update(0, idle, map);
   dryBullet.update(.3, map);
-  near(dryBullet.velocity.length(), 800); near(center(dryBullet), dryStart + 240);
+  near(dryBullet.velocity.length(), 2600); near(center(dryBullet), dryStart + 780);
 
   const edge = playerAt(375.5 - 24.5, 225 - 24.5); // Only tangent to water.
   edge.update(0, idle, map); edge.shoot(new Vector2(1, 0));
   const tangentBullet = edge.getBullets()[0]; tangentBullet.update(.2, map);
-  near(tangentBullet.velocity.length(), 800);
+  near(tangentBullet.velocity.length(), 2600);
 });
 
 test('drag accumulates on re-entry, while dry flight preserves remaining velocity and launch-speed buffs', () => {
@@ -113,6 +113,8 @@ test('drag accumulates on re-entry, while dry flight preserves remaining velocit
   crossing.update(.02, map);
   near(crossing.velocity.length(), afterSecond); near(center(crossing) - secondDryStart, afterSecond * .02);
   const player = playerAt(200, 200); player.addModifier('bulletSpeed', .5, 0, true);
+  // 加速后的子弹在 .625s 内会飞过默认射程，放宽射程以观察水阻衰减。
+  player.applyConfig({ shooting: { maxRange: 4000 } });
   map.tiles.forEach(row => row.fill('water')); player.update(0, idle, map); player.shoot(new Vector2(1, 0));
   const buffed = player.getBullets()[0]; buffed.update(.625, map);
   near(buffed.velocity.length(), player.getBulletSpeed() / 2);
@@ -146,13 +148,14 @@ test('annihilation particles are white, small, fade out and expire through the e
   bullet.update(.625, map);
   assert.equal(particles.getPerformanceStats().activeParticles, 4);
   for (const particle of particles.particles) {
-    assert.equal(particle.getColor(), '#ffffff');
+    assert.ok(['#ffffff', '#e8e8e8', '#cfcfcf', '#b5b5b5'].includes(particle.getColor()));
     near(particle.getPosition().x, center(bullet)); near(particle.getPosition().y, 225);
-    assert.ok(particle.getSize() <= 2.4);
+    // 湮灭烟尘的基准尺寸 4，粒子按 0.8–1.2 倍随机缩放。
+    assert.ok(particle.getSize() <= 4.8);
   }
   particles.update(.1);
   for (const particle of particles.particles) assert.ok(particle.getAlpha() > 0 && particle.getAlpha() < 1);
-  particles.update(.2);
+  particles.update(.5); // 烟尘寿命 0.35s 随机 0.8–1.2 倍，累计 0.6s 后池应清空。
   assert.equal(particles.getPerformanceStats().activeParticles, 0);
   bullet.update(.3, map); assert.equal(particles.getPerformanceStats().activeParticles, 0);
 });
@@ -171,9 +174,10 @@ test('per-depth drag edits affect newly fired bullets only, support zero and res
     player.applyConfig({ bulletWaterDrag: { [key]: 0 } });
     player.fireCooldown = 0; player.shoot(dir); const disabled = player.getBullets().at(-1);
     old.update(.1, map); tuned.update(.1, map); disabled.update(.1, map);
-    near(old.velocity.length(), 800 * (1 - previousRate * .1));
-    near(tuned.velocity.length(), 800 * .98); near(disabled.velocity.length(), 800);
-    player.setDebugState({ heatPercentage: 0 }); player.applyConfig(initial);
+    const base = player.getBulletSpeed();
+    near(old.velocity.length(), base * (1 - previousRate * .1));
+    near(tuned.velocity.length(), base * .98); near(disabled.velocity.length(), base);
+    player.setDebugState({ magazineAmmo: player.getMagazineSize(), chambered: true }); player.applyConfig(initial);
   }
   const snapshot = player.getConfigSnapshot(); snapshot.bulletWaterDrag.deep = 99;
   near(player.getConfigSnapshot().bulletWaterDrag.deep, 1.6);

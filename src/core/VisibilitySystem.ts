@@ -1,15 +1,16 @@
-import { LightingSystem } from './LightingSystem';
-import type { TileMap } from '../map/TileMap';
-
+/**
+ * 战争迷雾：以角色为中心的圆形柔边遮罩。
+ *
+ * 地形始终可见，遮罩只用来隐藏「游戏单位」——掉落物、拾取物、投射物、粒子
+ * 以及以后的敌人。遮罩本身完全透明，后续可以整体替换成风格化迷雾后处理。
+ */
 export interface VisionState {
   readonly x: number;
   readonly y: number;
   readonly direction: number;
-  readonly angle: number;
   readonly range: number;
 }
 
-/** Current line of sight only: lighting never reveals a hidden part of the world. */
 export class VisibilitySystem {
   private canvas?: HTMLCanvasElement;
 
@@ -19,41 +20,36 @@ export class VisibilitySystem {
     if (this.canvas.height !== height) this.canvas.height = height;
   }
 
-  apply(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, vision: VisionState,
-    map: TileMap, drawPlayerSilhouette: (mask: CanvasRenderingContext2D) => void): void {
-    this.initialize(ctx.canvas.width, ctx.canvas.height);
-    const canvas = this.canvas!, mask = canvas.getContext('2d')!;
-    const { x, y, direction, angle, range } = vision;
+  /** 供调试面板或测试读取遮罩。 */
+  getCanvas(): HTMLCanvasElement | undefined { return this.canvas; }
+
+  /**
+   * 在相机空间重建圆形遮罩；相机坐标与每次绘制使用的偏移一致。
+   * @param feather 外缘柔和过渡宽度（世界像素）
+   */
+  prepare(cameraX: number, cameraY: number, x: number, y: number, range: number, feather = range * 0.3): void {
+    const canvas = this.canvas;
+    if (!canvas) return;
+    const mask = canvas.getContext('2d')!;
     mask.setTransform(1, 0, 0, 1, 0, 0);
     mask.globalCompositeOperation = 'source-over';
     mask.clearRect(0, 0, canvas.width, canvas.height);
-    mask.save();
-    mask.translate(-cameraX, -cameraY);
-    if (!map.blocksLightAt(x, y)) {
-      const radial = mask.createRadialGradient(x, y, Math.max(0, range - 24), x, y, range);
-      radial.addColorStop(0, 'white'); radial.addColorStop(1, 'rgba(255,255,255,0)');
-      mask.fillStyle = radial;
-      mask.beginPath(); mask.moveTo(x, y);
-      mask.arc(x, y, range, direction - angle / 2, direction + angle / 2);
-      mask.closePath(); mask.fill();
-      const angular = mask.createConicGradient(direction - angle / 2, x, y);
-      const turn = Math.PI * 2, feather = Math.min(angle / 2, Math.PI / 60);
-      angular.addColorStop(0, 'rgba(255,255,255,0)');
-      angular.addColorStop(feather / turn, 'white');
-      angular.addColorStop((angle - feather) / turn, 'white');
-      angular.addColorStop(angle / turn, 'rgba(255,255,255,0)');
-      angular.addColorStop(1, 'rgba(255,255,255,0)');
-      mask.globalCompositeOperation = 'destination-in'; mask.fillStyle = angular;
-      mask.fillRect(cameraX, cameraY, canvas.width, canvas.height);
-      mask.globalCompositeOperation = 'destination-out'; mask.fillStyle = 'black';
-      // Do not protect all terrain tops here: a second wall behind the first is also hidden.
-      LightingSystem.drawShadows(mask, map.getShadowEdges(x, y, range), x, y, range);
-    }
-    mask.restore();
-    mask.globalCompositeOperation = 'destination-over';
-    mask.fillStyle = '#080808'; mask.fillRect(0, 0, canvas.width, canvas.height);
-    mask.globalCompositeOperation = 'source-over';
-    drawPlayerSilhouette(mask);
-    ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.drawImage(canvas, 0, 0); ctx.restore();
+    if (!Number.isFinite(range) || range <= 0) return;
+    const cx = x - cameraX, cy = y - cameraY;
+    const inner = Math.max(0, range - Math.max(0, feather));
+    const gradient = mask.createRadialGradient(cx, cy, inner, cx, cy, range);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    mask.fillStyle = gradient;
+    mask.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  /** 保留遮罩内的像素；目标画布必须与遮罩同尺寸。 */
+  apply(ctx: CanvasRenderingContext2D): void {
+    if (!this.canvas) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(this.canvas, 0, 0);
+    ctx.restore();
   }
 }

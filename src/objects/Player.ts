@@ -5,14 +5,29 @@ import { IdleState } from "../status/IdleState";
 import { MovingState } from "../status/MovingState";
 import { ShootingState } from "../status/ShootingState";
 import { StateMachine } from "../status/StateMachine";
-import { Bullet } from "./Bullet";
+import { Bullet, BulletEntityHitTest } from "./Bullet";
 import { Entities } from "./Entities";
 import { ParticleSystem } from "./ParticleSystem";
 import { DEFAULT_BALLISTICS, DEFAULT_MOVEMENT, DEFAULT_SPRINT, DEFAULT_BULLET_WATER_DRAG, parsePlayerCollider, parsePlayerConfig, PlayerConfig } from "./PlayerConfig";
 import { ColliderShape } from "../physics/Collider";
 import type { VisionState } from "../core/VisibilitySystem";
+import type { FootstepEvent } from "./FootprintSystem";
 
 const WADING_COLORS = [[98, 186, 255], [177, 143, 178], [255, 100, 100], [255, 64, 64]];
+/** 脚印步距（世界像素），按实际位移累计而不是按时间。 */
+const FOOTSTEP_STRIDE = 26;
+/** 离水后继续留下湿脚印的时长（秒）。 */
+const FOOTSTEP_WET_SECONDS = 1.5;
+/** 单帧最多补发的脚印数，避免长帧后一次爆发。 */
+const FOOTSTEP_MAX_PER_FRAME = 8;
+/** 跑步摇摆的最大速度权重，与疾跑倍率一致，避免移速增益叠加后失控。 */
+const RUN_SWAY_MAX_WEIGHT = 1.6;
+/** 双手前后摆动的幅度相对整体摇摆的比例。 */
+const RUN_SWAY_HAND_SCALE = 0.75;
+/** 双手滞后头部的相位（弧度），让手臂有一点跟随感。 */
+const RUN_SWAY_HAND_LAG = 0.5;
+/** 头部摇摆相对整体摇摆的比例；行走与奔跑都只保留轻微晃动。 */
+const RUN_SWAY_HEAD_SCALE = 0.5;
 
 export interface PlayerAimInput {
   target: { x: number; y: number };
@@ -21,10 +36,11 @@ export interface PlayerAimInput {
 }
 
 export interface PlayerDebugValues {
-  health: number;
-  stamina: number;
-  heatPercentage: number;
-  overheatCooldownRemaining: number;
+  health?: number;
+  stamina?: number;
+  magazineAmmo?: number;
+  chambered?: boolean;
+  reloadProgress?: number;
 }
 
 /**
@@ -37,9 +53,12 @@ export class Player extends Entities {
   private health = 100;
   private maxHealth = 100;
   private gold = 0;
+  private meat = 0;
 
   getGold(): number { return this.gold; }
   collectGold(): void { this.gold++; }
+  getMeat(): number { return this.meat; }
+  collectMeat(): void { this.meat++; }
 
   private movement = { ...DEFAULT_MOVEMENT };
   private sprint = { ...DEFAULT_SPRINT };
@@ -55,6 +74,10 @@ export class Player extends Entities {
   private releasedAfterExhaustion = false;
   private staminaRegenDelay = 0;
   private trailDistance = 0;
+  private footstepDistance = 0;
+  private footstepWetTimer = 0;
+  private footstepWaterDepth = 0;
+  private onFootstepCallback?: (step: FootstepEvent) => void;
   private wadingMap?: TileMap;
   private wadingAlpha = 0;
   private wadingColor = 'rgb(98, 186, 255)';
@@ -63,6 +86,10 @@ export class Player extends Entities {
   getStamina(): number { return this.stamina; }
   getMaxStamina(): number { return this.sprint.maxStamina; }
   getIsSprinting(): boolean { return this.sprinting; }
+  /** 身体是否接触水体（任何水深，含岸边的一点重叠）；脚印湿度与涉水音效共用。 */
+  isInWater(): boolean { return this.terrainWaterCoverage.fraction > 1e-6; }
+  /** 刚出水的湿身计时中：脚步仍是湿身的踩踏声，干地的循环脚步该让位。 */
+  isFootWet(): boolean { return this.footstepWetTimer > 0; }
 
   getHealth(): number { return this.health; }
   getMaxHealth(): number { return this.maxHealth; }
@@ -82,6 +109,10 @@ export class Player extends Entities {
   private scale: number = 1; // 玩家缩放比例
   private breathingAmplitude: number = 3; // 呼吸动画振幅
   private breathingSpeed: number = 2; // 呼吸动画速度
+  private runSwayAmplitude: number = 2.5; // 跑步摇摆幅度，占 size 的百分比
+  private runSwaySpeed: number = 10; // 基础移速下的摇摆角速度（弧度/秒）
+  private runSwayPhase: number = 0; // 跑步摇摆相位
+  private runSwayWeight: number = 0; // 本帧实际移速权重，0–1.6
 
   // 射击相关属性
   private isShooting: boolean = false; // 玩家是否正在开火
@@ -91,32 +122,43 @@ export class Player extends Entities {
   private armAngle = -Math.PI;
   private armDistance = Infinity;
   private shotPoseTime = 0;
-  private focus = 0;
   private recoil = 0;
+  /** 战争迷雾半径（世界像素）；手电筒的张角和距离固定，不受这里影响。 */
+  private visionRange = 400;
   private timeSinceShot = Infinity;
   private bullets: Bullet[] = []; // 存储玩家发射的子弹
 
   private fireRate: number = 0.2; // 射速（秒/发）
   private fireCooldown: number = 0; // 开火冷却计时器（控制射速）
 
-  private bulletSpeed: number = 800; // 子弹速度 
+  private bulletSpeed: number = 2600; // 子弹速度
   private bulletWaterDrag = { ...DEFAULT_BULLET_WATER_DRAG };
   private damage = 10;
 
-  private maxShootingTime: number = 3.5; // 最长持续射击时间（秒）
-  private shootingTimeRemaining: number = this.maxShootingTime; // 当前剩余可射击时间
-  private maxOverheatCooldownTime: number = 1.0; // 最长过热冷却时间（秒）
-  private overheatCooldownRemaining: number = this.maxOverheatCooldownTime; // 当前过热后的冷却时间（秒）
-  private isOverheated: boolean = false; // 是否处于过热状态
+  // 弹药：初始武器是格罗特手枪，弹匣 6 发 + 膛内 1 发，备弹无限。
+  private readonly weaponName = '格罗特手枪';
+  private magazineSize: number = 6; // 弹匣容量（不含膛内那一发）
+  private magazineAmmo: number = 6; // 弹匣内余弹
+  private chambered: boolean = true; // 膛内是否还有一发
+  /** 调试选项：打空最后一发时是否自动换弹。默认关闭，正常流程只能按 R 换弹。 */
+  private autoReload: boolean = false;
 
-  // 进度条可见性相关属性
-  private cooldownBarAlpha: number = 0; // 进度条透明度（0-1）
-  private isBarVisible: boolean = false; // 进度条是否应该可见
+  // 换弹：没有热量和过热，只有"打空 → 按 R 换弹"。
+  private reloadDuration: number = 1.4; // 换弹时长（秒）
+  private reloadRemaining: number = 0; // 换弹剩余时间（秒）
+  private isReloading: boolean = false; // 是否正在换弹
+
+  // 进度环可见性相关属性：只在换弹时显示
+  private reloadBarAlpha: number = 0; // 进度环透明度（0-1）
   private fadeSpeed: number = 5; // 淡入淡出速度系数
 
   // 回调函数定义
   private onShootCallback?: (shootDir: Vector2) => void; // 射击回调，用于触发摄像机震动等效果
+  private onBulletLandedCallback?: (x: number, y: number) => void; // 子弹自然停止回调，用于生成地面弹坑
   private onStatsChangeCallback?: () => void; // 属性变化回调
+  private onReloadCallback?: () => void; // 换弹回调（开始换弹时触发，用于播放换弹音效）
+  /** 场景提供的子弹可命中单位查询，发射时转发给每颗新子弹。 */
+  private bulletEntityHitTest?: BulletEntityHitTest;
 
   // 状态机系统
   private stateMachine: StateMachine<Player>;
@@ -278,16 +320,62 @@ export class Player extends Entities {
     }
   }
 
+  /** 只要身体仍接触水体就刷新湿度；离水后短暂保留，让第一步就带出深色湿脚印。 */
+  private updateFootstepWetness(delta: number): void {
+    if (this.terrainWaterCoverage.fraction > 1e-6) {
+      this.footstepWaterDepth = Math.max(this.footstepWaterDepth, this.terrainWaterCoverage.depth);
+      this.footstepWetTimer = FOOTSTEP_WET_SECONDS;
+      return;
+    }
+    if (this.footstepWetTimer <= 0) return;
+    this.footstepWetTimer = Math.max(0, this.footstepWetTimer - delta);
+    if (this.footstepWetTimer === 0) this.footstepWaterDepth = 0;
+  }
+
+  /** 按实际位移每跨过固定步距发出一个候选步点；水/墙上的落地校验由接收方完成。 */
+  private emitFootsteps(startX: number, startY: number): void {
+    const callback = this.onFootstepCallback;
+    if (!callback) return;
+    const fromX = startX + this.size / 2, fromY = startY + this.size / 2;
+    const dx = this.x + this.size / 2 - fromX, dy = this.y + this.size / 2 - fromY;
+    const distance = Math.hypot(dx, dy);
+    if (!Number.isFinite(distance) || distance < 1e-6) return;
+    // 调试跳坐标或长暂停后不绘制横跨地图的轨迹。
+    if (distance > this.size * 4) { this.footstepDistance = 0; return; }
+
+    const angle = Math.atan2(dy, dx);
+    // 水中与刚出水的脚步声不同：前者是涉水，后者是湿身后的踩踏。
+    const inWater = this.terrainWaterCoverage.fraction > 1e-6;
+    // 深水（索引 2）已经不可快速通过，视为完全湿透；超深水不可进入，仅作上限保护。
+    const wetness = this.footstepWetTimer > 0
+      ? 0.35 + 0.65 * Math.min(1, this.footstepWaterDepth / 2) : 0;
+    const travelled = FOOTSTEP_STRIDE - this.footstepDistance;
+    for (let step = travelled, count = 0; step <= distance && count < FOOTSTEP_MAX_PER_FRAME;
+      step += FOOTSTEP_STRIDE, count++) {
+      const fraction = step / distance;
+      callback({ x: fromX + dx * fraction, y: fromY + dy * fraction, angle, wetness, inWater });
+    }
+    this.footstepDistance = (this.footstepDistance + distance) % FOOTSTEP_STRIDE;
+  }
+
   protected getLookDirection(_input?: Input): Vector2 {
     if (!this.pointerAim?.face) return new Vector2();
     return new Vector2(this.pointerAim.target.x - this.x - this.size / 2,
       this.pointerAim.target.y - this.y - this.size / 2);
   }
 
+  /** 手电筒锥光固定 120°／400；`range` 是战争迷雾半径，可由调试面板调整。 */
   getVisionState(): Readonly<VisionState> {
     return { x: this.x + this.size / 2, y: this.y + this.size / 2,
-      direction: this.currentRotation - Math.PI,
-      angle: (120 - 75 * this.focus) * Math.PI / 180, range: 400 + 400 * this.focus };
+      direction: this.currentRotation - Math.PI, range: this.visionRange };
+  }
+
+  /** 战争迷雾半径（世界像素），仅供调试面板调整；手电筒不受影响。 */
+  getVisionRange(): number { return this.visionRange; }
+
+  setVisionRange(range: number): void {
+    if (!Number.isFinite(range) || range <= 0) throw new Error('视野半径必须是正有限数值');
+    this.visionRange = range;
   }
 
   private updateAimPose(delta: number): void {
@@ -301,11 +389,18 @@ export class Player extends Entities {
     if ((aim?.face || aim?.fire) && distance > 1e-6) {
       this.armAngle = Math.atan2(dy, dx); this.armDistance = distance;
     }
-    const t = aim?.face ? Math.max(0, Math.min(1, (distance - 100) / 700)) : 0;
-    const target = t * t * (3 - 2 * t);
-    // Exponential smoothing reaches 95% in 120ms, independent of frame rate.
-    this.focus += (target - this.focus) * (1 - Math.exp(-delta * 25));
-    if (Math.abs(target - this.focus) < 1e-5) this.focus = target;
+  }
+
+  /** 按本帧实际位移推进跑步摇摆；撞墙或站立时权重归零。 */
+  private updateRunSway(delta: number, startX: number, startY: number): void {
+    if (delta <= 0) return;
+    const maxSpeed = this.getMaxSpeed();
+    const travel = Math.hypot(this.x - startX, this.y - startY);
+    const ratio = Number.isFinite(maxSpeed) && maxSpeed > 0
+      ? Math.min(RUN_SWAY_MAX_WEIGHT, travel / delta / maxSpeed)
+      : 0;
+    this.runSwayWeight = ratio;
+    this.runSwayPhase = (this.runSwayPhase + delta * this.runSwaySpeed * ratio) % (Math.PI * 2);
   }
 
   /** World-space hand endpoint shared by rendering and projectile creation. */
@@ -342,11 +437,11 @@ export class Player extends Entities {
     this.recoil = Math.max(0, this.recoil - recovery / this.ballistics.recoilRecoveryDuration);
   }
 
-  private getOverlayLayout(offsetX = 0, offsetY = 0): { healthX: number; healthY: number; heatX: number; heatY: number; debuffX: number; debuffY: number } {
+  private getOverlayLayout(offsetX = 0, offsetY = 0): { healthX: number; healthY: number; reloadX: number; reloadY: number; debuffX: number; debuffY: number } {
     const centerX = this.x - offsetX + this.size / 2, centerY = this.y - offsetY + this.size / 2;
-    const radius = this.size / Math.SQRT2 + 8, heatOffset = (radius + 28) / Math.SQRT2;
+    const radius = this.size / Math.SQRT2 + 8, reloadOffset = (radius + 28) / Math.SQRT2;
     return { healthX: centerX - this.size / 2, healthY: centerY + radius + 15,
-      heatX: centerX + heatOffset, heatY: centerY - heatOffset,
+      reloadX: centerX + reloadOffset, reloadY: centerY - reloadOffset,
       debuffX: centerX - radius - 18, debuffY: centerY };
   }
 
@@ -376,34 +471,26 @@ export class Player extends Entities {
     return this.velocity.length() === 0 && !this.isShooting;
   }
 
-  /** Weapon heat grows clockwise; the red overheat arc shrinks during recovery. */
-  private drawCooldownRing(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
-    if (this.cooldownBarAlpha <= 0) return;
-    const { heatX: x, heatY: y } = this.getOverlayLayout(offsetX, offsetY);
-    const progress = Math.max(0, Math.min(1, this.isOverheated
-      ? 1 - this.getOverheatCooldownProgress() : this.getHeatPercentage()));
+  /** 换弹进度环：只在换弹时淡入，从顶部顺时针填到当前进度。 */
+  private drawReloadRing(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
+    if (this.reloadBarAlpha <= 0.01) return;
+    const { reloadX: x, reloadY: y } = this.getOverlayLayout(offsetX, offsetY);
+    const progress = this.getReloadProgress();
     ctx.save();
-    ctx.globalAlpha = this.cooldownBarAlpha;
+    ctx.globalAlpha *= this.reloadBarAlpha;
     ctx.beginPath();
     ctx.arc(x, y, 11, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(12, 18, 26, 0.8)";
     ctx.fill();
-    ctx.strokeStyle = "rgba(210, 225, 240, 0.25)";
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(18, 26, 30, 0.55)";
+    ctx.lineWidth = 4;
     ctx.stroke();
     if (progress > 0) {
       ctx.beginPath();
       ctx.arc(x, y, 11, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
-      ctx.strokeStyle = this.isOverheated ? "#ff6b64" : `hsl(${185 * (1 - progress)}, 85%, 65%)`;
+      ctx.strokeStyle = "rgba(255, 206, 107, 1)";
+      ctx.lineWidth = 3;
       ctx.lineCap = "round";
-      ctx.stroke();
-    }
-    if (this.isOverheated) {
-      ctx.strokeStyle = "#ff6b64";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 1);
-      ctx.moveTo(x, y + 3); ctx.lineTo(x, y + 4);
       ctx.stroke();
     }
     ctx.restore();
@@ -464,6 +551,12 @@ export class Player extends Entities {
       if (config.animation.breathingSpeed !== undefined) {
         this.breathingSpeed = config.animation.breathingSpeed;
       }
+      if (config.animation.runSwayAmplitude !== undefined) {
+        this.runSwayAmplitude = config.animation.runSwayAmplitude;
+      }
+      if (config.animation.runSwaySpeed !== undefined) {
+        this.runSwaySpeed = config.animation.runSwaySpeed;
+      }
     }
 
     // 应用射击属性
@@ -475,22 +568,16 @@ export class Player extends Entities {
       if (config.shooting.bulletSpeed !== undefined) {
         this.bulletSpeed = config.shooting.bulletSpeed;
       }
-      if (config.shooting.maxShootingTime !== undefined) {
-        const remainingFraction = this.shootingTimeRemaining / this.maxShootingTime;
-        this.maxShootingTime = config.shooting.maxShootingTime;
-        this.shootingTimeRemaining = remainingFraction * this.maxShootingTime;
-        // 同时更新剩余射击时间，确保一致性
-        if (!this.isOverheated) {
-          this.shootingTimeRemaining = Math.min(
-            this.shootingTimeRemaining,
-            this.maxShootingTime
-          );
-        }
+      if (config.shooting.magazineSize !== undefined) {
+        this.magazineSize = config.shooting.magazineSize;
+        // 容量缩小后余弹不能超出上限
+        this.magazineAmmo = Math.min(this.magazineAmmo, this.magazineSize);
       }
-      if (config.shooting.maxOverheatCooldownTime !== undefined) {
-        const fraction = this.overheatCooldownRemaining / this.maxOverheatCooldownTime;
-        this.maxOverheatCooldownTime = config.shooting.maxOverheatCooldownTime;
-        this.overheatCooldownRemaining = (this.isOverheated ? fraction : 1) * this.maxOverheatCooldownTime;
+      if (config.shooting.reloadDuration !== undefined) {
+        const fraction = this.reloadDuration > 0 ? this.reloadRemaining / this.reloadDuration : 0;
+        this.reloadDuration = config.shooting.reloadDuration;
+        // 换弹途中改时长时保留已完成的进度比例
+        if (this.isReloading) this.reloadRemaining = Math.max(0, fraction * this.reloadDuration);
       }
     }
 
@@ -513,18 +600,23 @@ export class Player extends Entities {
         decel: this.decel, nonlinearFactor: this.nonlinearFactor, rotationSpeed: this.rotationSpeed, rotationStrategy: this.rotationStrategy },
       movement: { ...this.movement }, sprint: { ...this.sprint },
       bulletWaterDrag: { ...this.bulletWaterDrag },
-      animation: { breathingAmplitude: this.breathingAmplitude, breathingSpeed: this.breathingSpeed },
+      animation: {
+        breathingAmplitude: this.breathingAmplitude, breathingSpeed: this.breathingSpeed,
+        runSwayAmplitude: this.runSwayAmplitude, runSwaySpeed: this.runSwaySpeed,
+      },
       shooting: { ...this.ballistics, damage: this.damage, fireRate: this.fireRate, bulletSpeed: this.bulletSpeed,
-        maxShootingTime: this.maxShootingTime, maxOverheatCooldownTime: this.maxOverheatCooldownTime },
+        magazineSize: this.magazineSize, reloadDuration: this.reloadDuration },
       ui: { fadeSpeed: this.fadeSpeed },
     };
   }
 
   getDebugState() {
     return {
-      health: this.health, stamina: this.stamina, heatPercentage: this.getHeatPercentage() * 100,
-      overheatCooldownRemaining: this.isOverheated ? this.overheatCooldownRemaining : 0,
-      isOverheated: this.isOverheated, exhausted: this.exhausted,
+      health: this.health, stamina: this.stamina,
+      magazineAmmo: this.magazineAmmo, magazineSize: this.magazineSize,
+      chambered: this.chambered, roundsReady: this.magazineAmmo + (this.chambered ? 1 : 0),
+      isReloading: this.isReloading, reloadProgress: this.getReloadProgress() * 100,
+      exhausted: this.exhausted,
       effectiveSpeed: this.getMaxSpeed(), effectiveSprintSpeed: this.getMaxSpeed() * this.sprint.speedMultiplier,
       effectiveDamage: this.getModifiedValue(this.damage, 'damage'),
       effectiveFireRate: 1 / this.getFireRate(), effectiveBulletSpeed: this.getBulletSpeed(),
@@ -535,12 +627,15 @@ export class Player extends Entities {
   setDebugState(values: Partial<PlayerDebugValues>): void {
     if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('调试状态必须是对象');
     for (const [key, value] of Object.entries(values)) {
-      if (!['health', 'stamina', 'heatPercentage', 'overheatCooldownRemaining'].includes(key)
-        || typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`无效调试值: ${key}`);
+      if (!['health', 'stamina', 'magazineAmmo', 'chambered', 'reloadProgress'].includes(key)) {
+        throw new Error(`无效调试值: ${key}`);
+      }
+      if (key === 'chambered') {
+        if (typeof value !== 'boolean') throw new Error(`无效调试值: ${key}`);
+        continue;
+      }
+      if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`无效调试值: ${key}`);
     }
-    const willOverheat = values.heatPercentage === undefined ? this.isOverheated : values.heatPercentage >= 100;
-    if (values.overheatCooldownRemaining !== undefined && values.overheatCooldownRemaining > 0
-      && !willOverheat) throw new Error('仅过热时可设置剩余冷却');
     const clamp = (value: number, max: number) => Math.max(0, Math.min(max, value));
     if (values.health !== undefined) this.health = clamp(values.health, this.maxHealth);
     if (values.stamina !== undefined) {
@@ -550,21 +645,22 @@ export class Player extends Entities {
       this.staminaRegenDelay = 0;
       if (this.exhausted) this.sprinting = false;
     }
-    if (values.heatPercentage !== undefined) {
-      const heat = clamp(values.heatPercentage, 100);
-      this.isOverheated = false;
-      this.fireCooldown = 0;
-      this.shootingTimeRemaining = (1 - heat / 100) * this.maxShootingTime;
-      this.overheatCooldownRemaining = this.maxOverheatCooldownTime;
-      if (heat === 100) this.startOverheat();
+    if (values.magazineAmmo !== undefined) {
+      this.magazineAmmo = Math.round(clamp(values.magazineAmmo, this.magazineSize));
+      // 手动改余弹等于中止当前换弹，由玩家自己决定下一步
+      this.cancelReload();
     }
-    if (values.overheatCooldownRemaining !== undefined) {
-      this.overheatCooldownRemaining = clamp(values.overheatCooldownRemaining, this.maxOverheatCooldownTime);
-      if (this.overheatCooldownRemaining === 0) {
-        this.isOverheated = false;
-        this.shootingTimeRemaining = this.maxShootingTime;
-        this.fireCooldown = 0;
-        this.overheatCooldownRemaining = this.maxOverheatCooldownTime;
+    if (values.chambered !== undefined) {
+      this.chambered = values.chambered;
+      this.cancelReload();
+    }
+    if (values.reloadProgress !== undefined) {
+      const progress = clamp(values.reloadProgress, 100);
+      if (progress >= 100) this.finishReload();
+      else if (progress <= 0) this.cancelReload();
+      else {
+        this.isReloading = true;
+        this.reloadRemaining = (1 - progress / 100) * this.reloadDuration;
       }
     }
     this.onStatsChangeCallback?.();
@@ -691,6 +787,38 @@ export class Player extends Entities {
   }
 
   /**
+   * 设置子弹自然停止回调（落点是否为干燥地面由接收方判断）。
+   * @param callback 接收子弹最终中心坐标
+   */
+  setOnBulletLanded(callback: (x: number, y: number) => void): void {
+    this.onBulletLandedCallback = callback;
+  }
+
+  /**
+   * 注册子弹对单位的命中查询；场景用它把子弹和鸡等可命中对象连接起来。
+   * 每次发射时转发给新子弹，之后发射的子弹共享同一查询。
+   */
+  setBulletEntityHitTest(test?: BulletEntityHitTest): void {
+    this.bulletEntityHitTest = test;
+  }
+
+  /**
+   * 注册脚印候选点回调；左右交替、地形校验与绘制由接收方负责。
+   * @param callback 接收世界坐标、行进方向和涉水湿度（0–1）
+   */
+  setOnFootstepCallback(callback: (step: FootstepEvent) => void): void {
+    this.onFootstepCallback = callback;
+  }
+
+  /**
+   * 设置换弹回调：按 R 换弹（或调试开启自动换弹后打空）开始的那一刻触发。
+   * 备弹无限，换弹只消耗时间，不消耗资源。
+   */
+  setOnReloadCallback(callback: () => void): void {
+    this.onReloadCallback = callback;
+  }
+
+  /**
    * 射击方法
    * @param inputDir 射击方向
    * @param damage 子弹伤害值
@@ -701,29 +829,22 @@ export class Player extends Entities {
     this.shootAt(new Vector2(this.x + this.size / 2 + target.x, this.y + this.size / 2 + target.y), damage, map);
   }
 
-  /** 发射时冻结世界落点；方向辅助方法和鼠标输入共用热量、散布与碰撞。 */
+  /** 发射时冻结世界落点；方向辅助方法和鼠标输入共用弹药、散布与碰撞。 */
   shootAt(target: { x: number; y: number }, damage: number = this.damage, map?: TileMap): void {
     if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) return;
     const inputDir = new Vector2(target.x - this.x - this.size / 2, target.y - this.y - this.size / 2);
     // 验证射击方向
     if (inputDir.length() <= 1e-6) return;
 
-    // 检查是否过热
-    if (this.isOverheated) return;
-
-    // 检查剩余射击时间
-    if (this.shootingTimeRemaining <= 0) {
-      this.startOverheat();
-      return;
-    }
-
     // 检查射击冷却
     if (this.fireCooldown > 1e-9) return;
+    // 没有子弹时只能等换弹；射击打断换弹会清零进度，必须重新按 R。
+    if (!this.hasAmmo()) return;
+    if (this.isReloading) this.cancelReload();
     // Preserve a sub-frame remainder without replaying missed shots after a long frame.
     this.fireCooldown = this.getFireRate() + Math.min(0, this.fireCooldown);
 
-    // 减少剩余射击时间
-    this.shootingTimeRemaining -= this.getFireRate();
+    this.consumeRound();
 
     // 生成子弹
     // A click fires immediately; the firing pose must already show the emitting hand.
@@ -743,7 +864,9 @@ export class Player extends Entities {
     const direction = inputDir.clone().normalize();
     const bulletVel = direction.clone().scale(this.getBulletSpeed());
     const bullet = new Bullet(bulletPos, bulletVel, this.getModifiedValue(damage, "damage"),
-      this.particleSystem, this.terrainWaterCoverage.fraction > 1e-6, this.bulletWaterDrag, travelDistance);
+      this.particleSystem, this.terrainWaterCoverage.fraction > 1e-6, this.bulletWaterDrag, travelDistance,
+      this.onBulletLandedCallback);
+    if (this.bulletEntityHitTest) bullet.setEntityHitTest(this.bulletEntityHitTest);
     if (map) bullet.checkLaunchPath(new Vector2(this.x + this.size / 2, this.y + this.size / 2), map);
     if (!bullet.getIsDestroyed()) this.bullets.push(bullet);
     this.recoil = Math.min(1, this.recoil + this.ballistics.recoilPerShot);
@@ -755,18 +878,58 @@ export class Player extends Entities {
     // 更新状态
     this.stateMachine.changeState("shooting");
     this.isShooting = true;
+
+    // 打空（6+1 全打完）时，只有调试面板开启自动换弹才立刻换弹；否则等玩家按 R。
+    if (this.autoReload && !this.hasAmmo()) this.startReload();
   }
 
-  /**
-   * 开始过热状态
-   * @private
-   */
-  private startOverheat(): void {
-    this.isOverheated = true;
-    this.shootingTimeRemaining = 0;
-    this.fireCooldown = 0;
-    this.overheatCooldownRemaining = this.maxOverheatCooldownTime;
-    // 可以在这里添加过热特效或音效
+  /** 还有没有能立刻发射的子弹：膛内 1 发 + 弹匣内余弹。 */
+  private hasAmmo(): boolean {
+    return this.chambered || this.magazineAmmo > 0;
+  }
+
+  /** 先打膛内那一发，打完再从弹匣顶一发进膛。 */
+  private consumeRound(): void {
+    this.chambered = false;
+    if (this.magazineAmmo > 0) {
+      this.magazineAmmo--;
+      this.chambered = true;
+    }
+  }
+
+  /** 开始换弹；备弹无限，结束时总是补满。 */
+  private startReload(): void {
+    if (this.isReloading) return;
+    this.isReloading = true;
+    this.reloadRemaining = this.reloadDuration;
+    // 交给场景播换弹音效
+    this.onReloadCallback?.();
+  }
+
+  /** 中止换弹并清零进度；开火会打断换弹。 */
+  private cancelReload(): void {
+    this.isReloading = false;
+    this.reloadRemaining = 0;
+  }
+
+  /** 换弹完成：膛内上膛一发、弹匣补满（幂等）。 */
+  private finishReload(): void {
+    this.isReloading = false;
+    this.reloadRemaining = 0;
+    this.chambered = true;
+    this.magazineAmmo = this.magazineSize;
+  }
+
+  /** 打空最后一发后是否自动换弹（调试选项，默认关闭）。 */
+  getAutoReload(): boolean { return this.autoReload; }
+
+  /** 开关自动换弹；关闭时正在进行的换弹不受影响。 */
+  setAutoReload(enabled: boolean): void { this.autoReload = !!enabled; }
+
+  /** 玩家按 R 手动换弹；弹匣已满时什么都不做。 */
+  requestReload(): void {
+    if (this.isReloading || (this.magazineAmmo >= this.magazineSize && this.chambered)) return;
+    this.startReload();
   }
 
   /**
@@ -780,8 +943,11 @@ export class Player extends Entities {
     this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y) ? aim : undefined;
     this.isShooting = !!this.pointerAim?.fire;
     this.updateRecoil(delta);
+    const startX = this.x, startY = this.y;
+    const movingInput = this.getMoveDirection(input).length() > 0;
     this.updateMovement(delta, input, map);
     this.updateAimPose(delta);
+    this.updateRunSway(delta, startX, startY);
     this.wadingMap = this.terrainSpeedFactor < 1 - 1e-6 && this.terrainWaterCoverage.fraction > 1e-6 ? map : undefined;
     if (this.wadingMap) {
       const depth = Math.max(0, Math.min(3, this.terrainWaterCoverage.depth)), lower = Math.floor(depth), blend = depth - lower;
@@ -789,48 +955,28 @@ export class Player extends Entities {
       this.wadingColor = `rgb(${a.map((value, i) => Math.round(value + (b[i] - value) * blend)).join(', ')})`;
     }
     this.wadingAlpha = this.wadingMap ? Math.min(1, this.wadingAlpha + delta / 0.08) : Math.max(0, this.wadingAlpha - delta / 0.12);
+    this.updateFootstepWetness(delta);
+    if (movingInput) this.emitFootsteps(startX, startY);
 
-    // 更新射击冷却和过热状态
-    if (this.isOverheated) {
-      // 过热冷却倒计时
-      this.overheatCooldownRemaining -= delta;
-      if (this.overheatCooldownRemaining <= 0) {
-        // 过热冷却完成
-        this.isOverheated = false;
-        this.shootingTimeRemaining = this.maxShootingTime;
-        this.overheatCooldownRemaining = this.maxOverheatCooldownTime; // 重置过热冷却时间
-      }
+    // 推进换弹：按帧累积，长帧不会跨过终点后倒扣
+    if (this.isReloading) {
+      this.reloadRemaining -= delta;
+      if (this.reloadRemaining <= 1e-9) this.finishReload();
+    }
+    // 开启自动换弹后，打空弹匣即开始换弹；也兼作调试面板直接清空弹匣时的兜底。
+    if (this.autoReload && !this.isReloading && !this.hasAmmo()) this.startReload();
 
-    } else {
-      // 常规射击冷却
-      if (this.fireCooldown > 0) {
-        this.fireCooldown -= delta;
-        if (!this.isShooting || delta >= this.getFireRate()) this.fireCooldown = Math.max(0, this.fireCooldown);
-      }
-
-      // 当玩家停止射击时，缓慢恢复射击时间
-      if (!this.isShooting && this.shootingTimeRemaining < this.maxShootingTime) {
-        // 每秒恢复50%的最大射击时间
-        this.shootingTimeRemaining += delta * this.maxShootingTime * 0.5;
-        // 确保不超过最大值
-        if (this.shootingTimeRemaining > this.maxShootingTime) {
-          this.shootingTimeRemaining = this.maxShootingTime;
-        }
-      }
+    // 射击间隔计时
+    if (this.fireCooldown > 0) {
+      this.fireCooldown -= delta;
+      if (!this.isShooting || delta >= this.getFireRate()) this.fireCooldown = Math.max(0, this.fireCooldown);
     }
 
-    // 管理进度条可见性
-    if (this.isShooting || this.isOverheated || this.shootingTimeRemaining < this.maxShootingTime) {
-      this.isBarVisible = true;
+    // 进度环只在换弹时淡入淡出
+    if (this.isReloading) {
+      this.reloadBarAlpha = Math.min(1, this.reloadBarAlpha + delta * this.fadeSpeed);
     } else {
-      this.isBarVisible = false;
-    }
-
-    // 更新进度条透明度
-    if (this.isBarVisible) {
-      this.cooldownBarAlpha = Math.min(1, this.cooldownBarAlpha + delta * this.fadeSpeed);
-    } else {
-      this.cooldownBarAlpha = Math.max(0, this.cooldownBarAlpha - delta * this.fadeSpeed);
+      this.reloadBarAlpha = Math.max(0, this.reloadBarAlpha - delta * this.fadeSpeed);
     }
 
     // 处理射击逻辑
@@ -857,29 +1003,37 @@ export class Player extends Entities {
     this.bullets = this.bullets.filter(bullet => !bullet.getIsDestroyed());
   }
 
-  /**
-   * 获取当前射击热量百分比（0-1）
-   * @returns 射击热量百分比
-   */
-  getHeatPercentage(): number {
-    return 1 - (this.shootingTimeRemaining / this.maxShootingTime);
+  getWeaponName(): string {
+    return this.weaponName;
   }
 
-  /**
-   * 获取是否处于过热状态
-   * @returns 是否过热
-   */
-  getIsOverheated(): boolean {
-    return this.isOverheated;
+  /** 弹匣内余弹（不含膛内那一发）。 */
+  getMagazineAmmo(): number {
+    return this.magazineAmmo;
   }
 
-  /**
-   * 获取过热冷却进度（0-1）
-   * @returns 过热冷却进度
-   */
-  getOverheatCooldownProgress(): number {
-    if (!this.isOverheated) return 0;
-    return 1 - (this.overheatCooldownRemaining / this.maxOverheatCooldownTime);
+  getMagazineSize(): number {
+    return this.magazineSize;
+  }
+
+  /** 膛内是否还有一发。 */
+  getChambered(): boolean {
+    return this.chambered;
+  }
+
+  getIsReloading(): boolean {
+    return this.isReloading;
+  }
+
+  /** 换弹剩余时间（秒）；未换弹时为 0。 */
+  getReloadRemaining(): number {
+    return this.reloadRemaining;
+  }
+
+  /** 换弹进度（0-1）；未换弹时为 0。 */
+  getReloadProgress(): number {
+    if (!this.isReloading || this.reloadDuration <= 0) return 0;
+    return Math.max(0, Math.min(1, 1 - this.reloadRemaining / this.reloadDuration));
   }
 
   /**
@@ -891,8 +1045,9 @@ export class Player extends Entities {
   draw(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
     const centerX = this.x + this.size / 2, centerY = this.y + this.size / 2;
     // The same local raster on land and water prevents a shading/resolution pop at the shoreline.
-    // A fixed maximum extent avoids reallocating the buffer on every breathing frame.
-    const extent = Math.ceil(this.size * 2 * (1 + this.breathingAmplitude / 100)) + 4;
+    // A fixed maximum extent avoids reallocating the buffer on every breathing/sway frame.
+    const swayPad = this.size * this.runSwayAmplitude / 100 * RUN_SWAY_MAX_WEIGHT;
+    const extent = Math.ceil(this.size * 2 * (1 + this.breathingAmplitude / 100) + swayPad * 2) + 4;
     const canvas = this.wadingCanvas ??= document.createElement('canvas');
     if (canvas.width !== extent || canvas.height !== extent) { canvas.width = extent; canvas.height = extent; }
     const buffer = canvas.getContext('2d')!;
@@ -907,11 +1062,7 @@ export class Player extends Entities {
     ctx.drawImage(canvas, centerX - extent / 2 - offsetX, centerY - extent / 2 - offsetY);
   }
 
-  drawVisibilitySilhouette(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
-    this.drawModel(ctx, this.x + this.size / 2 - offsetX, this.y + this.size / 2 - offsetY, true);
-  }
-
-  private drawModel(ctx: CanvasRenderingContext2D, centerX: number, centerY: number, silhouette = false): void {
+  private drawModel(ctx: CanvasRenderingContext2D, centerX: number, centerY: number): void {
     ctx.save();
 
     // Visual breathing only: getCollider() uses size and never this render scale.
@@ -929,33 +1080,40 @@ export class Player extends Entities {
     const muzzle = this.getMuzzlePosition();
     const dx = muzzle.x - this.x - s / 2, dy = muzzle.y - this.y - s / 2;
     const hand = { x: dx * c + dy * sn, y: -dx * sn + dy * c };
+    // Running sway: the hands swing front and back in opposite phase (alternating),
+    // while the head sways laterally at a smaller amplitude; hands only while lowered.
+    const sway = s * this.runSwayAmplitude / 100 * this.runSwayWeight;
+    const headSway = Math.sin(this.runSwayPhase) * sway * RUN_SWAY_HEAD_SCALE;
+    const handSway = Math.sin(this.runSwayPhase - RUN_SWAY_HAND_LAG) * sway
+      * RUN_SWAY_HAND_SCALE * (1 - this.armLift);
     const disc = (x: number, y: number, r: number, color: string | CanvasGradient) => {
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = silhouette ? 'white' : color; ctx.fill();
+      ctx.fillStyle = color; ctx.fill();
     };
     const capsule = (ax: number, ay: number, bx: number, by: number, width: number, color: string) => {
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
-      ctx.strokeStyle = silhouette ? 'white' : color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke();
+      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke();
     };
     // Rounded shoulders, sleeves and hands sit below the head in the top-down view.
     const leftX = s * .04 * (1 - this.armLift) + hand.x * .67 * this.armLift;
     const leftY = -s * .46 * (1 - this.armLift) + (hand.y - s * .13) * this.armLift;
-    capsule(0, -s * .31, leftX, leftY, s * .22, '#183c4a');
-    capsule(0, s * .31, hand.x, hand.y, s * .22, '#183c4a');
-    capsule(s * .02, -s * .31, leftX, leftY, s * .15, '#4d8999');
-    capsule(s * .02, s * .31, hand.x, hand.y, s * .15, '#4d8999');
-    disc(leftX, leftY, s * .085, '#e5ccb0');
-    disc(hand.x, hand.y, s * .085, '#eed7b9');
+    capsule(0, -s * .31, leftX + handSway, leftY, s * .22, '#183c4a');
+    capsule(0, s * .31, hand.x - handSway, hand.y, s * .22, '#183c4a');
+    capsule(s * .02, -s * .31, leftX + handSway, leftY, s * .15, '#4d8999');
+    capsule(s * .02, s * .31, hand.x - handSway, hand.y, s * .15, '#4d8999');
+    disc(leftX + handSway, leftY, s * .085, '#e5ccb0');
+    disc(hand.x - handSway, hand.y, s * .085, '#eed7b9');
     disc(-s * .055, 0, s * .45, '#102c39');
-    const body = silhouette ? 'white' : ctx.createLinearGradient(-s * .4, s * .3, s * .35, -s * .3);
-    if (typeof body !== 'string') { body.addColorStop(0, '#245362'); body.addColorStop(1, '#73b4bf'); }
+    const body = ctx.createLinearGradient(-s * .4, s * .3, s * .35, -s * .3);
+    body.addColorStop(0, '#245362'); body.addColorStop(1, '#73b4bf');
     disc(0, 0, s * .405, body);
     disc(s * .055, 0, s * .29, '#23404a');
-    const head = silhouette ? 'white' : ctx.createRadialGradient(s * .16, -s * .12, s * .015, s * .09, 0, s * .28);
-    if (typeof head !== 'string') { head.addColorStop(0, '#fff1d6'); head.addColorStop(.65, '#ead3b2'); head.addColorStop(1, '#b49a7a'); }
-    disc(s * .09, 0, s * .265, head);
+    const head = ctx.createRadialGradient(
+      s * .16, -s * .12 + headSway, s * .015, s * .09, headSway, s * .28);
+    head.addColorStop(0, '#fff1d6'); head.addColorStop(.65, '#ead3b2'); head.addColorStop(1, '#b49a7a');
+    disc(s * .09, headSway, s * .265, head);
     // A small crown highlight indicates facing without drawing a face.
-    capsule(s * .22, -s * .08, s * .27, s * .025, s * .035, '#fff4dd');
+    capsule(s * .22, -s * .08 + headSway, s * .27, s * .025 + headSway, s * .035, '#fff4dd');
 
     ctx.restore();
   }
@@ -963,7 +1121,7 @@ export class Player extends Entities {
   /** Screen-space overlays are drawn after lighting. */
   drawUI(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
     this.drawWadingIndicator(ctx, offsetX, offsetY);
-    this.drawCooldownRing(ctx, offsetX, offsetY);
+    this.drawReloadRing(ctx, offsetX, offsetY);
     ctx.save();
     const { healthX: x, healthY: y } = this.getOverlayLayout(offsetX, offsetY);
     ctx.fillStyle = "#181d24";

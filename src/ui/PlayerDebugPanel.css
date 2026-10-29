@@ -3,8 +3,10 @@
   --debug-border: #405366;
   --debug-text: #e5edf5;
   --debug-muted: #a9bdd0;
+  /* 让开 canvas 右上角的 HUD：FPS 基线 24px、坐标基线 46px（均含 10px 边距） */
+  --debug-top: 58px;
   position: fixed;
-  top: 14px;
+  top: var(--debug-top);
   right: 14px;
   z-index: 10;
   color: var(--debug-text);
@@ -28,7 +30,7 @@
 .player-debug aside {
   width: 340px;
   max-width: calc(100vw - 28px);
-  max-height: calc(100dvh - 75px);
+  max-height: calc(100dvh - var(--debug-top) - 61px);
   display: flex;
   flex-direction: column;
   background: var(--debug-bg);
@@ -50,6 +52,8 @@
   font: 13px/1.5 Consolas, monospace; font-variant-numeric: tabular-nums;
 }
 .debug-field input:disabled { opacity: .5; }
+.debug-check { grid-template-columns: minmax(0, 1fr) auto; }
+.debug-check input { width: 18px; height: 18px; padding: 0; justify-self: end; accent-color: #ffce6b; }
 .debug-field input[aria-invalid="true"] { border-color: #ff9c94; }
 .debug-unit { font-size: 11px; color: var(--debug-muted); }
 .debug-error, .debug-effective { grid-column: 1 / -1; font-size: 11px; }
@@ -63,17 +67,17 @@
 .debug-meter progress::-moz-progress-bar { background: #79e2a0; }
 .debug-meter-stamina progress::-webkit-progress-value { background: #75dfe9; }
 .debug-meter-stamina progress::-moz-progress-bar { background: #75dfe9; }
-.debug-meter-heat progress::-webkit-progress-value, .debug-meter-cooldown progress::-webkit-progress-value { background: #ff9a77; }
-.debug-meter-heat progress::-moz-progress-bar, .debug-meter-cooldown progress::-moz-progress-bar { background: #ff9a77; }
+.debug-meter-ammo progress::-webkit-progress-value, .debug-meter-reload progress::-webkit-progress-value { background: #ffce6b; }
+.debug-meter-ammo progress::-moz-progress-bar, .debug-meter-reload progress::-moz-progress-bar { background: #ffce6b; }
 .player-debug[data-exhausted="true"] .debug-meter-stamina { opacity: .55; }
 .debug-meter output { white-space: nowrap; font: 11px Consolas, monospace; color: var(--debug-muted); }
 .debug-derived { color: var(--debug-muted); font-size: 12px; margin: 6px 0 12px; }
 .debug-derived output { color: #b7e7ee; }
 .debug-status { font-size: 11px; color: #79e2a0; }
-.debug-status.overheated { color: #ff9a77; }
+.debug-status.reloading { color: #ffce6b; }
 .player-debug footer { flex-shrink: 0; padding: 12px 16px; border-top: 1px solid var(--debug-border); }
 .player-debug footer small { display: block; color: var(--debug-muted); margin-top: 7px; font-size: 11px; }
 @media (max-width: 400px) {
-  .player-debug { top: 8px; right: 8px; }
-  .player-debug aside { max-width: calc(100vw - 16px); max-height: calc(100dvh - 63px); }
+  .player-debug { right: 8px; }
+  .player-debug aside { max-width: calc(100vw - 16px); max-height: calc(100dvh - var(--debug-top) - 55px); }
 }

@@ -61,14 +61,15 @@ try {
         },
         stats() {
           const p = scene.player;
-          return { x: p.x, y: p.y, speed: p.getVelocity().length(), stamina: p.getStamina(), sprinting: p.getIsSprinting(), heat: p.getHeatPercentage(), overheated: p.getIsOverheated() };
+          return { x: p.x, y: p.y, speed: p.getVelocity().length(), stamina: p.getStamina(), sprinting: p.getIsSprinting(),
+            ammo: p.getMagazineAmmo(), reloading: p.getIsReloading(), reloadProgress: p.getReloadProgress() };
         },
         pixel(x, y) { return [...game.renderer.ctx.getImageData(Math.floor((x + .5) * game.renderer.width / scene.worldCanvas.width), Math.floor((y + .5) * game.renderer.height / scene.worldCanvas.height), 1, 1).data]; },
         ring(angle) {
           const p = scene.player;
-          const { heatX, heatY } = p.getOverlayLayout(scene.camera.x, scene.camera.y);
+          const { reloadX, reloadY } = p.getOverlayLayout(scene.camera.x, scene.camera.y);
           // A thin circle is filtered by the existing 0.85 world zoom; sample its local footprint.
-          const samples = [-1, 0, 1].flatMap(dx => [-1, 0, 1].map(dy => this.pixel(heatX + 11 * Math.cos(angle) + dx, heatY + 11 * Math.sin(angle) + dy)));
+          const samples = [-1, 0, 1].flatMap(dx => [-1, 0, 1].map(dy => this.pixel(reloadX + 11 * Math.cos(angle) + dx, reloadY + 11 * Math.sin(angle) + dy)));
           return samples.sort((a, b) => Math.max(...b.slice(0, 3)) - Math.max(...a.slice(0, 3)))[0];
         },
       };
@@ -127,33 +128,34 @@ try {
     console.log(`DPR ${dpr} taps: ${taps.map(tap => `${tap.duration * 1000}ms=${tap.distance.toFixed(2)}px`).join(', ')}.`);
 
     for (const [ox, oy] of [[0, 0], [37.25, 19.75]]) {
-      const heat = await page.evaluate(([ox, oy]) => {
-        const t = movementTest; t.reset(); t.advance(1.4, ['MouseLeft']);
-        t.scene.camera.x = ox; t.scene.camera.y = oy; t.render();
+      const ring = await page.evaluate(([ox, oy]) => {
+        const t = movementTest; t.reset();
         const p = t.scene.player;
-        return { stats: t.stats(), right: t.ring(0), bottom: t.ring(Math.PI / 2),
+        p.setDebugState({ magazineAmmo: 3 });
+        p.requestReload();
+        t.tick(0.28); // 1.4s 换弹的 20%：进度弧只走过右上方向
+        t.scene.camera.x = ox; t.scene.camera.y = oy; t.render();
+        return { stats: t.stats(), bright: t.ring(-Math.PI / 4), dark: t.ring(Math.PI / 2),
           stamina: t.pixel(p.x - ox + 20, p.getOverlayLayout(ox, oy).healthY + 12) };
       }, [ox, oy]);
-      assert.ok(heat.stats.heat > 0.25 && heat.stats.heat < 0.5);
-      assert.ok(Math.max(...heat.right.slice(0, 3)) > 140, 'clockwise heat arc covers the right quarter');
-      assert.ok(Math.max(...heat.bottom.slice(0, 3)) < 110, 'heat arc has not reached the bottom');
-      assert.deepEqual(heat.stamina, [117, 223, 233, 255], 'stamina stays bright after lighting');
+      assert.equal(ring.stats.reloading, true, 'the ring only appears while reloading');
+      assert.ok(ring.stats.reloadProgress > 0.15 && ring.stats.reloadProgress < 0.25, `reload progress: ${ring.stats.reloadProgress}`);
+      assert.ok(Math.max(...ring.bright.slice(0, 3)) > 140, 'the reload arc fills clockwise from the top');
+      assert.ok(Math.max(...ring.dark.slice(0, 3)) < 110, 'the reload arc has not reached the bottom');
+      assert.deepEqual(ring.stamina, [117, 223, 233, 255], 'stamina stays bright after lighting');
       cases++;
     }
-    if (dpr === 1) await page.screenshot({ path: join(output, 'movement-heat.png'), clip: { x: 100, y: 150, width: 340, height: 260 } });
-    const overheat = await page.evaluate(() => {
-      const t = movementTest; t.reset();
-      for (let i = 0; i < 300 && !t.scene.player.getIsOverheated(); i++) t.advance(1 / 60, ['MouseLeft']);
-      t.render(); return { stats: t.stats(), right: t.ring(0) };
+    if (dpr === 1) await page.screenshot({ path: join(output, 'movement-reload.png'), clip: { x: 100, y: 150, width: 340, height: 260 } });
+    const refilled = await page.evaluate(() => {
+      const t = movementTest; t.advance(1.2);
+      const p = t.scene.player;
+      return { stats: t.stats(), arc: t.ring(Math.PI / 4), ammo: p.getMagazineAmmo(), chambered: p.getChambered() };
     });
-    assert.equal(overheat.stats.overheated, true); assert.ok(overheat.right[0] > 220 && overheat.right[1] < 150);
-    const cooled = await page.evaluate(() => {
-      const t = movementTest; t.advance(0.5);
-      return { filled: t.ring(Math.PI / 4), empty: t.ring(3 * Math.PI / 4) };
-    });
-    assert.ok(cooled.filled[0] > 220); assert.ok(Math.max(...cooled.empty.slice(0, 3)) < 110, 'cooldown arc shrinks clockwise from the top');
-    if (dpr === 1) await page.screenshot({ path: join(output, 'movement-overheat.png'), clip: { x: 100, y: 150, width: 340, height: 260 } });
-    assert.equal(await page.evaluate(() => { movementTest.advance(1); return movementTest.scene.player.cooldownBarAlpha; }), 0);
+    assert.equal(refilled.stats.reloading, false);
+    assert.equal(refilled.ammo, 6); assert.equal(refilled.chambered, true);
+    assert.equal(refilled.stats.reloadProgress, 0);
+    assert.ok(Math.max(...refilled.arc.slice(0, 3)) < 110, 'the finished reload leaves no amber arc');
+    assert.equal(await page.evaluate(() => { movementTest.advance(1); return movementTest.scene.player.reloadBarAlpha; }), 0);
     const exhausted = await page.evaluate(() => {
       const t = movementTest; t.reset(); t.advance(4, ['d', 'Shift']);
       t.scene.player.x = 200; t.scene.player.y = 250; t.render();
@@ -166,5 +168,5 @@ try {
     assert.equal(errors.length, 0, errors.join('\n'));
     await context.close();
   }
-  console.log(`Browser movement regression: ${cases} DPR/camera cases, real Shift input, heat/cooldown arcs, fade-out and exhaustion passed.`);
+  console.log(`Browser movement regression: ${cases} DPR/camera cases, real Shift input, reload arcs, fade-out and exhaustion passed.`);
 } finally { await browser.close(); }

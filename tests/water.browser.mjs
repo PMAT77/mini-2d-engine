@@ -52,7 +52,7 @@ async function checkWading(page){
     }
     camera=[.375,.625];const bounds=JSON.stringify(p.getCollider().bounds);
     for(const angle of [0,Math.PI/4,Math.PI,Math.PI*1.5]){
-      p.currentRotation=angle;p.aimAngle=angle;p.aimVisible=true;p.cooldownBarAlpha=1;render();
+      p.currentRotation=angle;p.aimAngle=angle;p.aimVisible=true;p.reloadBarAlpha=1;render();
       expect(pixel(100,100)[3]===255,'rotated head remains intact');expect(JSON.stringify(p.getCollider().bounds)===bounds,'render rotation must not alter the circular collider');
       const {debuffX,debuffY}=p.getOverlayLayout(...camera);color(pixel(debuffX+camera[0],debuffY+camera[1]-6),arrowColors.deep_water,'rotation does not rotate the debuff');
     }
@@ -82,37 +82,43 @@ async function checkBulletVisuals(page){
     const tint=(type,base=[255,255,0])=>{const hex=TILE_TYPES[type].color;return base.map((v,i)=>Math.round(v*.65+parseInt(hex.slice(i*2+1,i*2+3),16)*.35));};
     const color=(actual,rgb,message)=>expect(actual[3]===255&&rgb.every((v,i)=>Math.abs(v-actual[i])<=4),`${message}: ${actual} vs ${rgb}`);
     const clear=()=>{ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);ctx.setTransform(dpr,0,0,dpr,0,0);};
-    // Masking also applies to dry-origin bullets without altering their speed.
+    // Masking also applies to dry-origin bullets without altering their speed; the visual is a 6px line ending at the centre.
     const bullet=new Bullet(new Vector2(100,100),new Vector2(800,0));
     for(const type of ['shallow_water','water','deep_water','ultra_deep_water']){
       map.tiles.forEach(row=>row.fill(type));clear();bullet.draw(ctx,0,0,map);
-      color(pixel(100,100),tint(type),`${type} bullet tint`);
-      expect(pixel(107,100)[3]===0,'water must not color outside the circle');
+      color(pixel(97,100),tint(type,[255,255,255]),`${type} bullet tint`);
+      expect(pixel(107,100)[3]===0,'water must not color outside the drawn trail');
     }
+    // A moved bullet keeps both trail endpoints, so one line can straddle two depths.
+    const halved=new Bullet(new Vector2(60,100),new Vector2(800,0));
+    halved.update(.2);
     map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<2?'default':'deep_water'));
-    clear();bullet.draw(ctx,0,0,map);color(pixel(97,100),[255,255,0],'dry half');color(pixel(102,100),tint('deep_water'),'wet half');
+    clear();halved.draw(ctx,0,0,map);color(pixel(95,100),[255,255,255],'dry half');color(pixel(105,100),tint('deep_water'),'wet half');
     map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<2?'shallow_water':'deep_water'));
-    clear();bullet.draw(ctx,0,0,map);color(pixel(97,100),tint('shallow_water'),'shallow half');color(pixel(102,100),tint('deep_water'),'deep half');
+    clear();halved.draw(ctx,0,0,map);color(pixel(95,100),tint('shallow_water'),'shallow half');color(pixel(105,100),tint('deep_water'),'deep half');
     map.tiles.forEach(row=>row.fill('water'));
-    for(const [x,y] of [[.375,.625],[13.25,7.75]]){clear();bullet.draw(ctx,x,y,map);color(pixel(100-x,100-y),tint('water'),'fractional camera and shake');}
-    map.tiles.forEach(row=>row.fill('default'));clear();bullet.draw(ctx,0,0,map);color(pixel(100,100),[255,255,0],'land restores the original color');
-    map.tiles.forEach(row=>row.fill('deep_water'));bullet.setColor('#ffffff');clear();bullet.draw(ctx,0,0,map);color(pixel(100,100),tint('deep_water',[255,255,255]),'custom bullet color');
-    clear();bullet.draw(ctx);color(pixel(100,100),[255,255,255],'drawing without a map remains compatible');
+    for(const [x,y] of [[.375,.625],[13.25,7.75]]){clear();bullet.draw(ctx,x,y,map);color(pixel(97-x,100-y),tint('water'),'fractional camera and shake');}
+    map.tiles.forEach(row=>row.fill('default'));clear();bullet.draw(ctx,0,0,map);color(pixel(97,100),[255,255,255],'land leaves the bullet color untouched');
+    map.tiles.forEach(row=>row.fill('deep_water'));bullet.setColor('#ff5a5a');clear();bullet.draw(ctx,0,0,map);color(pixel(97,100),tint('deep_water',[255,90,90]),'custom bullet color');
+    bullet.setColor('#ffffff');clear();bullet.draw(ctx);color(pixel(97,100),[255,255,255],'drawing without a map remains compatible');
     const curved=new TileMap(100,100,{seed:8351});curved.tiles.forEach(row=>row.fill('default'));
     const lake=curved.water.lakes[0],cy=lake.center.y*50,seen=new Set();
     for(let x=lake.bounds.x*50;x<lake.center.x*50;x+=3){
       const type=curved.water.getTypeAt(x,cy,50);if(!type||seen.has(type))continue;
       if(Math.abs(curved.getShapeSpeedFactor(circleCollider(x,cy,5))-TILE_TYPES[type].speedFactor)>1e-7)continue;
       const b=new Bullet(new Vector2(x,cy),new Vector2(800,0));clear();b.draw(ctx,x-100,cy-100,curved);
-      color(pixel(100,100),tint(type),`curved lake ${type}`);seen.add(type);
+      color(pixel(97,100),tint(type,[255,255,255]),`curved lake ${type}`);seen.add(type);
     }
     expect(seen.size===4,'generated lake mask must include all four depths');
     const particles=new ParticleSystem(),stopped=new Bullet(new Vector2(100,100),new Vector2(100,0),10,particles,true);
     stopped.update(.625,map);expect(stopped.getIsDestroyed(),'drag must remove the bullet');
     const stopX=stopped.getPosition().x+5;
     clear();stopped.draw(ctx,0,0,map);expect(pixel(stopX,100)[3]===0,'stopped bullet is invisible');
-    particles.draw(ctx,0,0);color(pixel(stopX,100),[255,255,255],'white annihilation particles render at the stop position');
-    particles.update(.3);clear();particles.draw(ctx,0,0);expect(pixel(stopX,100)[3]===0,'annihilation particles expire');
+    particles.draw(ctx,0,0);
+    const smoke=[...Array(9)].map((_,i)=>pixel(stopX-2+(i%3)*2,100-2+Math.floor(i/3)*2)).filter(p=>p[3]===255);
+    expect(smoke.length>0,'white-grey smoke particles render at the stop position');
+    expect(smoke.every(p=>p[0]===p[1]&&p[1]===p[2]&&p[0]>=176),`smoke keeps the grey palette: ${JSON.stringify(smoke)}`);
+    particles.update(.4);clear();particles.draw(ctx,0,0);expect(pixel(stopX,100)[3]===0,'annihilation particles expire');
     return checks;
   });
 }
@@ -132,8 +138,8 @@ async function checkWaterBullets(page,dpr){
       scene.map=new TileMap(30,24,{generateWater:false});
       scene.map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<5?'default':col===5?'shallow_water':col===6?'water':col===7?'deep_water':'ultra_deep_water'));
       scene.pickupItems=[];scene.goldPickups=[];scene.particleSystem.clear();
-      p.bullets=[];p.fireCooldown=0;p.isOverheated=false;p.shootingTimeRemaining=10;
-      p.applyConfig({shooting:{fireRate:5,maxShootingTime:10}});
+      p.bullets=[];p.fireCooldown=0;p.setDebugState({magazineAmmo:p.getMagazineSize(),chambered:true});
+      p.applyConfig({shooting:{fireRate:5,reloadDuration:.02}});
       p.x=(wet?245:225)-24.5;p.y=500-24.5;p.velocity.set(0,0);
       p.update(0,{isKeyDown:()=>false},scene.map);scene.camera.reset();
       window.waterBulletRun={original:p.update,originalExplosion:scene.particleSystem.createExplosion,bursts:[],bullet:undefined,samples:[],frames:0,wet,originCoverage:p.terrainWaterCoverage.fraction,depths:new Set()};
@@ -169,14 +175,14 @@ async function checkWaterBullets(page,dpr){
     for(let i=0;i<result.samples.length;i++){
       const sample=result.samples[i];
       if(wet){if(i)assert.ok(sample.speed<=result.samples[i-1].speed+1e-7);}
-      else assert.ok(Math.abs(sample.speed-800)<1e-7);
+      else assert.ok(Math.abs(sample.speed-2600)<1e-7);
     }
     if(wet){
-      assert.ok(result.samples.at(-1).speed<800,'water-origin bullet must lose speed while traversing depth bands');
+      assert.ok(result.samples.at(-1).speed<2600,'water-origin bullet must lose speed while traversing depth bands');
       await page.waitForFunction(()=>waterBulletRun.bullet.getIsDestroyed());
       const stopped=await page.evaluate(()=>({speed:waterBulletRun.bullet.velocity.length(),remaining:waterBulletGame.sceneManager.getCurrentScene().player.getBullets().length,bursts:waterBulletRun.bursts}));
       assert.equal(stopped.speed,0);assert.equal(stopped.remaining,0);
-      assert.equal(stopped.bursts.length,1);assert.equal(stopped.bursts[0].count,4);assert.deepEqual(stopped.bursts[0].colors,['#ffffff']);
+      assert.equal(stopped.bursts.length,1);assert.equal(stopped.bursts[0].count,4);assert.deepEqual(stopped.bursts[0].colors,['#ffffff', '#e8e8e8', '#cfcfcf', '#b5b5b5']);
       await page.screenshot({path:`${output}/water-bullet-annihilation-dpr${dpr}.png`});
     }
     measurements.push(result);

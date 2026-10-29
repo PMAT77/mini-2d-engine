@@ -90,9 +90,9 @@ test('independent stats and permanent effects retain their own lifetimes', () =>
   const p = new Player(0, 0), manager = new ModifierManager(p);
   manager.addModifier({ stat: 'maxSpeed', value: 1, duration: 1, isMultiplier: true, description: '' });
   manager.addModifier({ stat: 'bulletSpeed', value: 1, duration: 0, isMultiplier: true, description: '' });
-  manager.update(2); assert.equal(p.getMaxSpeed(), 200); assert.equal(p.getBulletSpeed(), 1600);
+  manager.update(2); assert.equal(p.getMaxSpeed(), 200); assert.equal(p.getBulletSpeed(), 5200);
   assert.throws(() => manager.addModifier({ stat: 'damage', value: NaN, duration: 1 }), /Invalid/);
-  manager.clearAllModifiers(); assert.equal(p.getBulletSpeed(), 800);
+  manager.clearAllModifiers(); assert.equal(p.getBulletSpeed(), 2600);
 });
 test('health clamps to 0..100 and a health pickup heals without adding a modifier', () => {
   const p = new Player(0, 0); assert.equal(p.getHealth(), 100);
@@ -117,10 +117,11 @@ test('pickup descriptions match their actual randomly selected multiplier', () =
     assert.ok(effect.description.includes(`${Math.round(effect.value * 100)}%`));
   }
 });
-test('configuration validates atomically and applies rotation and heat capacity', () => {
+test('configuration validates atomically and applies rotation and magazine capacity', () => {
   const p = new Player(0, 0);
-  p.applyConfig({ base: { rotationSpeed: 1, rotationStrategy: 'ccw' }, shooting: { maxShootingTime: 7 } });
-  assert.equal(p.rotationSpeed, 1); assert.equal(p.rotationStrategy, 'ccw'); assert.equal(p.getHeatPercentage(), 0);
+  p.applyConfig({ base: { rotationSpeed: 1, rotationStrategy: 'ccw' }, shooting: { magazineSize: 7 } });
+  assert.equal(p.rotationSpeed, 1); assert.equal(p.rotationStrategy, 'ccw'); assert.equal(p.getMagazineAmmo(), 6);
+  assert.equal(p.getMagazineSize(), 7);
   for (const config of [null, [], { base: { size: 0 } }, { shooting: { fireRate: -1 } }, { base: { rotationStrategy: 'x' } }, { ui: { fadeSpeed: Infinity } }, { unknown: {} }]) assert.throws(() => parsePlayerConfig(config));
   assert.throws(() => p.applyConfig({ base: { maxSpeed: 700 }, shooting: { fireRate: 0 } }));
   assert.equal(p.getMaxSpeed(), 200);

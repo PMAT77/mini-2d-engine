@@ -30,14 +30,16 @@
   },
   "animation": {
     "breathingAmplitude": 3,
-    "breathingSpeed": 2
+    "breathingSpeed": 2,
+    "runSwayAmplitude": 2.5,
+    "runSwaySpeed": 10
   },
   "shooting": {
     "damage": 10,
     "fireRate": 0.2,
-    "bulletSpeed": 800,
-    "maxShootingTime": 3.5,
-    "maxOverheatCooldownTime": 1,
+    "bulletSpeed": 2600,
+    "magazineSize": 6,
+    "reloadDuration": 1.4,
     "maxRange": 1000,
     "spreadHorizontal": 0.6,
     "spreadVertical": 0.4,

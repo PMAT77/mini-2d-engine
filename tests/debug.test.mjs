@@ -25,7 +25,7 @@ test('debug configuration keeps defaults, owns snapshots and rejects invalid pat
   }
   assert.equal(player.getMaxSpeed(), 200); assert.equal(player.getFireRate(), 0.2);
   const before = player.getDebugState();
-  for (const patch of [{ health: 20, stamina: NaN }, { health: 20, unknown: 1 }, { overheatCooldownRemaining: 0.5 }, null, []]) {
+  for (const patch of [{ health: 20, stamina: NaN }, { health: 20, unknown: 1 }, { chambered: 1 }, { reloadProgress: NaN }, null, []]) {
     assert.throws(() => player.setDebugState(patch)); assert.deepEqual(player.getDebugState(), before);
   }
   assert.throws(() => parsePlayerConfig({ shooting: { damage: '20' } }));
@@ -34,32 +34,34 @@ test('debug configuration keeps defaults, owns snapshots and rejects invalid pat
 test('configured damage affects new bullets, preserves explicit damage and stacks with existing boosts', () => {
   const player = new Player(0, 0), dir = new Vector2(1, 0);
   player.shoot(dir);
-  assert.equal(player.getBullets()[0].getDamage(), 10);
+  const first = player.getBullets().at(-1);
+  assert.equal(first.getDamage(), 10);
   player.applyConfig({ shooting: { damage: 25, fireRate: 0.1 } });
   player.addModifier('damage', 0.5, 0, true);
   player.update(0.2, idle); player.shoot(dir);
-  assert.equal(player.getBullets()[0].getDamage(), 10);
-  assert.equal(player.getBullets()[1].getDamage(), 37.5);
+  assert.equal(first.getDamage(), 10);
+  assert.equal(player.getBullets().at(-1).getDamage(), 37.5);
   player.update(0.2, idle); player.shoot(dir, 6);
-  assert.equal(player.getBullets()[2].getDamage(), 9);
+  assert.equal(player.getBullets().at(-1).getDamage(), 9);
   assert.equal(player.getConfigSnapshot().shooting.damage, 25);
   assert.equal(player.getDebugState().effectiveDamage, 37.5);
 });
 
 test('resource capacity edits preserve fractions and direct current-value edits clamp to capacity', () => {
   const player = new Player(0, 0);
-  player.setDebugState({ health: 25, stamina: 40, heatPercentage: 30 });
-  player.applyConfig({ base: { maxHealth: 200 }, sprint: { maxStamina: 150 }, shooting: { maxShootingTime: 7 } });
-  near(player.getHealth(), 50); near(player.getStamina(), 60); near(player.getDebugState().heatPercentage, 30);
+  player.setDebugState({ health: 25, stamina: 40, magazineAmmo: 3, chambered: false, reloadProgress: 50 });
+  player.applyConfig({ base: { maxHealth: 200 }, sprint: { maxStamina: 150 }, shooting: { reloadDuration: 4 } });
+  near(player.getHealth(), 50); near(player.getStamina(), 60); near(player.getDebugState().reloadProgress, 50);
   player.setDebugState({ health: 999, stamina: 999 });
   assert.equal(player.getHealth(), 200); assert.equal(player.getStamina(), 150);
   player.setDebugState({ health: -1 }); assert.equal(player.getHealth(), 0);
-  player.setDebugState({ heatPercentage: 100 }); player.update(0.25, idle);
-  player.applyConfig({ shooting: { maxOverheatCooldownTime: 2 } });
-  near(player.getDebugState().overheatCooldownRemaining, 1.5);
+  player.setDebugState({ magazineAmmo: 99 }); assert.equal(player.getMagazineAmmo(), 6);
+  assert.equal(player.getIsReloading(), false);
+  player.setDebugState({ magazineAmmo: 2 }); assert.equal(player.getMagazineAmmo(), 2);
+  player.setDebugState({ chambered: false }); assert.equal(player.getChambered(), false);
 });
 
-test('zero stamina exhausts, deliberate refill unlocks sprint and overheating can be triggered or cleared', () => {
+test('zero stamina exhausts, deliberate refill unlocks sprint and an empty magazine blocks fire until reload', () => {
   const player = new Player(0, 0);
   player.setDebugState({ stamina: 0 });
   assert.equal(player.getDebugState().exhausted, true);
@@ -69,30 +71,37 @@ test('zero stamina exhausts, deliberate refill unlocks sprint and overheating ca
   assert.equal(player.getDebugState().exhausted, false);
   player.update(0.1, { isKeyDown: key => ['Shift', 'd'].includes(key) });
   assert.equal(player.getIsSprinting(), true);
-  player.setDebugState({ heatPercentage: 100 });
-  assert.equal(player.getIsOverheated(), true);
-  assert.throws(() => player.setDebugState({ health: 12, heatPercentage: 50, overheatCooldownRemaining: 0.5 }));
-  assert.equal(player.getHealth(), 100); assert.equal(player.getIsOverheated(), true);
+  player.setDebugState({ magazineAmmo: 0, chambered: false });
+  assert.throws(() => player.setDebugState({ health: 12, chambered: 1 }));
+  assert.equal(player.getHealth(), 100);
   player.shoot(new Vector2(1, 0)); assert.equal(player.getBullets().length, 0);
-  player.setDebugState({ overheatCooldownRemaining: 999 });
-  assert.equal(player.getDebugState().overheatCooldownRemaining, 1);
-  player.setDebugState({ overheatCooldownRemaining: 0 });
-  assert.equal(player.getIsOverheated(), false); assert.equal(player.getHeatPercentage(), 0);
+  // 自动换弹默认关闭：空弹匣时按开火没有弹药，只能按 R 或勾选调试开关。
+  player.update(0.01, idle);
+  assert.equal(player.getIsReloading(), false);
+  player.setAutoReload(true);
+  player.update(0.01, idle);
+  assert.equal(player.getIsReloading(), true);
+  player.shoot(new Vector2(1, 0)); assert.equal(player.getBullets().length, 0);
+  player.setDebugState({ reloadProgress: 100 });
+  assert.equal(player.getMagazineAmmo(), 6); assert.equal(player.getChambered(), true);
+  assert.equal(player.getIsReloading(), false);
+  player.update(0.01, idle);
   player.shoot(new Vector2(1, 0)); assert.equal(player.getBullets().length, 1);
-  player.setDebugState({ heatPercentage: 100 }); player.setDebugState({ heatPercentage: 25 });
-  assert.equal(player.getIsOverheated(), false); near(player.getDebugState().heatPercentage, 25);
+  player.setDebugState({ magazineAmmo: 6, chambered: true });
+  assert.equal(player.getIsReloading(), false);
 });
 
 test('restoring a detached initial configuration refills resources without removing pickup modifiers', () => {
   const player = new Player(0, 0), initial = player.getConfigSnapshot();
   player.addModifier('maxSpeed', 0.5, 0, true); player.addModifier('damage', 1, 0, true);
   player.applyConfig({ base: { maxSpeed: 600, maxHealth: 50 }, shooting: { damage: 40 } });
-  player.setDebugState({ health: 0, stamina: 0, heatPercentage: 100 });
+  player.setDebugState({ health: 0, stamina: 0, magazineAmmo: 0, chambered: false });
   player.applyConfig(initial);
-  player.setDebugState({ health: player.getMaxHealth(), stamina: player.getMaxStamina(), heatPercentage: 0 });
+  player.setDebugState({ health: player.getMaxHealth(), stamina: player.getMaxStamina(),
+    magazineAmmo: player.getMagazineSize(), chambered: true });
   assert.deepEqual(player.getConfigSnapshot(), initial);
   assert.equal(player.getHealth(), 100); assert.equal(player.getStamina(), 100);
-  assert.equal(player.getIsOverheated(), false); assert.equal(player.getDebugState().exhausted, false);
+  assert.equal(player.getIsReloading(), false); assert.equal(player.getDebugState().exhausted, false);
   assert.equal(player.getMaxSpeed(), 300); assert.equal(player.getDebugState().effectiveDamage, 20);
 });
 

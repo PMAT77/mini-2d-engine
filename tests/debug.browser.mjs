@@ -58,6 +58,10 @@ try {
     // The preceding fresh keydown toggles closed once; repeating leaves it closed.
     assert.equal(await panel.isVisible(), false); await page.getByRole('button', { name: '调试 · F2' }).click();
 
+    assert.equal(await field('light.radius').inputValue(), '100', 'glow radius defaults to 100');
+    assert.equal(await field('light.intensity').inputValue(), '0.5', 'glow intensity defaults to 0.5');
+    assert.equal(await field('flashlight.intensity').inputValue(), '0.8', 'flashlight intensity defaults to 0.8');
+
     await edit('base.maxHealth', 200); await edit('health', 45);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getHealth()), 45);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getMaxHealth()), 200);
@@ -128,16 +132,30 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.getDebugState().exhausted), false);
     await edit('sprint.drainPerSecond', 50); await edit('sprint.regenPerSecond', 20);
     await edit('sprint.regenDelay', 0.3); await edit('sprint.restartThreshold', 0.25);
-    await edit('shooting.maxShootingTime', 7); await edit('shooting.maxOverheatCooldownTime', 2);
-    await edit('heatPercentage', 100);
-    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsOverheated()), true);
-    assert.equal(await field('overheatCooldownRemaining').isEnabled(), true);
-    await edit('overheatCooldownRemaining', 1); await page.evaluate(() => debugTest.tick(0.25));
-    assert.equal(await page.evaluate(() => debugTest.scene.player.getDebugState().overheatCooldownRemaining), 0.75);
-    await edit('overheatCooldownRemaining', 0);
-    assert.equal(await field('overheatCooldownRemaining').isDisabled(), true);
-    await edit('heatPercentage', 100); await page.getByRole('button', { name: '清除过热', exact: true }).click();
-    assert.equal(await page.evaluate(() => debugTest.scene.player.getHeatPercentage()), 0);
+    await edit('shooting.magazineSize', 8); await edit('shooting.reloadDuration', 2);
+    await edit('magazineAmmo', 0); await edit('chambered', 0);
+    await edit('reloadProgress', 50);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), true);
+    await page.evaluate(() => debugTest.tick(0.5));
+    assert.ok(Math.abs(await page.evaluate(() => debugTest.scene.player.getReloadProgress()) - .75) < 1e-6);
+    await page.getByRole('button', { name: '打空弹匣', exact: true }).click();
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getMagazineAmmo()), 0);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), false);
+    await page.getByRole('button', { name: '立即换弹', exact: true }).click();
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), true);
+    await page.getByRole('button', { name: '补满弹匣', exact: true }).click();
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getMagazineAmmo()), 8);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getChambered()), true);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), false);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getAutoReload()), false);
+    await field('autoReload').check();
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getAutoReload()), true);
+    await page.getByRole('button', { name: '打空弹匣', exact: true }).click();
+    await page.evaluate(() => debugTest.tick(0.01));
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), true);
+    await field('autoReload').uncheck();
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getAutoReload()), false);
+    await page.getByRole('button', { name: '补满弹匣', exact: true }).click();
 
     await edit('light.radius', 80); await edit('light.intensity', 1);
     const smallLight = await page.evaluate(() => debugTest.brightness());
@@ -158,6 +176,22 @@ try {
     await edit('light.radius', 0); await page.evaluate(() => debugTest.brightness());
     assert.equal(await page.evaluate(() => debugTest.scene.playerLight.getRadius()), 0);
 
+    await edit('vision.range', 700);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getVisionRange()), 700);
+    await edit('vision.range', 50);
+    assert.equal(await field('vision.range').getAttribute('aria-invalid'), 'true');
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getVisionRange()), 700);
+    await edit('vision.range', 400);
+
+    await edit('flashlight.radius', 650);
+    assert.equal(await page.evaluate(() => debugTest.scene.flashlight.getRadius()), 650);
+    await edit('flashlight.intensity', 1.2);
+    assert.equal(await page.evaluate(() => debugTest.scene.flashlight.getIntensity()), 1.2);
+    await edit('flashlight.intensity', 3);
+    assert.equal(await field('flashlight.intensity').getAttribute('aria-invalid'), 'true');
+    assert.equal(await page.evaluate(() => debugTest.scene.flashlight.getIntensity()), 1.2);
+    await edit('flashlight.radius', 400); await edit('flashlight.intensity', 0.9);
+
     for (const [key, initial, tuned, type] of [['shallow',40,20,'shallow_water'],['water',80,30,'water'],['deep',160,40,'deep_water'],['ultraDeep',320,50,'ultra_deep_water']]) {
       const id=`bulletWaterDrag.${key}`;
       assert.equal(await field(id).inputValue(),String(initial));
@@ -166,7 +200,7 @@ try {
       const actual=await page.evaluate(async({key,type})=>{
         const {Vector2}=await import('/src/math/Vector2.ts');
         const {scene}=debugTest,p=scene.player;
-        scene.map.tiles.forEach(row=>row.fill(type));p.bullets=[];p.setDebugState({heatPercentage:0});p.fireCooldown=0;
+        scene.map.tiles.forEach(row=>row.fill(type));p.bullets=[];p.setDebugState({magazineAmmo:p.getMagazineSize(),chambered:true});p.fireCooldown=0;
         p.update(0,{isKeyDown:()=>false},scene.map);p.shoot(new Vector2(1,0));
         const bullet=p.getBullets()[0];bullet.update(.1,scene.map);
         return{rate:p.getConfigSnapshot().bulletWaterDrag[key],ratio:bullet.velocity.length()/p.getBulletSpeed()};
@@ -199,9 +233,12 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.getMaxSpeed()), initialSpeed * 1.5);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getHealth()), 100);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getStamina()), 100);
-    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsOverheated()), false);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), false);
     assert.deepEqual(await page.evaluate(() => ({ radius: debugTest.scene.playerLight.getRadius(), intensity: debugTest.scene.playerLight.getIntensity() })),
       await page.evaluate(() => debugTest.initialLight));
+    assert.equal(await field('vision.range').inputValue(), '400', 'reset restores the fog radius baseline');
+    assert.equal(await field('flashlight.radius').inputValue(), '400', 'reset restores the flashlight range baseline');
+    assert.equal(await field('flashlight.intensity').inputValue(), '0.8', 'reset restores the flashlight intensity baseline');
     assert.ok((await panel.innerText()).includes(`实际 ${initialSpeed * 1.5}`));
     await panel.locator('.debug-content').evaluate(element => { element.scrollTop = 0; });
     await page.screenshot({ path: join(output, `debug-panel-dpr-${dpr}.png`) });

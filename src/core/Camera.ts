@@ -177,35 +177,6 @@ export class Camera {
   }
 
   /**
-   * 绘制调试信息，显示相机死区和中心点
-   * @param ctx Canvas渲染上下文
-   */
-  public drawDebug(ctx: CanvasRenderingContext2D): void {
-    const dzLeft = (this.width - this.deadZoneWidth) / 2;
-    const dzTop = (this.height - this.deadZoneHeight) / 2;
-
-    ctx.save();
-
-    // 绘制死区矩形
-    ctx.strokeStyle = "rgba(255, 0, 0, 0.4)";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(dzLeft, dzTop, this.deadZoneWidth, this.deadZoneHeight);
-
-    // 绘制相机中心点
-    ctx.fillStyle = "rgba(255,0,0,0.9)";
-    ctx.beginPath();
-    ctx.arc(this.width / 2, this.height / 2, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 绘制相机视口边界
-    ctx.strokeStyle = "rgba(0,0,0,0.3)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0, 0, this.width, this.height);
-
-    ctx.restore();
-  }
-
-  /**
    * 计算当前的震动衰减系数
    * @private
    * @returns 衰减系数（0-1之间的值）

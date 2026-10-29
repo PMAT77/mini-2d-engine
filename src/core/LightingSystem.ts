@@ -1,6 +1,9 @@
 import { LightSource } from "./LightSource";
+import type { ConeLight } from "./ConeLight";
 import { solidPath } from "../map/SolidTerrain";
 import type { ShadowEdge, TileMap, TileRect } from "../map/TileMap";
+
+const TAU = Math.PI * 2;
 
 /** Back-facing edges cast away from the light; the block surface stays visible. */
 export function projectShadow(edge: ShadowEdge, x: number, y: number, radius: number, length?: number): number[] | null {
@@ -133,6 +136,15 @@ export class LightingSystem {
     ctx.clip("evenodd");
   }
 
+  /** Ground-only clip for camera-space contexts (0,0 = camera origin, no transform). */
+  private clipCameraGround(ctx: CanvasRenderingContext2D, map: TileMap, cameraX: number, cameraY: number): void {
+    const { width, height } = this.shadowCanvas!;
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+    solidPath(ctx, map.getBlockingPolygons(cameraX, cameraY, width, height), cameraX, cameraY);
+    ctx.clip("evenodd");
+  }
+
   private prepareTerrainLight(cameraX: number, cameraY: number, map?: TileMap): void {
     const light = this.terrainLight;
     if (!light || light.intensity === 0) return;
@@ -254,11 +266,16 @@ export class LightingSystem {
       const rgb = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(light.getColor());
       const color = rgb ? `${parseInt(rgb[1], 16)}, ${parseInt(rgb[2], 16)}, ${parseInt(rgb[3], 16)}` : "255, 255, 255";
       const gradient = lightCtx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, radius);
-      for (let i = 0; i <= 32; i++) {
-        gradient.addColorStop(i / 32, `rgba(${color}, ${Math.min(1, light.getIntensity() * lightFalloff(radius * i / 32, radius))})`);
+      const cone = light.shape === "cone" ? light as ConeLight : undefined;
+      const stops = cone ? 96 : 32;
+      for (let i = 0; i <= stops; i++) {
+        const distance = radius * i / stops;
+        const inner = cone ? cone.innerVisibility(distance) : 1;
+        gradient.addColorStop(i / stops, `rgba(${color}, ${Math.min(1, light.getIntensity() * lightFalloff(distance, radius) * inner)})`);
       }
       lightCtx.fillStyle = gradient;
       lightCtx.fillRect(pos.x - radius, pos.y - radius, radius * 2, radius * 2);
+      if (light.shape === "cone") this.featherCone(light as ConeLight, cameraX, cameraY, width, height);
 
       if (map) {
         const edges = map.getShadowEdges(pos.x, pos.y, radius + light.getSourceRadius());
@@ -275,10 +292,37 @@ export class LightingSystem {
         else if (light.getSourceRadius() === 0) LightingSystem.drawShadows(lightCtx, edges, pos.x, pos.y, radius);
         lightCtx.restore();
       }
+      ctx.save();
+      // 单位光只照亮地面和水域：有高度的地形顶面保持环境光，不会被单位光提亮或压暗。
+      if (map && light.groundOnly) this.clipCameraGround(ctx, map, cameraX, cameraY);
       ctx.globalCompositeOperation = "lighter";
       ctx.drawImage(this.lightCanvas, 0, 0);
+      ctx.restore();
     }
     ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Cut the circular gradient down to the cone and feather both radial edges so the
+   * flashlight fades into the ambient light instead of ending on a hard line.
+   */
+  private featherCone(light: ConeLight, cameraX: number, cameraY: number, width: number, height: number): void {
+    const ctx = this.lightCtx!, pos = light.getPosition();
+    const angle = light.getAngle();
+    const feather = Math.min(light.getFeather(), angle / 2 - 1e-6);
+    const conic = ctx.createConicGradient(light.getStartAngle(), pos.x, pos.y);
+    const edge = Math.max(feather, 1e-4) / TAU;
+    const inner = Math.max(edge, (angle - feather) / TAU);
+    conic.addColorStop(0, "rgba(255,255,255,0)");
+    conic.addColorStop(edge, "rgba(255,255,255,1)");
+    conic.addColorStop(inner, "rgba(255,255,255,1)");
+    conic.addColorStop(angle / TAU, "rgba(255,255,255,0)");
+    conic.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.fillStyle = conic;
+    ctx.fillRect(cameraX, cameraY, width, height);
+    ctx.restore();
   }
 
   applyLighting(ctx: CanvasRenderingContext2D): void {

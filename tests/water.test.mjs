@@ -41,7 +41,7 @@ test('wading overlay remains on the screen left independently of facing, aim and
     assert.deepEqual(p.getOverlayLayout(37.25,19.5),layout);
   }
   assert.ok(layout.debuffX<200.5-37.25-10);near(layout.debuffY,210.75-19.5+24.5);
-  assert.ok(Math.hypot(layout.debuffX-layout.heatX,layout.debuffY-layout.heatY)>22);
+  assert.ok(Math.hypot(layout.debuffX-layout.reloadX,layout.debuffY-layout.reloadY)>22);
 });
 
 test('debuff color is constant within each depth and blends water depths without diluting them with land', () => {
@@ -229,9 +229,9 @@ test('gold scatter paths cannot enter curved ultra-deep water', () => {
   while(m.isShapeWalkable(rectangleCollider(x+1,y,8,8)))x++;
   const col=Math.floor((x-20)/50),row=Math.floor(y/50);
   m.tiles[row][col]='mineral';m.tileHp[row][col]=100;m.damageTile(col,row,10);
-  assert.equal(scene.goldPickups.length,2);
+  assert.equal(scene.goldPickups.length,1);
   for(let i=0;i<40;i++)for(const gold of scene.goldPickups){gold.update(1/60);assert.ok(m.isShapeWalkable(gold.getCollider()));}
   m.breakTile(col,row);
-  assert.equal(scene.goldPickups.length,20);
+  assert.equal(scene.goldPickups.length,10);
   for(let i=0;i<40;i++)for(const gold of scene.goldPickups){gold.update(1/60);assert.ok(m.queryShape(gold.getCollider()).every(c=>c.depth<=0.01));}
 });

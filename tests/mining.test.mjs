@@ -34,30 +34,30 @@ const damageRects = (map, cameraX = 0, cameraY = 0, delta = 0) => {
   return marks;
 };
 
-test('strong bullet hits pay crossed stages and destruction tops up to twenty gold once', () => {
+test('strong bullet hits pay crossed stages and destruction tops up to ten gold once', () => {
   const scene = makeScene(); ore(scene);
   const fire = () => new Bullet(new Vector2(200, 225), new Vector2(1000, 0), 60, scene.particleSystem).update(0.2, scene.map);
   fire();
   assert.equal(scene.map.tileHp[4][6], 40);
-  assert.equal(scene.goldPickups.length, 6);
+  assert.equal(scene.goldPickups.length, 3);
   fire();
   assert.equal(scene.map.tiles[4][6], 'default');
   assert.equal(scene.map.tileHp[4][6], 0);
   assert.equal(scene.map.tileHighlight[4][6], 0);
-  assert.equal(scene.goldPickups.length, 20);
+  assert.equal(scene.goldPickups.length, 10);
   assert.ok(scene.particleSystem.getPerformanceStats().activeParticles >= 32);
   assert.equal(scene.player.getGold(), 0);
   scene.map.damageTile(6, 4, 100);
   scene.map.breakTile(6, 4);
-  assert.equal(scene.goldPickups.length, 20);
+  assert.equal(scene.goldPickups.length, 10);
   ore(scene, 8, 4); scene.map.breakTile(8, 4);
-  assert.equal(scene.goldPickups.length, 40, 'direct destruction uses the same drop path');
+  assert.equal(scene.goldPickups.length, 20, 'direct destruction uses the same drop path');
   scene.map.tiles[4][9] = 'wall'; scene.map.damageTile(9, 4, 1000);
   assert.equal(scene.map.tiles[4][9], 'wall');
-  assert.equal(scene.goldPickups.length, 40);
+  assert.equal(scene.goldPickups.length, 20);
 });
 
-test('all twenty pieces stay in walkable space throughout scattering, including enclosed map corners', () => {
+test('all ten pieces stay in walkable space throughout scattering, including enclosed map corners', () => {
   for (const random of [0, 0.5, 0.9999]) for (const [col, row] of [[0, 0], [99, 99], [6, 4]]) {
     const scene = makeScene();
     scene.map.tiles.forEach(line => line.fill('wall'));
@@ -65,12 +65,12 @@ test('all twenty pieces stay in walkable space throughout scattering, including 
     const original = Math.random;
     try { Math.random = () => random; scene.map.breakTile(col, row); }
     finally { Math.random = original; }
-    assert.equal(scene.goldPickups.length, 20);
+    assert.equal(scene.goldPickups.length, 10);
     for (let frame = 0; frame < 60; frame++) for (const piece of scene.goldPickups) {
       piece.update(1 / 60);
       assert.ok(scene.map.isShapeWalkable(piece.getCollider()), `blocked piece at ${piece.x}, ${piece.y}`);
     }
-    assert.equal(new Set(scene.goldPickups.map(p => `${p.x},${p.y}`)).size, 20);
+    assert.equal(new Set(scene.goldPickups.map(p => `${p.x},${p.y}`)).size, 10);
   }
 });
 
@@ -86,7 +86,7 @@ test('gold scatters to randomized positions, persists on the floor, and only col
   const positions = scene.goldPickups.map(p => [p.x, p.y]);
   scene.update(120, emptyInput);
   assert.deepEqual(scene.goldPickups.map(p => [p.x, p.y]), positions);
-  assert.equal(scene.goldPickups.length, 20);
+  assert.equal(scene.goldPickups.length, 10);
   assert.equal(scene.player.getGold(), 0);
 });
 
@@ -101,21 +101,25 @@ test('scene auto-picks up every landed square once and leaves health and boosts 
     scene.player.y = piece.y + GoldPickup.SIZE / 2 - scene.player.getSize() / 2;
     scene.update(1 / 60, emptyInput);
     assert.ok(scene.goldPickups.length < before);
-    assert.equal(scene.player.getGold() + scene.goldPickups.length, 20);
+    assert.equal(scene.player.getGold() + scene.goldPickups.length, 10);
   }
   scene.update(1, emptyInput);
-  assert.equal(scene.player.getGold(), 20);
+  assert.equal(scene.player.getGold(), 10);
   assert.equal(scene.player.getHealth(), 50);
   assert.equal(scene.modifierManager.getModifierCount(), 0);
 });
 
 test('normal and boosted player attacks give feedback on the first hit and every one or two hits thereafter', () => {
   for (const [boost, expected] of [
-    [0, [2, 2, 4, 4, 6, 6, 8, 8, 10, 20]],
-    [0.5, [2, 4, 4, 6, 8, 10, 20]],
-    [1, [2, 4, 6, 8, 20]],
+    [0, [1, 1, 2, 2, 3, 3, 4, 4, 5, 10]],
+    [0.5, [1, 2, 2, 3, 4, 5, 10]],
+    [1, [1, 2, 3, 4, 10]],
   ]) {
     const scene = makeScene(); ore(scene);
+    // 本用例统计每发 0.2s 帧内挖掉的矿块，沿用旧的 800 弹速保持命中节奏；
+    // 弹匣放大到 100 发，避免 7 发打空后换弹打断这条 10 发序列。
+    scene.player.applyConfig({ shooting: { bulletSpeed: 800, magazineSize: 100 } });
+    scene.player.setDebugState({ magazineAmmo: 100, chambered: true });
     scene.player.x = scene.player.y = 200;
     scene.player.setOnShootCallback(() => {});
     if (boost) scene.player.addModifier('damage', boost, 1, true);
@@ -151,10 +155,10 @@ test('invalid damage does nothing and lethal damage emits destruction instead of
   scene.map.damageTile(6, 4, 10); scene.map.breakTile(6, 4);
   assert.deepEqual(events[1], ['destroyed', 6, 4, 'mineral']);
   assert.equal(events.length, 2);
-  assert.equal(scene.goldPickups.length, 20);
+  assert.equal(scene.goldPickups.length, 10);
   const oneShot = makeScene(); ore(oneShot);
   oneShot.map.damageTile(6, 4, 1000);
-  assert.equal(oneShot.goldPickups.length, 20);
+  assert.equal(oneShot.goldPickups.length, 10);
 });
 
 test('partial drops start and travel outside live ore, walls, deep water and map edges', () => {
@@ -171,7 +175,7 @@ test('partial drops start and travel outside live ore, walls, deep water and map
     const original = Math.random;
     try { Math.random = () => random; scene.map.damageTile(col, row, 10); }
     finally { Math.random = original; }
-    assert.equal(scene.goldPickups.length, 2);
+    assert.equal(scene.goldPickups.length, 1);
     assert.equal(scene.map.tiles[row][col], 'mineral');
     const starts = scene.goldPickups.map(piece => [piece.x, piece.y]);
     for (let frame = 0; frame <= 60; frame++) for (const piece of scene.goldPickups) {
@@ -191,30 +195,30 @@ test('blocked partial payouts retry without losing gold and destruction clears p
   scene.map.damageTile(6, 4, 30);
   assert.equal(scene.goldPickups.length, 0);
   scene.map.tiles[4][5] = 'default';
-  scene.map.damageTile(6, 4, 1); // No new threshold: retry the four pieces already earned.
-  assert.equal(scene.goldPickups.length, 4);
+  scene.map.damageTile(6, 4, 1); // No new threshold: retry the two pieces already earned.
+  assert.equal(scene.goldPickups.length, 2);
   scene.map.damageTile(6, 4, 100);
-  assert.equal(scene.goldPickups.length, 20);
+  assert.equal(scene.goldPickups.length, 10);
   assert.equal(scene.goldDroppedByTile.size, 0);
   ore(scene); scene.map.breakTile(6, 4);
-  assert.equal(scene.goldPickups.length, 40, 'a new ore at the same position has its own full payout');
+  assert.equal(scene.goldPickups.length, 20, 'a new ore at the same position has its own full payout');
 
   const closed = makeScene(); closed.map.tiles.forEach(row => row.fill('wall')); ore(closed, 0, 0);
   closed.map.damageTile(0, 0, 90);
   assert.equal(closed.goldPickups.length, 0);
   closed.map.damageTile(0, 0, 10);
-  assert.equal(closed.goldPickups.length, 20);
+  assert.equal(closed.goldPickups.length, 10);
   closed.goldPickups.forEach(piece => assert.ok(closed.map.isShapeWalkable(piece.getCollider())));
 });
 
-test('partially mined ore and adjacent ore have independent twenty-gold budgets', () => {
+test('partially mined ore and adjacent ore have independent ten-gold budgets', () => {
   const scene = makeScene(); ore(scene); ore(scene, 7, 4);
   scene.map.damageTile(6, 4, 10); scene.map.damageTile(7, 4, 10);
-  assert.equal(scene.goldPickups.length, 4);
+  assert.equal(scene.goldPickups.length, 2);
   scene.map.breakTile(6, 4);
-  assert.equal(scene.goldPickups.length, 22);
+  assert.equal(scene.goldPickups.length, 11);
   scene.map.breakTile(7, 4);
-  assert.equal(scene.goldPickups.length, 40);
+  assert.equal(scene.goldPickups.length, 20);
   assert.equal(scene.goldDroppedByTile.size, 0);
 });
 

@@ -6,22 +6,52 @@ import { solidPath } from '../map/SolidTerrain';
 import { TileTypeId, getTileType } from "../map/TileType";
 import { Vector2 } from "../math/Vector2";
 import { ParticleSystem } from "../objects/ParticleSystem";
+import { CraterSystem } from "../objects/CraterSystem";
+import { FootprintSystem } from "../objects/FootprintSystem";
+import { RippleSystem } from "../objects/RippleSystem";
 import { Player, PlayerAimInput } from "../objects/Player";
 import { PlayerConfig } from "../objects/PlayerConfig";
+import { Chicken } from "../objects/Chicken";
 import { PlayerDebugPanel } from "../ui/PlayerDebugPanel";
+import { FloatingTextSystem } from "../ui/FloatingTextSystem";
 
 // 导入光照系统相关类
 import { ConfigLoader } from "../core/ConfigLoader";
 import { LightSource } from "../core/LightSource";
+import { ConeLight } from "../core/ConeLight";
 import { LightingSystem } from "../core/LightingSystem";
 import { VisibilitySystem } from "../core/VisibilitySystem";
 import { ModifierManager } from "../core/ModifierManager";
 
 import { PickupItem, PickupType } from "../objects/PickupItem";
 import { GoldPickup } from "../objects/GoldPickup";
+import { MeatPickup } from "../objects/MeatPickup";
+import type { BulletEntityHit } from "../objects/Bullet";
 import { Torch } from "../objects/Torch";
 import { seededRandom } from "../map/WaterTerrain";
 import { ColliderShape, DEFAULT_SHAPE, compileShape, rectangleCollider, transformCollider } from "../physics/Collider";
+import { SoundPlayer } from "../core/SoundPlayer";
+import type { PlayOptions, SoundHandle } from "../core/SoundPlayer";
+import type { FootstepEvent } from "../objects/FootprintSystem";
+
+/** 声音资源：一段击发、一段拉栓换弹、干地与湿身脚步，以及一段循环的涉水行走采样。 */
+const GUNSHOT_SOUND = "/audio/gunshot.wav";
+const RELOAD_SOUND = "/audio/reload.wav";
+const DRY_STEP_SOUND = "/audio/step-brick.wav";
+const WATER_STEP_SOUND = "/audio/step-water.wav";
+const WET_STEP_SOUND = "/audio/step-mud.wav";
+/** 小鸡：走路时每一步的轻响，以及停下时偶尔的叫声。 */
+const CHICKEN_STEP_SOUND = "/audio/chicken-step.wav";
+/** 三段真实鸡叫，每次随机取一段；每段都完整播完，不用同一句反复循环。 */
+const CHICKEN_CLUCK_SOUNDS = [
+  "/audio/chicken-cluck-1.mp3",
+  "/audio/chicken-cluck-2.mp3",
+  "/audio/chicken-cluck-3.mp3",
+] as const;
+/** 拾取：肉块只留入口的第一口撕咬（采样已裁到 0.75 秒），金块是一声硬币落袋的清脆响。 */
+const MEAT_PICKUP_SOUND = "/audio/142-short-food-meat-pickup.wav";
+const GOLD_PICKUP_SOUND = "/audio/116-short-platinum-coin-pickup-pure.wav";
+
 
 
 /**
@@ -29,12 +59,29 @@ import { ColliderShape, DEFAULT_SHAPE, compileShape, rectangleCollider, transfor
  */
 export class GameScene extends Scene {
   private player!: Player;
+  private chickens: Chicken[] = [];
   private map!: TileMap;
   private camera!: Camera;
   private worldCanvas!: HTMLCanvasElement;
   private worldContext!: CanvasRenderingContext2D;
+  /** 单位层：掉落物、拾取物、投射物、粒子；只受迷雾裁剪。 */
+  private unitCanvas!: HTMLCanvasElement;
+  private unitContext!: CanvasRenderingContext2D;
+  /** 后处理层：金块光晕等叠加光效，同样按迷雾裁剪后以 lighter 合成。 */
+  private effectCanvas!: HTMLCanvasElement;
+  private effectContext!: CanvasRenderingContext2D;
   private displayedView?: { x: number; y: number; width: number; height: number };
   private configLoader!: ConfigLoader;
+  /** 击发与脚步的一次性音效。 */
+  private readonly sfx = new SoundPlayer();
+  /** 脚步声的剩余冷却时间（秒），按移动速度调整间隔。 */
+  private footstepSoundDelay = 0;
+  /** 小鸡的脚步声与叫声各自计时：叫声稀疏，不能被密集的脚步挤掉。 */
+  private chickenStepDelay = 0;
+  private chickenCluckDelay = 0;
+  /** 正在播放的鸡叫：几秒长的整段录音，音量每帧按玩家到鸣叫点的距离重算。 */
+  /** 正在响的鸡叫：带上是哪只鸡，鸡被击杀时要立刻把这一声收掉。 */
+  private activeClucks: { handle: SoundHandle; chicken: Chicken; x: number; y: number; volume: number }[] = [];
   private loaded: boolean = false;
   private loadingPromise?: Promise<void>;
   private loadError = "";
@@ -47,17 +94,57 @@ export class GameScene extends Scene {
 
   // 添加玩家光源引用
   private playerLight: LightSource;
+  /** 面朝方向的手电筒锥光，G 键开关。 */
+  private flashlight: ConeLight;
+  private flashlightOn = true;
+  private flashlightHeld = false;
+  private reloadHeld = false;
+  /** 准星收缩进度：0 = 未瞄准，1 = 完全收紧。 */
+  private crosshairTighten = 0;
 
   // 常量定义
   private static readonly PLAYER_SIZE = 49;
   private static readonly CAMERA_ZOOM = 0.85;
-  private static readonly GOLD_DROP_COUNT = 20;
+  private static readonly GOLD_DROP_COUNT = 10;
   private static readonly GOLD_DROP_THRESHOLDS = [0.9, 0.7, 0.5, 0.3, 0.1];
+  /** 出生点周围随机游荡的小鸡数量。 */
+  private static readonly CHICKEN_COUNT = 6;
+  /** 小鸡发声：620 像素内线性衰减，衰减到 0.08 以下直接不响。 */
+  private static readonly CHICKEN_AUDIO_RANGE = 620;
+  private static readonly CHICKEN_MIN_ATTENUATION = 0.08;
+  /** 鸡叫是几秒长的整段录音，基准音量；实际音量按玩家距离每帧重算。 */
+  private static readonly CHICKEN_CLUCK_VOLUME = 0.45;
+  /** 准星：未瞄准/完全收紧时的间隙，以及每秒收紧、回弹速度。 */
+  private static readonly CROSSHAIR_GAP_IDLE = 6;
+  private static readonly CROSSHAIR_GAP_AIMED = 2;
+  private static readonly CROSSHAIR_TIGHTEN_RATE = 5;
+  private static readonly CROSSHAIR_RELEASE_RATE = 8;
+  /** 小鸡死亡后先播放白色气团，延迟这么久再掉出肉块。 */
+  private static readonly MEAT_DROP_DELAY = 0.4;
+  /** 手电筒固定 120° / 400px：角色无法改变视野远近和角度。 */
+  private static readonly FLASHLIGHT_ANGLE = Math.PI * 2 / 3;
+  private static readonly FLASHLIGHT_RANGE = 400;
+  /** 迷雾外缘的柔和过渡宽度（世界像素）。 */
+  private static readonly FOG_FEATHER = 120;
+  /** 脚边全向微光半径。 */
+  private static readonly GLOW_RADIUS = 100;
   private goldPickups: GoldPickup[] = [];
   private goldDroppedByTile = new Map<number, number>();
+  /** 小鸡死亡后掉落的肉块，落地后才可收集。 */
+  private meatPickups: MeatPickup[] = [];
+  /** 死亡气团播放期间等待出肉的延迟队列。 */
+  private pendingMeatDrops: { x: number; y: number; timer: number }[] = [];
 
   // 粒子系统
   private particleSystem: ParticleSystem;
+  // 地面弹坑装饰
+  private readonly craterSystem = new CraterSystem();
+  // 地面脚印装饰
+  private readonly footprintSystem = new FootprintSystem();
+  // 水面涟漪装饰：涉水时替代脚印
+  private readonly rippleSystem = new RippleSystem();
+  // 拾取飘字：在角色身边蹦出 "金块+N" / "肉块+N"，1 秒后淡出
+  private readonly floatingTexts = new FloatingTextSystem();
   // 光照系统
   private lightingSystem: LightingSystem;
   private visibilitySystem = new VisibilitySystem();
@@ -96,7 +183,8 @@ export class GameScene extends Scene {
     };
     this.map.onTileDamaged = (col, row, type, hp, maxHp) => {
       if (type !== TileTypeId.MINERAL) return;
-      const earned = GameScene.GOLD_DROP_THRESHOLDS.filter(threshold => hp / maxHp <= threshold + Number.EPSILON).length * 2;
+      // 每个已跨过的耐久门槛先散落 1 块，击毁时再补齐到 GOLD_DROP_COUNT。
+      const earned = GameScene.GOLD_DROP_THRESHOLDS.filter(threshold => hp / maxHp <= threshold + Number.EPSILON).length;
       this.scatterGold(col, row, earned, false);
     };
 
@@ -116,20 +204,44 @@ export class GameScene extends Scene {
       Math.min(deadZoneWidth, this.map.width * this.map.tileSize),
       Math.min(deadZoneHeight, this.map.height * this.map.tileSize), GameScene.PLAYER_SIZE, { type: "circle", radius: 0.5 });
     this.player = new Player(spawn.x, spawn.y, undefined, this.particleSystem);
+    // 子弹自然落地时尝试在干燥地面留下弹坑。
+    this.player.setOnBulletLanded((x, y) => this.craterSystem.spawn(x, y, this.map));
+    // 移动时在干燥地面留下脚印；涉水时改写为朝行进反方向扩散的涟漪。
+    this.player.setOnFootstepCallback(step => {
+      if (!this.footprintSystem.spawn(step, this.map)) this.rippleSystem.spawn(step, this.map);
+      this.playFootstepSound(step);
+    });
 
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
     const playerCenter = new Vector2(playerCenterX, playerCenterY);
 
-    // 设置玩家光源（位置跟随玩家中心，照射范围400，暖白色，强度1，发光半径16）
-    this.playerLight = new LightSource(playerCenter, 400, "#FFF4E8", 1.0, 16);
+    // 脚边一小圈全向微光，配合面朝方向的手电筒锥光；两者都是加法补光，且只照地面。
+    this.playerLight = new LightSource(playerCenter, GameScene.GLOW_RADIUS, "#FFF4E8", 0.5, 8);
+    this.playerLight.groundOnly = true;
     this.lightingSystem.addLightSource(this.playerLight);
+    this.flashlight = new ConeLight(playerCenter, GameScene.FLASHLIGHT_RANGE, "#FFF4E8", 0.8,
+      GameScene.FLASHLIGHT_ANGLE, 0.35);
+    this.flashlight.groundOnly = true;
+    // 光从持灯者身体之外开始，人物不会被自己的手电筒打出一块高光。
+    this.flashlight.setInnerRadius(30, 16);
+    this.lightingSystem.addLightSource(this.flashlight);
 
     this.torches = Torch.generate(this.map, mapOptions?.seed === undefined ? Math.random : seededRandom(mapOptions.seed ^ 0x746f7263));
     this.torches.forEach(torch => this.lightingSystem.addLightSource(torch.light));
 
-    // 从原环境光中分出微弱的左上方入射光，保持无遮挡暗区的原有亮度。
-    this.lightingSystem.setAmbientLight("#2F3843");
+    // 小鸡围绕出生点随机生成，平时只在干地上自由活动；属于单位层，会被迷雾裁剪。
+    this.chickens = Chicken.spawn(this.map, GameScene.CHICKEN_COUNT, playerCenter);
+    for (const chicken of this.chickens) {
+      chicken.setOnStepCallback((x, y) => this.playChickenStep(x, y));
+      chicken.setOnCluckCallback((x, y) => this.playChickenCluck(chicken, x, y));
+    }
+    // 子弹每次位移先查询小鸡，命中单位优先于该点之后的地形。
+    this.player.setBulletEntityHitTest((startX, startY, endX, endY, radius, damage) =>
+      this.findChickenHit(startX, startY, endX, endY, radius, damage));
+
+    // 环境光决定整张地图的基础明暗（亮度 0.35），单位光只做局部补光。
+    this.lightingSystem.setAmbientLight("rgba(214, 226, 240, 0.35)");
     this.lightingSystem.setTerrainLight({
       position: { x: -this.map.width * this.map.tileSize, y: -this.map.height * this.map.tileSize },
       color: "#B4C8E0", intensity: 0.06,
@@ -150,6 +262,13 @@ export class GameScene extends Scene {
 
       // 触发相机震动，使用线性衰减模式
       this.camera.shake(magnitude, duration, angle, frequency, 'linear');
+      // 单发只用一个声部：连续射击时后一发直接接管，不会叠出混浊的尾音。
+      this.sfx.play(GUNSHOT_SOUND, 0.6, 1, { count: 1 });
+    });
+
+    // 按 R（或调试开启自动换弹后打空）开始换弹；换弹时长正好演完这段机械声。
+    this.player.setOnReloadCallback(() => {
+      this.sfx.play(RELOAD_SOUND, 0.5, 1, { count: 1 });
     });
 
 
@@ -161,13 +280,130 @@ export class GameScene extends Scene {
   }
 
   /**
+   * 出水后湿身的那 1.5 秒里按脚步补一声踩踏；干地和涉水都改成了整段循环，不走这里。
+   * 脚印步距只有 26 像素，声音按速度抽稀到每 0.28–0.6 秒一次，听起来才像走路。
+   */
+  private playFootstepSound(step: FootstepEvent): void {
+    if (this.footstepSoundDelay > 0) return;
+    // 水里踩得再密也只该有一段连续的涉水声，重放会把循环截成碎片。
+    if (step.inWater) return;
+    // 干地的脚步由 updateFootstepSound 整段循环负责，这里只补湿身的踩踏声。
+    if (step.wetness <= 0) return;
+    this.footstepSoundDelay = Math.min(0.6, 90 / Math.max(80, this.player.getVelocity().length()));
+    // 轻微随机音高，避免重复播放同一段采样时听出机械感。
+    this.sfx.play(WET_STEP_SOUND, 0.5, 0.94 + Math.random() * 0.12);
+  }
+
+  /**
+   * 涉水行走的循环音效：身体接触水面且这一帧真的挪动了位置时才出声。
+   * 整段采样按 loop 播放，播放速率跟实际速度成正比，快走时叠得更密、慢淌时拖得更长；
+   * 离水、停下或被墙挡住时目标音量归零，由 SoundPlayer 在 120 毫秒内淡出。
+   */
+  private updateWadingSound(speed: number): void {
+    const wading = this.player.isInWater() && speed > 20;
+    this.sfx.loop(WATER_STEP_SOUND, wading ? 0.45 : 0, Math.max(0.6, Math.min(1.6, speed / 200)));
+  }
+
+  /**
+   * 干地走路的循环音效：砖地采样是连续行走的整段录音，首尾静音已裁掉（现长 4.035 秒），
+   * 录音里一步约 0.58 秒。播放速率按「采样步距 / 玩家步距」折算，取样步距与原有
+   * 90 毫秒抽稀闸门对齐，即速率 ≈ 速度 / 156：慢走 0.95 倍，常速 200 px/s 约 1.28 倍，
+   * 冲刺 320 px/s 到 2.05 倍，跑起来脚步更密、音高也略高。
+   * 涉水和刚出水湿身时让位给别的脚步，停下或顶墙时淡出。
+   */
+  private updateFootstepSound(speed: number): void {
+    const walking = !this.player.isInWater() && !this.player.isFootWet() && speed > 20;
+    this.sfx.loop(DRY_STEP_SOUND, walking ? 0.45 : 0, Math.max(0.95, Math.min(2.05, speed / 156)));
+  }
+
+  /** 小鸡发声的距离衰减：620 像素内线性降低，再远就听不见。 */
+  private chickenAttenuation(x: number, y: number): number {
+    const dx = x - this.player.x - this.player.getSize() / 2;
+    const dy = y - this.player.y - this.player.getSize() / 2;
+    return 1 - Math.hypot(dx, dy) / GameScene.CHICKEN_AUDIO_RANGE;
+  }
+
+  /**
+   * 小鸡原地发声：按与玩家的距离线性衰减，620 像素外直接不响。
+   * 声音在迷雾里也该有方向感，所以远近比音色更重要。
+   * @param options 声部数量（鸡叫是整段几秒的录音，需要多留几个声部）等播放方式
+   */
+  private playChickenAt(url: string, x: number, y: number, volume: number, options?: PlayOptions): boolean {
+    const attenuation = this.chickenAttenuation(x, y);
+    if (attenuation <= GameScene.CHICKEN_MIN_ATTENUATION) return false;
+    this.sfx.play(url, volume * attenuation, 0.92 + Math.random() * 0.16, options);
+    return true;
+  }
+
+  /**
+   * 小鸡走路的脚步声：小鸡一秒约三步，抽稀到 0.25 秒一次，六只一起走也不会盖过玩家自己的脚步。
+   * 录音本身是整段十秒的鸡舍环境，从随机位置起播，每次听到的都是不同的一截。
+   */
+  private playChickenStep(x: number, y: number): void {
+    if (this.chickenStepDelay > 0) return;
+    // 小鸡只是背景点缀：贴身 0.25 左右，仍比玩家脚步（0.4）低一截。
+    if (this.playChickenAt(CHICKEN_STEP_SOUND, x, y, 0.25, { randomStart: true })) this.chickenStepDelay = 0.25;
+  }
+
+  /**
+   * 叫声：比脚步稀疏得多，单独计时，免得被密集的脚步声挤掉。
+   * 三种鸡叫随机取一种；每段都有 6.7–8.2 秒，所以排三个声部，
+   * 0.9 秒内连叫几声时前一声还能继续响，更密的连叫才会复用最早的声部。
+   * 录音这几秒里玩家可能已经走远或走近，所以音量交给 updateCluckVolumes 每帧重算。
+   */
+  private playChickenCluck(chicken: Chicken, x: number, y: number): void {
+    if (this.chickenCluckDelay > 0) return;
+    const attenuation = this.chickenAttenuation(x, y);
+    if (attenuation <= GameScene.CHICKEN_MIN_ATTENUATION) return;
+    const url = CHICKEN_CLUCK_SOUNDS[Math.floor(Math.random() * CHICKEN_CLUCK_SOUNDS.length)];
+    const handle = this.sfx.play(url, GameScene.CHICKEN_CLUCK_VOLUME * attenuation,
+      0.92 + Math.random() * 0.16, { count: 3 });
+    if (handle) this.activeClucks.push({ handle, chicken, x, y, volume: GameScene.CHICKEN_CLUCK_VOLUME });
+    this.chickenCluckDelay = 0.9;
+  }
+
+  /**
+   * 每帧按玩家当前位置重算正在响的鸡叫音量：走远渐弱、走近渐强，而不是触发时定死。
+   * 鸡在录音中途被击杀时，这一声立刻掐掉——录音有 6.7–8.2 秒，不能留在原地继续叫。
+   */
+  private updateCluckVolumes(): void {
+    const px = this.player.x + this.player.getSize() / 2;
+    const py = this.player.y + this.player.getSize() / 2;
+    this.activeClucks = this.activeClucks.filter(cluck => {
+      if (!cluck.chicken.isAlive()) {
+        cluck.handle.stop();
+        return false;
+      }
+      if (!cluck.handle.isPlaying()) return false;
+      const attenuation = Math.max(0, 1 - Math.hypot(cluck.x - px, cluck.y - py) / GameScene.CHICKEN_AUDIO_RANGE);
+      cluck.handle.setVolume(cluck.volume * attenuation);
+      return true;
+    });
+  }
+
+  /** 鸡被击杀的同一帧就把它的叫声收掉，不等下一帧的逐帧音量更新。 */
+  private stopChickenClucks(chicken: Chicken): void {
+    this.activeClucks = this.activeClucks.filter(cluck => {
+      if (cluck.chicken !== chicken) return true;
+      cluck.handle.stop();
+      return false;
+    });
+  }
+
+  /**
    * 初始化光照系统
    */
   private initLightingSystem(): void {
     this.worldCanvas ??= document.createElement("canvas");
     this.worldContext ??= this.worldCanvas.getContext("2d")!;
-    this.worldCanvas.width = this.camera.width;
-    this.worldCanvas.height = this.camera.height;
+    this.unitCanvas ??= document.createElement("canvas");
+    this.unitContext ??= this.unitCanvas.getContext("2d")!;
+    this.effectCanvas ??= document.createElement("canvas");
+    this.effectContext ??= this.effectCanvas.getContext("2d")!;
+    for (const canvas of [this.worldCanvas, this.unitCanvas, this.effectCanvas]) {
+      canvas.width = this.camera.width;
+      canvas.height = this.camera.height;
+    }
     this.lightingSystem.initialize(this.camera.width, this.camera.height);
     this.visibilitySystem.initialize(this.camera.width, this.camera.height);
   }
@@ -253,14 +489,103 @@ export class GameScene extends Scene {
 
   private updateGoldPickups(delta: number): void {
     const body = this.player.getCollider();
+    let collected = 0;
     this.goldPickups = this.goldPickups.filter(pickup => {
       pickup.update(delta);
       if (!pickup.isCollidingWithShape(body)) return true;
       this.player.collectGold();
+      collected++;
       this.particleSystem.createExplosion(new Vector2(pickup.x + GoldPickup.SIZE / 2, pickup.y + GoldPickup.SIZE / 2),
         6, 45, 3, 0.2, ["#ffd700", "#fff1a3"]);
       return false;
     });
+    // 碎金常常一簇一簇地捡：同一帧只响一声，硬币音才不会叠成一团。
+    if (collected > 0) {
+      this.sfx.play(GOLD_PICKUP_SOUND, 0.4, 0.98 + Math.random() * 0.04);
+      this.showPickupText(`金块+${collected}`);
+    }
+  }
+
+  /** 查找子弹线段上最早接触的小鸡；只有子弹真正走到命中点时才结算伤害。 */
+  private findChickenHit(startX: number, startY: number, endX: number, endY: number,
+    radius: number, damage: number): BulletEntityHit | null {
+    let best: { fraction: number; chicken: Chicken; x: number; y: number } | null = null;
+    for (const chicken of this.chickens) {
+      if (!chicken.isAlive()) continue;
+      const fraction = chicken.hitTestSegment(startX, startY, endX, endY, radius);
+      if (fraction === null) continue;
+      if (!best || fraction < best.fraction) {
+        best = {
+          fraction,
+          chicken,
+          x: startX + (endX - startX) * fraction,
+          y: startY + (endY - startY) * fraction,
+        };
+      }
+    }
+    if (!best) return null;
+    const target = best;
+    return {
+      fraction: target.fraction,
+      x: target.x,
+      y: target.y,
+      apply: () => this.damageChicken(target.chicken, damage, target.x, target.y),
+    };
+  }
+
+  /** 小鸡受击：非致命时冒一小团白羽；致命时白色气团、延迟掉肉并移除小鸡。 */
+  private damageChicken(chicken: Chicken, damage: number, hitX: number, hitY: number): void {
+    const killed = chicken.takeDamage(damage);
+    if (!killed) {
+      this.particleSystem.createExplosion(new Vector2(hitX, hitY), 6, 55, 3, 0.22,
+        ["#ffffff", "#f2f2f2", "#dedede"]);
+      return;
+    }
+    const center = new Vector2(chicken.x + chicken.getSize() / 2, chicken.y + chicken.getSize() / 2);
+    // 慢速大颗粒形成白色气团，再补一圈快速白点。
+    this.particleSystem.createExplosion(center, 28, 70, 7, 0.9,
+      ["#ffffff", "#f7f7f7", "#e8e8e8"]);
+    this.particleSystem.createExplosion(center, 8, 150, 4, 0.32, ["#ffffff"]);
+    this.pendingMeatDrops.push({ x: center.x, y: center.y, timer: GameScene.MEAT_DROP_DELAY });
+    // 死掉的小鸡不会再叫，几秒长的录音要当场掐断，而不是由逐帧音量更新下一帧再发现。
+    this.stopChickenClucks(chicken);
+    this.chickens = this.chickens.filter(other => other !== chicken);
+  }
+
+  private updateMeatDrops(delta: number): void {
+    for (const drop of this.pendingMeatDrops) drop.timer -= delta;
+    const ready = this.pendingMeatDrops.filter(drop => drop.timer <= 0);
+    this.pendingMeatDrops = this.pendingMeatDrops.filter(drop => drop.timer > 0);
+    for (const drop of ready) {
+      this.meatPickups.push(new MeatPickup(drop.x - MeatPickup.SIZE / 2, drop.y - MeatPickup.SIZE / 2));
+    }
+  }
+
+  private updateMeatPickups(delta: number): void {
+    const body = this.player.getCollider();
+    let collected = 0;
+    this.meatPickups = this.meatPickups.filter(pickup => {
+      pickup.update(delta);
+      if (!pickup.isCollidingWithShape(body)) return true;
+      this.player.collectMeat();
+      collected++;
+      this.particleSystem.createExplosion(
+        new Vector2(pickup.x + MeatPickup.SIZE / 2, pickup.y + MeatPickup.SIZE / 2),
+        8, 50, 3, 0.25, ["#ff9b9b", "#ffd6d6", "#ffffff"]);
+      return false;
+    });
+    // 与金块同理：一次跨到好几块肉上也只咬一口。
+    if (collected > 0) {
+      this.sfx.play(MEAT_PICKUP_SOUND, 0.5);
+      this.showPickupText(`肉块+${collected}`);
+    }
+  }
+
+  /** 在角色身边蹦出一行拾取提示（例如 "肉块+3"）；左右位置由飘字系统随机散开。 */
+  private showPickupText(text: string): void {
+    this.floatingTexts.spawn(text,
+      this.player.x + this.player.getSize() / 2,
+      this.player.y + this.player.getSize() / 2);
   }
 
   // 添加更新道具的方法
@@ -460,7 +785,7 @@ export class GameScene extends Scene {
       this.initLightingSystem();
       this.game.input.setPointerEnabled(true);
       this.debugPanel ??= new PlayerDebugPanel(this.player, this.game.input, this.game.renderer.ctx.canvas,
-        this.playerLight, this.initialPlayerConfig, this.initialPlayerLight);
+        this.playerLight, this.flashlight, this.initialPlayerConfig, this.initialPlayerLight);
       window.addEventListener('resize', this.resizeListener);
     } catch (error) {
       if (this.active) this.loadError = error instanceof Error ? error.message : String(error);
@@ -469,6 +794,11 @@ export class GameScene extends Scene {
 
   onExit(): void {
     this.active = false;
+    // 循环音效不会自己停，离开场景时立即收掉，免得声音跟着残留。
+    this.sfx.stopLoops();
+    // 正在响的鸡叫也失去跟踪对象了，离开场景时硬停，重新进入时从头开始。
+    this.activeClucks.forEach(cluck => cluck.handle.stop(0));
+    this.activeClucks.length = 0;
     this.game?.input?.setPointerEnabled(false);
     this.game?.input?.clear();
     this.displayedView = undefined;
@@ -489,10 +819,29 @@ export class GameScene extends Scene {
     if (!this.loaded) return;
 
     // 更新玩家状态
+    const prevX = this.player.x, prevY = this.player.y;
     this.player.update(delta, input, this.map, this.getPointerAim(input));
+    // 用实际位移判断“在走”，顶墙原地推和被墙卡住时不会继续播放涉水声。
+    const movedSpeed = delta > 0 ? Math.hypot(this.player.x - prevX, this.player.y - prevY) / delta : 0;
+    this.updateWadingSound(movedSpeed);
+    this.updateFootstepSound(movedSpeed);
+    // 两条循环音效的目标音量都设好了，统一推进一步淡入淡出，各自都是 120 毫秒。
+    this.sfx.update(delta);
+    this.footstepSoundDelay = Math.max(0, this.footstepSoundDelay - delta);
+    this.chickenStepDelay = Math.max(0, this.chickenStepDelay - delta);
+    this.chickenCluckDelay = Math.max(0, this.chickenCluckDelay - delta);
+
+    // 小鸡只在干地自由游荡，不读取玩家输入。
+    this.chickens.forEach(chicken => chicken.update(delta, input, this.map));
+    // 鸡叫是几秒钟的整段录音：玩家这几秒里的走动要立刻反映到音量上。
+    this.updateCluckVolumes();
 
     // 更新粒子系统
     this.particleSystem.update(delta);
+    this.craterSystem.update(delta);
+    this.footprintSystem.update(delta);
+    this.rippleSystem.update(delta);
+    this.floatingTexts.update(delta);
 
     // 更新光照系统
     this.torches.forEach(torch => torch.update(delta));
@@ -508,13 +857,32 @@ export class GameScene extends Scene {
     // 检查玩家与道具的碰撞
     this.checkPickupCollisions();
     this.updateGoldPickups(delta);
+    // 先结算死亡延迟，再让已落地的肉块参与拾取。
+    this.updateMeatDrops(delta);
+    this.updateMeatPickups(delta);
 
     // 相机跟随玩家中心位置
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
 
     this.camera.follow(playerCenterX, playerCenterY, delta);
-    this.playerLight.setPosition(new Vector2(playerCenterX, playerCenterY));
+    const center = new Vector2(playerCenterX, playerCenterY);
+    this.playerLight.setPosition(center);
+    this.flashlight.setPosition(center);
+    this.flashlight.setDirection(this.player.getVisionState().direction);
+
+    // G 键是开关而不是常亮：只在下沿切换，避免按住时反复翻转。
+    const flashlightDown = input.isKeyDown("g");
+    if (flashlightDown && !this.flashlightHeld) {
+      this.flashlightOn = !this.flashlightOn;
+      this.flashlight.setActive(this.flashlightOn);
+    }
+    this.flashlightHeld = flashlightDown;
+
+    // R 键换弹同样只认下沿，按住不会反复起手。
+    const reloadDown = input.isKeyDown("r");
+    if (reloadDown && !this.reloadHeld) this.player.requestReload();
+    this.reloadHeld = reloadDown;
   }
 
   /**
@@ -547,57 +915,78 @@ export class GameScene extends Scene {
     const cameraOffset = this.camera.getOffset();
     this.displayedView = { ...cameraOffset, width: ctx.canvas.width, height: ctx.canvas.height };
 
-    // 绘制地图，使用带震动偏移的相机位置
+    // 地形与静态装饰始终可见：地形顶面只受环境光和单位光提亮，不会被视野遮住。
     this.map.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height, this.deltaSinceLastFrame);
+    // 脚印、涟漪与弹坑属于地面装饰：在地图之后、单位层之前绘制，始终可见且受光照。
+    this.footprintSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
+    this.rippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
+    this.craterSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.torches.forEach(torch => torch.draw(ctx, cameraOffset.x, cameraOffset.y));
-    this.goldPickups.forEach(pickup => pickup.draw(ctx, cameraOffset.x, cameraOffset.y));
 
-    // 绘制道具（在子弹上方，玩家下方）
+    // 单位层：只有迷雾范围内的单位才绘制，地形不参与裁剪。
+    const units = this.unitContext;
+    units.setTransform(1, 0, 0, 1, 0, 0);
+    units.globalCompositeOperation = "source-over";
+    units.clearRect(0, 0, this.unitCanvas.width, this.unitCanvas.height);
+    if (this.goldPickups.length || this.chickens.length || this.meatPickups.length) {
+      units.save();
+      units.beginPath();
+      units.rect(0, 0, this.unitCanvas.width, this.unitCanvas.height);
+      solidPath(units, this.map.getBlockingPolygons(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), cameraOffset.x, cameraOffset.y);
+      // 和地图共用像素边界，地面投影不能覆盖墙壁、矿石的顶面。
+      units.clip("evenodd");
+      this.goldPickups.forEach(pickup => pickup.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition()));
+      this.chickens.forEach(chicken => chicken.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition()));
+      this.meatPickups.forEach(pickup => pickup.drawShadow(units, cameraOffset.x, cameraOffset.y));
+      units.restore();
+    }
+    this.goldPickups.forEach(pickup => pickup.draw(units, cameraOffset.x, cameraOffset.y));
+    this.meatPickups.forEach(pickup => pickup.draw(units, cameraOffset.x, cameraOffset.y));
+    // 绘制道具（在子弹上方，金块下方）
     this.pickupItems.forEach(pickup => {
-      // 保存当前上下文状态
-      ctx.save();
-      // 应用相机偏移
-      ctx.translate(-cameraOffset.x, -cameraOffset.y);
-      // 绘制道具
-      pickup.draw(ctx);
-      // 恢复上下文状态
-      ctx.restore();
+      units.save();
+      units.translate(-cameraOffset.x, -cameraOffset.y);
+      pickup.draw(units);
+      units.restore();
     });
-
+    // 小鸡在拾取物之上、子弹之下；随后统一做迷雾裁剪，因此迷雾外不可见。
+    this.chickens.forEach(chicken => chicken.draw(units, cameraOffset.x, cameraOffset.y));
     // 所有世界对象共用包含震动的相机偏移
     this.player.getBullets().forEach(bullet => {
-      bullet.draw(ctx, cameraOffset.x, cameraOffset.y, this.map);
+      bullet.draw(units, cameraOffset.x, cameraOffset.y, this.map);
     });
-
-    // 绘制粒子（在子弹上方，玩家下方）
-    this.particleSystem.draw(ctx, cameraOffset.x, cameraOffset.y);
+    this.particleSystem.draw(units, cameraOffset.x, cameraOffset.y);
+    this.prepareFog(cameraOffset.x, cameraOffset.y);
+    this.visibilitySystem.apply(units);
+    ctx.drawImage(this.unitCanvas, 0, 0);
 
     // 绘制玩家（在所有元素上方），使用带震动偏移的相机位置
     this.player.draw(ctx, cameraOffset.x, cameraOffset.y);
 
-    // 绘制相机死区（调试用）
-    this.camera.drawDebug(ctx);
-
     // 应用光照效果
     this.applyLighting(ctx, cameraOffset.x, cameraOffset.y);
-    // 分层绘制全部掉落物，后一个金块的光晕不能重新照亮前一个的投影。
-    this.goldPickups.forEach(pickup => pickup.drawGlow(ctx, cameraOffset.x, cameraOffset.y));
-    if (this.goldPickups.length) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
-      solidPath(ctx, this.map.getBlockingPolygons(cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height), cameraOffset.x, cameraOffset.y);
-      // 和地图共用像素边界，短投影及其柔边均不能覆盖墙壁、矿石的顶面。
-      ctx.clip("evenodd");
-      this.goldPickups.forEach(pickup => pickup.drawShadow(ctx, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition()));
-      ctx.restore();
-    }
-    this.goldPickups.forEach(pickup => pickup.drawSparkles(ctx, cameraOffset.x, cameraOffset.y));
-    this.visibilitySystem.apply(ctx, cameraOffset.x, cameraOffset.y, this.player.getVisionState(), this.map,
-      mask => this.player.drawVisibilitySilhouette(mask, cameraOffset.x, cameraOffset.y));
+    // 后处理光效单独一层，和单位共用迷雾遮罩后以 lighter 叠加。
+    const effects = this.effectContext;
+    effects.setTransform(1, 0, 0, 1, 0, 0);
+    effects.globalCompositeOperation = "source-over";
+    effects.clearRect(0, 0, this.effectCanvas.width, this.effectCanvas.height);
+    this.goldPickups.forEach(pickup => pickup.drawGlow(effects, cameraOffset.x, cameraOffset.y));
+    this.goldPickups.forEach(pickup => pickup.drawSparkles(effects, cameraOffset.x, cameraOffset.y));
+    this.visibilitySystem.apply(effects);
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(this.effectCanvas, 0, 0);
+    ctx.restore();
     this.player.drawUI(ctx, cameraOffset.x, cameraOffset.y);
     screenContext.drawImage(this.worldCanvas, 0, 0, screenContext.canvas.width, screenContext.canvas.height);
     ctx = screenContext;
+    // 拾取飘字画在屏幕层：沿用 HUD 的 dpr 约定，白字不随光照变暗。
+    ctx.save();
+    const textDpr = window.devicePixelRatio || 1;
+    ctx.scale(textDpr, textDpr);
+    this.floatingTexts.draw(ctx, cameraOffset.x, cameraOffset.y,
+      (screenContext.canvas.width / textDpr) / this.camera.width);
+    ctx.restore();
     ctx.save();
     const dpr = window.devicePixelRatio || 1;
     ctx.scale(dpr, dpr);
@@ -607,6 +996,10 @@ export class GameScene extends Scene {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillText(`黄金 ${this.player.getGold()}`, 46, 32);
+    ctx.fillStyle = "#e05a5a";
+    ctx.fillRect(24, 50, 12, 12);
+    ctx.fillStyle = "#ffd6d6";
+    ctx.fillText(`肉块 ${this.player.getMeat()}`, 46, 56);
     ctx.restore();
     this.drawCrosshair(ctx);
   }
@@ -638,11 +1031,20 @@ export class GameScene extends Scene {
 
   private drawCrosshair(ctx: CanvasRenderingContext2D): void {
     const pointer = this.game.input.getPointerState?.();
-    if (!pointer?.active) return;
+    if (!pointer?.active) { this.crosshairTighten = 0; return; }
     const rect = this.getCanvasViewport();
-    if (rect.width <= 0 || rect.height <= 0) return;
+    if (rect.width <= 0 || rect.height <= 0) { this.crosshairTighten = 0; return; }
+
+    const overTarget = this.isCrosshairOnTarget(pointer);
+    const onTarget = pointer.rightDown && overTarget;
+    const dt = Math.min(Math.max(this.deltaSinceLastFrame, 0), 0.1);
+    const rate = onTarget ? GameScene.CROSSHAIR_TIGHTEN_RATE : -GameScene.CROSSHAIR_RELEASE_RATE;
+    this.crosshairTighten = Math.min(1, Math.max(0, this.crosshairTighten + rate * dt));
+    const gap = GameScene.CROSSHAIR_GAP_IDLE
+      + (GameScene.CROSSHAIR_GAP_AIMED - GameScene.CROSSHAIR_GAP_IDLE) * this.crosshairTighten
+      + this.player.getRecoilState().intensity * 8;
+
     const x = pointer.clientX - rect.left, y = pointer.clientY - rect.top;
-    const gap = 4 + this.player.getRecoilState().intensity * 8;
     ctx.save();
     ctx.setTransform(ctx.canvas.width / rect.width, 0, 0, ctx.canvas.height / rect.height, 0, 0);
     ctx.beginPath();
@@ -651,18 +1053,32 @@ export class GameScene extends Scene {
     ctx.moveTo(x, y - gap - 7); ctx.lineTo(x, y - gap);
     ctx.moveTo(x, y + gap); ctx.lineTo(x, y + gap + 7);
     ctx.strokeStyle = '#101820'; ctx.lineWidth = 3.5; ctx.stroke();
-    ctx.strokeStyle = '#d8faff'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.strokeStyle = overTarget ? '#ff3b30' : '#d8faff'; ctx.lineWidth = 1.5; ctx.stroke();
     ctx.fillStyle = '#d8faff'; ctx.fillRect(x - 1, y - 1, 2, 2);
     ctx.restore();
+  }
+
+  /** 准星中心是否压在活鸡的命中圆内；与子弹使用同一套命中判定。 */
+  private isCrosshairOnTarget(pointer: { clientX: number; clientY: number }): boolean {
+    const world = this.screenToWorld(pointer.clientX, pointer.clientY);
+    if (!world) return false;
+    return this.chickens.some(chicken =>
+      chicken.hitTestSegment(world.x, world.y, world.x, world.y, 0) !== null);
+  }
+
+  /** 重建单位可见性遮罩：以角色为中心的圆形柔边迷雾。 */
+  private prepareFog(cameraX: number, cameraY: number): void {
+    const vision = this.player.getVisionState();
+    // 半径很小时同步收窄外缘过渡，避免整圈都是渐变。
+    const feather = Math.min(GameScene.FOG_FEATHER, vision.range * 0.35);
+    this.visibilitySystem.prepare(cameraX, cameraY, vision.x, vision.y, vision.range, feather);
   }
 
   /**
    * 应用光照效果
    */
   private applyLighting(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number) {
-    this.playerLight.setRangeScale(this.player.getVisionState().range / 400);
-    // 准备光照遮罩
-    // 使用与世界绘制一致的相机偏移
+    // 单位光不改变视野远近和角度：手电筒与脚边微光的范围完全由光源自身决定。
     this.lightingSystem.prepareLightingMask(
       cameraX,
       cameraY,

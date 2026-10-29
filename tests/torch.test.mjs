@@ -38,23 +38,34 @@ test('torch light sways occasionally, returns smoothly, and follows elapsed time
   assert.notDeepEqual(other.light.getPosition(), positions[0], 'phases keep different torches out of sync');
 });
 
-test('random torches use dry clear ground, stay spaced, and reproduce with the map seed', () => {
+test('random torches use dry clear ground near walls, stay spaced, and reproduce with the map seed', () => {
   const scene = new GameScene({ seed: 42 });
-  const torches = scene.torches;
+  const torches = scene.torches, map = scene.map;
   assert.ok(torches.length >= 10 && torches.length <= 25, `torch count: ${torches.length}`);
-  assert.equal(scene.lightingSystem.getLightCount(), torches.length + 2);
+  assert.equal(scene.lightingSystem.getLightCount(), torches.length + 3);
   assert.deepEqual(torches, new GameScene({ seed: 42 }).torches);
   for (const [i, torch] of torches.entries()) {
     const body = rectangleCollider(torch.x - 14, torch.y - 18, 28, 42);
-    assert.ok(scene.map.isShapeWalkable(body));
-    assert.equal(scene.map.getShapeSpeedFactor(body), 1);
-    assert.equal(scene.map.blocksLightAt(torch.x, torch.y), false);
-    assert.equal(torch.light.shadowTerrain, true);
+    assert.ok(map.isShapeWalkable(body));
+    assert.equal(map.getShapeSpeedFactor(body), 1);
+    assert.equal(map.blocksLightAt(torch.x, torch.y), false);
+    assert.equal(torch.light.shadowTerrain, false);
+    assert.equal(torch.light.groundOnly, true);
+    // 火把必须落在墙体 2 格范围内。
+    const col = Math.floor(torch.x / map.tileSize), row = Math.floor(torch.y / map.tileSize);
+    let nearWall = false;
+    for (let r = Math.max(0, row - 2); r <= Math.min(map.height - 1, row + 2); r++)
+      for (let c = Math.max(0, col - 2); c <= Math.min(map.width - 1, col + 2); c++)
+        if (map.tiles[r][c] === 'wall') nearWall = true;
+    assert.ok(nearWall, `torch at (${torch.x}, ${torch.y}) is within 2 tiles of a wall`);
     for (const other of torches.slice(i + 1)) assert.ok(Math.hypot(torch.x - other.x, torch.y - other.y) >= 320);
   }
   const blocked = new TileMap(10, 10, { generateWater: false });
   blocked.tiles.forEach(row => row.fill('wall'));
   assert.deepEqual(Torch.generate(blocked, seededRandom(42)), []);
+  const open = new TileMap(100, 100, { generateWater: false });
+  open.tiles.forEach(row => row.fill('default'));
+  assert.deepEqual(Torch.generate(open, seededRandom(42)), [], 'open ground with no wall nearby gets no torches');
 });
 
 test('walking and shooting through a torch leaves it and its light intact', () => {

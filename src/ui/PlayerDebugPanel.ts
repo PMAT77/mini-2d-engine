@@ -1,6 +1,7 @@
 import { Input } from '../core/Input';
 import { LightSource } from '../core/LightSource';
-import { Player, PlayerDebugValues } from '../objects/Player';
+import { ConeLight } from '../core/ConeLight';
+import { Player } from '../objects/Player';
 import { BulletWaterDrag, PlayerConfig } from '../objects/PlayerConfig';
 
 type DebugState = ReturnType<Player['getDebugState']>;
@@ -22,13 +23,19 @@ export class PlayerDebugPanel {
   private toggle = document.createElement('button');
   private fields: Field[] = [];
   private meters: { meter: HTMLProgressElement; text: HTMLElement; read: (state: DebugState) => [number, number] }[] = [];
+  private checkboxes: { input: HTMLInputElement; read: () => boolean }[] = [];
   private sprintSpeed = document.createElement('output');
-  private heatStatus = document.createElement('span');
+  private ammoStatus = document.createElement('span');
   private elapsed = 0;
+  private initialVisionRange: number;
+  private initialFlashlight: { radius: number; intensity: number };
 
   constructor(private player: Player, private input: Input, private canvas: HTMLCanvasElement,
-    private light: LightSource, private initialConfig: PlayerConfig = player.getConfigSnapshot(),
+    private light: LightSource, private flashlight: ConeLight,
+    private initialConfig: PlayerConfig = player.getConfigSnapshot(),
     private initialLight = { radius: light.getRadius(), intensity: light.getIntensity() }) {
+    this.initialVisionRange = player.getVisionRange();
+    this.initialFlashlight = { radius: flashlight.getRadius(), intensity: flashlight.getIntensity() };
     this.root.className = 'player-debug';
     this.root.dataset.playerDebug = '';
     this.toggle.type = 'button';
@@ -101,33 +108,71 @@ export class PlayerDebugPanel {
     this.configField(stamina, 'sprint', 'restartThreshold', '耗尽恢复门槛', '比例', 0.001, 0.05, 1);
     stamina.append(this.button('体力回满', () => this.player.setDebugState({ stamina: this.player.getMaxStamina() })));
 
-    const heat = this.section(content, '热量与冷却');
-    heat.append(this.heatStatus);
-    this.meter(heat, '武器热量', s => [s.heatPercentage, 100], 'heat');
-    this.stateField(heat, 'heatPercentage', '当前热量', '%', () => 100);
-    this.configField(heat, 'shooting', 'maxShootingTime', '持续射击容量', '秒', 0.01, 0.1);
-    this.configField(heat, 'shooting', 'maxOverheatCooldownTime', '过热冷却总时长', '秒', 0.01, 0.1);
-    this.meter(heat, '过热剩余冷却', s => [s.overheatCooldownRemaining,
-      this.player.getConfigSnapshot().shooting!.maxOverheatCooldownTime!], 'cooldown');
-    this.stateField(heat, 'overheatCooldownRemaining', '剩余冷却', '秒',
-      () => this.player.getConfigSnapshot().shooting!.maxOverheatCooldownTime!);
-    heat.append(this.button('清除过热', () => this.player.setDebugState({ heatPercentage: 0 })));
+    const ammo = this.section(content, '弹药与换弹');
+    ammo.append(this.ammoStatus);
+    this.meter(ammo, '弹匣余弹', s => [s.magazineAmmo, s.magazineSize], 'ammo');
+    this.stateField(ammo, 'magazineAmmo', '弹匣余弹', '发', () => this.player.getMagazineSize());
+    this.field(ammo, 'chambered', '膛内子弹', '发', 0, 1, {
+      read: (_config, state) => state.chambered ? 1 : 0,
+      write: value => this.player.setDebugState({ chambered: value !== 0 }),
+      max: () => 1,
+    });
+    this.configField(ammo, 'shooting', 'magazineSize', '弹匣容量', '发', 1, 1);
+    this.configField(ammo, 'shooting', 'reloadDuration', '换弹时长', '秒', 0.01, 0.1);
+    this.checkbox(ammo, 'autoReload', '打空自动换弹', () => this.player.getAutoReload(),
+      value => this.player.setAutoReload(value));
+    this.meter(ammo, '换弹进度', s => [s.reloadProgress, 100], 'reload');
+    this.stateField(ammo, 'reloadProgress', '换弹进度', '%', () => 100);
+    ammo.append(
+      this.button('打空弹匣', () => this.player.setDebugState({ magazineAmmo: 0, chambered: false })),
+      this.button('立即换弹', () => this.player.requestReload()),
+      this.button('补满弹匣', () => this.player.setDebugState({
+        magazineAmmo: this.player.getMagazineSize(), chambered: true,
+      })),
+    );
 
-    const lighting = this.section(content, '角色光照');
-    this.field(lighting, 'light.radius', '光圈半径', 'px', 0, 25, {
+    const lighting = this.section(content, '角色微光');
+    this.field(lighting, 'light.radius', '微光半径', 'px', 0, 25, {
       read: () => this.light.getRadius(), write: value => this.light.setRadius(value),
     });
-    this.field(lighting, 'light.intensity', '光照强度', '', 0, 0.1, {
+    this.field(lighting, 'light.intensity', '微光强度', '', 0, 0.1, {
       read: () => this.light.getIntensity(), write: value => this.light.setIntensity(value), max: () => 2,
     });
+    const flashNote = document.createElement('p'); flashNote.className = 'debug-derived';
+    flashNote.textContent = '只照地面，不影响地形顶面';
+    lighting.append(flashNote);
+
+    const torch = this.section(content, '锥形手电筒');
+    this.field(torch, 'flashlight.radius', '手电筒距离', 'px', 100, 25, {
+      read: () => this.flashlight.getRadius(), write: value => this.flashlight.setRadius(value), max: () => 1600,
+    });
+    this.field(torch, 'flashlight.intensity', '手电筒强度', '', 0, 0.05, {
+      read: () => this.flashlight.getIntensity(), write: value => this.flashlight.setIntensity(value), max: () => 2,
+    });
+    const torchNote = document.createElement('p'); torchNote.className = 'debug-derived';
+    torchNote.textContent = '张角固定 120°，G 键开关';
+    torch.append(torchNote);
+
+    const fog = this.section(content, '战争迷雾');
+    this.field(fog, 'vision.range', '迷雾半径', 'px', 100, 10, {
+      read: () => this.player.getVisionRange(), write: value => this.player.setVisionRange(value), max: () => 1600,
+    });
+    const fogNote = document.createElement('p'); fogNote.className = 'debug-derived';
+    fogNote.textContent = '只影响单位的可见范围；地形始终可见';
+    fog.append(fogNote);
 
     const footer = document.createElement('footer');
     const note = document.createElement('small'); note.textContent = '本次运行生效 · 刷新后还原';
     footer.append(this.button('恢复初始参数', () => {
       this.player.applyConfig(this.initialConfig);
-      this.player.setDebugState({ health: this.player.getMaxHealth(), stamina: this.player.getMaxStamina(), heatPercentage: 0 });
+      this.player.setDebugState({ health: this.player.getMaxHealth(), stamina: this.player.getMaxStamina(),
+        magazineAmmo: this.player.getMagazineSize(), chambered: true });
       this.light.setRadius(this.initialLight.radius);
       this.light.setIntensity(this.initialLight.intensity);
+      this.flashlight.setRadius(this.initialFlashlight.radius);
+      this.flashlight.setIntensity(this.initialFlashlight.intensity);
+      this.player.setVisionRange(this.initialVisionRange);
+      this.player.setAutoReload(false);
       this.fields.forEach(field => this.clearError(field));
       this.refresh(true);
     }), note);
@@ -170,7 +215,8 @@ export class PlayerDebugPanel {
     });
   }
 
-  private stateField(parent: HTMLElement, key: keyof PlayerDebugValues, label: string, unit: string, max: Field['max']): void {
+  private stateField(parent: HTMLElement, key: 'health' | 'stamina' | 'magazineAmmo' | 'reloadProgress',
+    label: string, unit: string, max: Field['max']): void {
     this.field(parent, key, label, unit, 0, 'any', {
       read: (_config, state) => state[key], write: value => this.player.setDebugState({ [key]: value }), max,
     });
@@ -211,6 +257,17 @@ export class PlayerDebugPanel {
     row.append(name, input, suffix, effective, error); parent.append(row); this.fields.push(field);
   }
 
+  /** 调试开关：只影响运行时行为，不写进配置快照。 */
+  private checkbox(parent: HTMLElement, id: string, label: string, read: () => boolean, write: (value: boolean) => void): void {
+    const row = document.createElement('div'); row.className = 'debug-field debug-check';
+    const name = document.createElement('label'); name.htmlFor = `debug-${id}`; name.textContent = label;
+    const input = document.createElement('input'); input.type = 'checkbox'; input.id = name.htmlFor;
+    input.dataset.debugField = id;
+    input.addEventListener('change', () => { write(input.checked); this.refresh(); });
+    row.append(name, input); parent.append(row);
+    this.checkboxes.push({ input, read });
+  }
+
   private clearError(field: Field): void {
     field.error.textContent = ''; field.input.removeAttribute('aria-invalid');
   }
@@ -227,7 +284,6 @@ export class PlayerDebugPanel {
         field.input.value = field.input.dataset.debugField!.includes('.') ? String(base) : this.format(base);
       }
       if (field.max) field.input.max = String(field.max(state));
-      if (field.input.dataset.debugField === 'overheatCooldownRemaining') field.input.disabled = !state.isOverheated;
       const actual = field.actual?.(state);
       field.effective.textContent = actual !== undefined && Math.abs(actual - base) > 0.0001 ? `实际 ${this.format(actual)}` : '';
     }
@@ -235,12 +291,14 @@ export class PlayerDebugPanel {
       const [value, max] = read(state); meter.max = max; meter.value = value;
       text.textContent = `${this.format(value)} / ${this.format(max)}`;
     }
+    for (const { input, read } of this.checkboxes) input.checked = read();
     this.sprintSpeed.value = `${this.format(config.base!.maxSpeed! * config.sprint!.speedMultiplier!)} px/s`;
     if (Math.abs(state.effectiveSprintSpeed - config.base!.maxSpeed! * config.sprint!.speedMultiplier!) > 0.0001) {
       this.sprintSpeed.value += ` · 实际 ${this.format(state.effectiveSprintSpeed)}`;
     }
-    this.heatStatus.textContent = state.isOverheated ? '过热 · 冷却中' : '可射击';
-    this.heatStatus.className = state.isOverheated ? 'debug-status overheated' : 'debug-status';
+    this.ammoStatus.textContent = state.isReloading ? '换弹中'
+      : state.magazineAmmo + (state.chambered ? 1 : 0) > 0 ? '可射击' : '弹匣已空';
+    this.ammoStatus.className = state.isReloading ? 'debug-status reloading' : 'debug-status';
     this.root.dataset.exhausted = String(state.exhausted);
   }
 

@@ -51,12 +51,12 @@ try {
       return { x: r.left + (325 - v.x) * r.width / v.width, y: r.top + (225 - v.y) * r.height / v.height };
     });
     await page.mouse.move(mouseTarget.x, mouseTarget.y); await page.mouse.down();
-    assert.deepEqual(await page.evaluate(() => stagedMining.untilHits(3)), [2, 2, 4]);
+    assert.deepEqual(await page.evaluate(() => stagedMining.untilHits(3)), [1, 1, 2]);
     await page.mouse.up();
     await page.evaluate(() => stagedMining.advance(0.12));
     await page.screenshot({ path: `${output}/mining-partial-dpr${dpr}.png` });
     await page.mouse.move(mouseTarget.x, mouseTarget.y); await page.mouse.down();
-    assert.deepEqual(await page.evaluate(() => stagedMining.untilHits(10)), [2, 2, 4, 4, 6, 6, 8, 8, 10, 20]);
+    assert.deepEqual(await page.evaluate(() => stagedMining.untilHits(10)), [1, 1, 2, 2, 3, 3, 4, 4, 5, 10]);
     await page.mouse.up();
     await page.evaluate(() => stagedMining.advance(0.7));
     assert.equal(await page.evaluate(() => stagedMining.safe), true);
@@ -77,7 +77,7 @@ try {
       t.advance(0.3, { isKeyDown: () => false });
       return { collected: p.getGold(), remaining: t.scene.goldPickups.length, safe: t.safe };
     });
-    assert.deepEqual(gold, { collected: 20, remaining: 0, safe: true });
+    assert.deepEqual(gold, { collected: 10, remaining: 0, safe: true });
     await page.screenshot({ path: `${output}/mining-collected-dpr${dpr}.png` });
     console.log(JSON.stringify({ dpr, stagedMining: gold }));
     await page.evaluate(() => {

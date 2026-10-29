@@ -4,6 +4,8 @@ import { Vector2 } from "../math/Vector2";
  * 光源类，表示点光源或有限尺寸的圆盘光源
  */
 export class LightSource {
+  /** 渲染形状：点光源由子类覆盖为锥形。 */
+  readonly shape: 'point' | 'cone' = 'point';
   private position: Vector2;
   private radius: number;
   private color: string;
@@ -11,8 +13,10 @@ export class LightSource {
   private isActive: boolean;
   private sourceRadius = 0;
   private rangeScale = 1;
-  /** 火炬等低位光源也会被前方障碍遮住其他地形顶面；默认保留玩家光的顶面照明。 */
+  /** 单位光的投影只作用于地面：地形顶面永远保持环境光，不会被任何光投影压暗。 */
   shadowTerrain = false;
+  /** 只照亮地面和水域：有高度的地形顶面不参与该光源，避免灯光“爬上”墙顶。 */
+  groundOnly = false;
 
   /**
    * 构造函数

@@ -31,9 +31,19 @@ export interface PlayerConfig {
     speedMultiplier?: number; rampDuration?: number; maxStamina?: number; drainPerSecond?: number;
     regenPerSecond?: number; regenDelay?: number; restartThreshold?: number;
   };
-  animation?: { breathingAmplitude?: number; breathingSpeed?: number };
+  animation?: {
+    breathingAmplitude?: number; breathingSpeed?: number;
+    /** 跑步摇摆幅度，占 size 的百分比；0 关闭。 */
+    runSwayAmplitude?: number;
+    /** 基础移速下的摇摆角速度（弧度/秒）；0 冻结相位。 */
+    runSwaySpeed?: number;
+  };
   shooting?: Partial<typeof DEFAULT_BALLISTICS> & {
-    damage?: number; fireRate?: number; bulletSpeed?: number; maxShootingTime?: number; maxOverheatCooldownTime?: number;
+    damage?: number; fireRate?: number; bulletSpeed?: number;
+    /** 弹匣容量（不含膛内那一发），必须是正整数。 */
+    magazineSize?: number;
+    /** 换弹时长（秒）。 */
+    reloadDuration?: number;
     /** @deprecated Accepted for old files; mouse aiming is immediate. */
     aimTurnDuration?: number;
     /** @deprecated Accepted for old files; mouse aiming never times out. */
@@ -54,8 +64,8 @@ export function parsePlayerConfig(value: unknown): PlayerConfig {
     base: ["size", "maxHealth", "maxSpeed", "accel", "decel", "nonlinearFactor", "rotationSpeed", "rotationStrategy"],
     movement: Object.keys(DEFAULT_MOVEMENT),
     sprint: Object.keys(DEFAULT_SPRINT),
-    animation: ["breathingAmplitude", "breathingSpeed"],
-    shooting: ["damage", "fireRate", "bulletSpeed", "maxShootingTime", "maxOverheatCooldownTime", "aimContinuityWindow", "aimTurnDuration", ...Object.keys(DEFAULT_BALLISTICS)],
+    animation: ["breathingAmplitude", "breathingSpeed", "runSwayAmplitude", "runSwaySpeed"],
+    shooting: ["damage", "fireRate", "bulletSpeed", "magazineSize", "reloadDuration", "aimContinuityWindow", "aimTurnDuration", ...Object.keys(DEFAULT_BALLISTICS)],
     ui: ["fadeSpeed"],
     bulletWaterDrag: Object.keys(DEFAULT_BULLET_WATER_DRAG),
   };
@@ -69,7 +79,7 @@ export function parsePlayerConfig(value: unknown): PlayerConfig {
       if (key === "rotationStrategy") {
         if (!["cw", "ccw", "auto"].includes(field as string)) throw new Error("rotationStrategy 必须是 cw、ccw 或 auto");
       } else {
-        const allowZero = group === "bulletWaterDrag" || ["maxSpeed", "breathingAmplitude", "breathingSpeed", "nonlinearFactor", "startSpeedRatio", "startupDuration", "turnDamping", "stopDuration", "rampDuration", "regenDelay", "aimTurnDuration", "spreadHorizontal", "spreadVertical", "maxSpreadHorizontal", "maxSpreadVertical", "recoilPerShot", "recoilRecoveryDelay"].includes(key);
+        const allowZero = group === "bulletWaterDrag" || ["maxSpeed", "breathingAmplitude", "breathingSpeed", "runSwayAmplitude", "runSwaySpeed", "nonlinearFactor", "startSpeedRatio", "startupDuration", "turnDamping", "stopDuration", "rampDuration", "regenDelay", "aimTurnDuration", "spreadHorizontal", "spreadVertical", "maxSpreadHorizontal", "maxSpreadVertical", "recoilPerShot", "recoilRecoveryDelay"].includes(key);
         if (typeof field !== "number" || !Number.isFinite(field) || (allowZero ? field < 0 : field <= 0)) {
           throw new Error(`无效配置值: ${group}.${key} 必须是${allowZero ? "非负" : "正"}有限数值`);
         }
@@ -77,6 +87,7 @@ export function parsePlayerConfig(value: unknown): PlayerConfig {
         if (key === "speedMultiplier" && field <= 1) throw new Error("sprint.speedMultiplier 必须大于 1");
         if ((key.includes('Spread') || key.startsWith('spread')) && field >= 45) throw new Error(`${group}.${key} 必须小于 45 度`);
         if (key === 'recoilPerShot' && field > 1) throw new Error('recoilPerShot 不能大于 1');
+        if (key === 'magazineSize' && !Number.isInteger(field)) throw new Error('弹匣容量必须是正整数');
       }
     }
   }

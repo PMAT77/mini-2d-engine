@@ -1,5 +1,6 @@
 import { LightSource } from '../core/LightSource';
 import { TileMap } from '../map/TileMap';
+import { TileTypeId } from '../map/TileType';
 import { Vector2 } from '../math/Vector2';
 import { rectangleCollider } from '../physics/Collider';
 
@@ -11,7 +12,18 @@ export class Torch {
   constructor(readonly x: number, readonly y: number, phase = 0) {
     this.time = phase;
     this.light = new LightSource(new Vector2(x, y), 180, '#FFAD55', 1, 4);
-    this.light.shadowTerrain = true;
+    this.light.groundOnly = true;
+  }
+
+  /** 只贴着墙放：以瓦片计，2 格内必须有墙体，火把才不会孤零零立在旷野。 */
+  private static nearWall(map: TileMap, x: number, y: number, radius = 2): boolean {
+    const col = Math.floor(x / map.tileSize), row = Math.floor(y / map.tileSize);
+    for (let r = Math.max(0, row - radius); r <= Math.min(map.height - 1, row + radius); r++) {
+      for (let c = Math.max(0, col - radius); c <= Math.min(map.width - 1, col + radius); c++) {
+        if (map.tiles[r][c] === TileTypeId.WALL) return true;
+      }
+    }
+    return false;
   }
 
   static generate(map: TileMap, random: () => number = Math.random): Torch[] {
@@ -26,7 +38,7 @@ export class Torch {
       for (let attempt = 0; attempt < 24; attempt++) {
         const x = left + 25 + random() * (w - 50), y = top + 25 + random() * (h - 50);
         const footprint = rectangleCollider(x - 14, y - 18, 28, 42);
-        if (!map.isShapeWalkable(footprint) || map.getShapeSpeedFactor(footprint) < 1
+        if (!Torch.nearWall(map, x, y) || !map.isShapeWalkable(footprint) || map.getShapeSpeedFactor(footprint) < 1
           || torches.some(torch => Math.hypot(torch.x - x, torch.y - y) < 320)) continue;
         torches.push(new Torch(x, y, random() * Math.PI * 2));
         break;
@@ -48,23 +60,41 @@ export class Torch {
 
   draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number): void {
     const x = this.x - cameraX, y = this.y - cameraY;
-    if (x < -20 || y < -30 || x > ctx.canvas.width + 20 || y > ctx.canvas.height + 30) return;
+    if (x < -20 || y < -25 || x > ctx.canvas.width + 20 || y > ctx.canvas.height + 25) return;
     ctx.save();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
-    ctx.beginPath(); ctx.ellipse(x, y + 20, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#654029'; ctx.fillRect(x - 3, y + 3, 6, 18);
-    ctx.fillStyle = '#A57743'; ctx.fillRect(x - 2, y + 3, 2, 17);
-    ctx.fillStyle = '#36383D'; ctx.fillRect(x - 6, y + 2, 12, 5);
-    const sway = Math.sin(this.time * 7) * 1.5;
-    const height = 13 + Math.sin(this.time * 11) * 2;
-    ctx.fillStyle = '#FF792B';
-    ctx.beginPath(); ctx.moveTo(x, y + 5);
-    ctx.bezierCurveTo(x - 11, y + 1, x - 5, y - 7, x + sway, y - height);
-    ctx.bezierCurveTo(x + 2, y - 5, x + 10, y + 2, x, y + 5); ctx.fill();
-    ctx.fillStyle = '#FFF0A4';
-    ctx.beginPath(); ctx.moveTo(x, y + 4);
-    ctx.quadraticCurveTo(x - 5, y + 1, x + sway / 2, y - 6);
-    ctx.quadraticCurveTo(x + 5, y + 2, x, y + 4); ctx.fill();
+
+    // 俯视阴影紧贴脚下，不再向侧面拖出侧视火炬的长影。
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.beginPath(); ctx.ellipse(x + 1, y + 8, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 从上往下只能看到火焰下方一小截木柄和顶部铁箍，看不到长木杆。
+    ctx.fillStyle = '#654029'; ctx.fillRect(x - 3, y + 1, 6, 8);
+    ctx.fillStyle = '#A57743'; ctx.fillRect(x - 3, y + 1, 2, 8);
+    ctx.fillStyle = '#36383D';
+    ctx.beginPath(); ctx.ellipse(x, y + 1, 4.5, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 火焰俯视是一团短圆火苗：轮廓没有向上的尖，避免再出现侧视的高火舌。
+    const sway = Math.sin(this.time * 7) * 1.2;
+    const breathe = 1 + Math.sin(this.time * 11) * 0.05;
+    ctx.translate(x + sway * 0.25, y - 1);
+    ctx.scale(breathe, breathe);
+    const glow = ctx.createRadialGradient(sway * 0.2, 1, 0.5, 0, 1, 8.5);
+    glow.addColorStop(0, '#FFF3C4');
+    glow.addColorStop(0.32, '#FFD36A');
+    glow.addColorStop(0.62, '#FF9A35');
+    glow.addColorStop(0.86, '#F0641D');
+    glow.addColorStop(1, '#D24610');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.moveTo(-6.8, -2.5);
+    ctx.bezierCurveTo(-7.6, -5.6, -5.6, -7.4, -3.4, -6.8);
+    ctx.bezierCurveTo(-2, -8.2, 0.4, -8.4, 1.8, -7);
+    ctx.bezierCurveTo(4.2, -7.8, 6.4, -5.8, 6.5, -3.4);
+    ctx.bezierCurveTo(8.4, -1.2, 8, 2.2, 5.6, 4.2);
+    ctx.bezierCurveTo(3, 6.2, -2.8, 6.4, -5.4, 4.4);
+    ctx.bezierCurveTo(-7.8, 2.2, -8.2, -0.4, -6.8, -2.5);
+    ctx.closePath();
+    ctx.fill();
     ctx.restore();
   }
 }

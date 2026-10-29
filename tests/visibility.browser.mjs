@@ -9,124 +9,110 @@ mkdirSync(output, { recursive: true });
 const results = [];
 try {
   for (const dpr of [1, 1.25, 2]) {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: dpr });
-    const page = await context.newPage(), errors = [], requests = [];
-    page.on('pageerror', e => errors.push(e.message)); page.on('request', r => requests.push(r.url()));
+    const context = await browser.newContext({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: dpr });
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', e => errors.push(e.message));
     await page.route('**/@vite/client', route => route.fulfill({ contentType: 'application/javascript', body: 'export {};' }));
     await page.goto(base);
     await page.evaluate(async () => { window.visionGame = (await import('/src/main.ts')).game; });
     await page.keyboard.down('Enter');
     await page.waitForSelector('[data-player-debug]'); await page.keyboard.up('Enter');
     await page.evaluate(() => { window.requestAnimationFrame = () => 0; });
-    await page.waitForTimeout(60);
-    assert.ok(!requests.some(url => url.includes('avatar.png')), 'the procedural model does not load an avatar');
-    await page.screenshot({ path: `${output}/cylinder-gameplay-dpr${dpr}.png` });
-    await page.evaluate(async () => {
-      const { Torch } = await import('/src/objects/Torch.ts');
+
+    const scene = await page.evaluate(async () => {
+      const { TileMap } = await import('/src/map/TileMap.ts');
       const { GoldPickup } = await import('/src/objects/GoldPickup.ts');
-      const game = visionGame, scene = game.sceneManager.getCurrentScene(), p = scene.player;
-      scene.map = new scene.map.constructor(40, 30, { generateWater: false });
+      const game = window.visionGame, scene = game.sceneManager.getCurrentScene();
+      scene.map = new TileMap(40, 30, { generateWater: false });
       scene.map.tiles.forEach(row => row.fill('default'));
-      scene.pickupItems = []; scene.goldPickups = []; scene.torches = []; scene.particleSystem.clear();
-      scene.lightingSystem.clearAllLights(); scene.lightingSystem.addLightSource(scene.playerLight);
-      p.x = 300.5; p.y = 425.5; p.currentRotation = Math.PI; p.velocity.set(0, 0);
-      p.applyConfig({ animation: { breathingAmplitude: 0 }, shooting: { spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 } });
-      p.setOnShootCallback(() => {}); p.bullets = []; p.fireCooldown = 0;
-      const lightPosition = p.getVelocity(); lightPosition.set(325, 450); scene.playerLight.setPosition(lightPosition);
-      scene.camera.reset(); scene.camera.x = .375; scene.camera.y = .625;
-      game.input.clear(); scene.deltaSinceLastFrame = 0;
-      const t = window.visionTest = {
-        game, scene, p, Torch, GoldPickup,
-        render() { scene.draw(game.renderer.ctx); },
-        tick(delta) { p.update(delta, game.input, scene.map, scene.getPointerAim(game.input)); this.render(); },
-        client(x, y) { const v = scene.displayedView, r = scene.getCanvasViewport(); return { x: r.left + (x - v.x) * r.width / v.width, y: r.top + (y - v.y) * r.height / v.height }; },
-        pixel(x, y, canvas = scene.visibilitySystem.canvas) { const v = scene.displayedView; return [...canvas.getContext('2d').getImageData(Math.floor(x - v.x), Math.floor(y - v.y), 1, 1).data]; },
+      scene.map.tileHp.forEach(row => row.fill(0));
+      scene.torches.forEach(t => scene.lightingSystem.removeLightSource(t.light)); scene.torches = [];
+      scene.pickupItems = []; scene.particleSystem.clear();
+      const s = scene.map.tileSize, px = 20.5 * s, py = 15.5 * s;
+      scene.player.x = px - 24.5; scene.player.y = py - 24.5;
+      scene.player.currentRotation = Math.PI / 2; // 视野朝上
+      scene.playerLight.getPosition().set(px, py);
+      scene.flashlight.getPosition().set(px, py);
+      scene.flashlight.setDirection(-Math.PI / 2);
+      scene.camera.x = px - scene.camera.width / 2; scene.camera.y = py - scene.camera.height / 2;
+      // 迷雾内 150px、迷雾外 520px 各放一个金块。
+      scene.goldPickups = [new GoldPickup(px, py - 150, px, py - 150), new GoldPickup(px, py - 520, px, py - 520)];
+      scene.goldPickups.forEach(g => g.update(1));
+      window.visionTest = {
+        scene, px, py,
+        draw(flashlight = true) { scene.flashlight.setActive(flashlight); scene.draw(game.renderer.ctx); },
+        pixel(x, y, canvas = scene.worldContext) {
+          const v = scene.displayedView;
+          return [...canvas.getImageData(Math.round(x - v.x), Math.round(y - v.y), 1, 1).data];
+        },
       };
-      t.render();
+      window.visionTest.draw(true);
+      return {
+        vision: scene.player.getVisionState(),
+        inside: window.visionTest.pixel(px + 4, py - 146),
+        outside: window.visionTest.pixel(px + 4, py - 516),
+        groundOutside: window.visionTest.pixel(px + 520, py),
+        sizes: { world: [scene.worldCanvas.width, scene.worldCanvas.height],
+          mask: [scene.visibilitySystem.getCanvas().width, scene.visibilitySystem.getCanvas().height] },
+      };
     });
-    const daily = await page.evaluate(() => {
-      const t = visionTest, v = t.p.getVisionState();
-      const polar = degrees => t.pixel(v.x + Math.cos(degrees * Math.PI / 180) * 200, v.y + Math.sin(degrees * Math.PI / 180) * 200)[0];
-      return { v, front: t.pixel(525, 450)[0], rear: t.pixel(125, 450)[0], far: t.pixel(750, 450)[0],
-        inner: polar(56), feather: polar(58.5), outside: polar(61), edge: t.pixel(713, 450)[0] };
-    });
-    assert.equal(daily.front, 255); assert.equal(daily.rear, 8); assert.equal(daily.far, 8);
-    assert.equal(daily.inner, 255); assert.ok(daily.feather > 40 && daily.feather < 220); assert.equal(daily.outside, 8);
-    assert.ok(daily.edge > 60 && daily.edge < 200);
-    await page.screenshot({ path: `${output}/cylinder-daily-dpr${dpr}.png` });
-    const far = await page.evaluate(() => visionTest.client(1125, 450));
-    await page.mouse.move(far.x, far.y); await page.mouse.down({ button: 'right' });
-    const raised = await page.evaluate(() => {
-      const t = visionTest; t.tick(.05); const half = t.p.armLift; t.tick(.95);
-      return { half, lift: t.p.armLift, v: t.p.getVisionState(), distant: t.pixel(1000, 450)[0], side: t.pixel(525, 600)[0],
-        baseRadius: t.scene.playerLight.getRadius(), effectiveRadius: t.scene.playerLight.getEffectiveRadius() };
-    });
-    assert.equal(raised.half, .5); assert.equal(raised.lift, 1);
-    assert.ok(Math.abs(raised.v.range - 800) < .01); assert.ok(Math.abs(raised.v.angle * 180 / Math.PI - 45) < .01);
-    assert.equal(raised.distant, 255); assert.equal(raised.side, 8);
-    assert.equal(raised.baseRadius, 400); assert.ok(Math.abs(raised.effectiveRadius - 800) < .01);
-    await page.screenshot({ path: `${output}/cylinder-focused-dpr${dpr}.png` });
-    await page.mouse.down();
-    const shot = await page.evaluate(() => {
-      const t = visionTest; t.tick(0); const b = t.p.getBullets()[0];
-      return { hand: t.p.getMuzzlePosition(), bullet: { x: b.getPosition().x + 5, y: b.getPosition().y + 5 }, arms: t.p.armLift };
-    });
-    assert.deepEqual(shot.hand, shot.bullet); assert.equal(shot.arms, 1);
-    await page.mouse.up(); await page.mouse.up({ button: 'right' });
-    await page.evaluate(() => { visionTest.tick(1); visionTest.p.bullets = []; visionTest.render(); });
-    const released = await page.evaluate(() => ({ v: visionTest.p.getVisionState(), arms: visionTest.p.armLift }));
-    assert.equal(released.v.range, 400); assert.equal(released.arms, 0);
+    assert.equal(scene.vision.range, 400, 'fog/vision radius is fixed');
+    assert.equal('angle' in scene.vision, false, 'vision no longer exposes a focus-dependent angle');
+    assert.ok(scene.inside[0] > 40, 'a unit inside the fog is visible');
+    assert.equal(scene.outside[3], 0, 'a unit outside the fog is not drawn');
+    assert.ok(scene.groundOutside[3] === 255 && scene.groundOutside[0] > 0, 'terrain behind the fog stays visible');
+    assert.deepEqual(scene.sizes.mask, scene.sizes.world, 'fog mask uses the world canvas size');
 
-    // A low light and post-lighting loot effects must not reveal occluded space or distant wall tops.
-    const occlusion = await page.evaluate(() => {
-      const t = visionTest, { scene: s, p } = t;
-      s.map.tiles[8][10] = s.map.tiles[9][10] = 'mineral'; s.map.tileHp[8][10] = s.map.tileHp[9][10] = 100;
-      s.map.tiles[8][13] = s.map.tiles[9][13] = 'wall';
-      const torch = new t.Torch(610, 450); s.torches = [torch]; s.lightingSystem.addLightSource(torch.light);
-      s.goldPickups = [new t.GoldPickup(610, 470, 610, 470), new t.GoldPickup(150, 450, 150, 450)];
-      s.goldPickups.forEach(g => g.update(1));
-      s.particleSystem.addParticle({ x: 610, y: 430, size: 8, color: '#ffffff', speed: 0, angle: 0, lifetime: 2 });
-      t.render();
-      const hidden = [[610, 446], [613, 472], [153, 452], [610, 430]];
-      const final = hidden.map(([x,y]) => t.pixel(x,y,s.worldCanvas));
-      const original = s.visibilitySystem.apply; s.visibilitySystem.apply = () => {}; t.render();
-      const raw = hidden.map(([x,y]) => t.pixel(x,y,s.worldCanvas));
-      const self = t.pixel(p.x + 24.5, p.y + 24.5, s.worldCanvas);
-      s.visibilitySystem.apply = original; t.render();
-      const result = { final, raw, self, maskedSelf: t.pixel(p.x + 24.5,p.y + 24.5,s.worldCanvas),
-        behind: t.pixel(600,450)[0], front: t.pixel(480,450)[0], distantWall: t.pixel(675,450)[0] };
-      s.map.damageTile(10,8,100); s.map.damageTile(10,9,100); t.render();
-      result.revealed = t.pixel(600,450)[0];
-      p.currentRotation = 0; t.render(); result.turnedAway = t.pixel(600,450)[0];
-      p.currentRotation = Math.PI; t.render();
-      return result;
+    const cone = await page.evaluate(() => {
+      const t = window.visionTest;
+      t.draw(true); const on = t.pixel(t.px, t.py - 120); const behind = t.pixel(t.px, t.py + 120);
+      t.draw(false); const off = t.pixel(t.px, t.py - 120); const behindOff = t.pixel(t.px, t.py + 120);
+      return { on, behind, off, behindOff };
     });
-    assert.equal(occlusion.behind, 8); assert.equal(occlusion.front, 255); assert.equal(occlusion.distantWall, 8);
-    assert.equal(occlusion.revealed, 255); assert.equal(occlusion.turnedAway, 8);
-    assert.deepEqual(occlusion.self, occlusion.maskedSelf);
-    for (let i = 0; i < occlusion.final.length; i++) for (let c = 0; c < 3; c++)
-      assert.ok(Math.abs(occlusion.final[i][c] - occlusion.raw[i][c] * 8 / 255) <= 1, 'all world effects share the final visibility mask');
-    await page.screenshot({ path: `${output}/cylinder-occlusion-dpr${dpr}.png` });
+    assert.ok(cone.on[0] > cone.off[0] + 6, 'the flashlight brightens only its facing cone');
+    assert.ok(Math.abs(cone.behind[0] - cone.behindOff[0]) <= 2, 'nothing behind the character is lit by the cone');
 
-    const alignment = [];
-    for (const shake of [false, true]) {
-      alignment.push(await page.evaluate(shake => {
-        const t = visionTest, c = t.scene.camera;
-        c.x = 37.25; c.y = 19.75; if (shake) { c.shake(5, 1, .5, 20, 'linear'); c.follow(325,450,.01); }
-        t.render(); const v = t.p.getVisionState(), client = t.client(v.x,v.y), world = t.scene.screenToWorld(client.x,client.y);
-        return { dx: world.x-v.x, dy: world.y-v.y, self: t.pixel(v.x,v.y)[0], front: t.pixel(v.x+100,v.y)[0], rear: t.pixel(v.x-100,v.y)[0] };
-      }, shake));
-    }
-    for (const a of alignment) { assert.ok(Math.abs(a.dx)<1e-7 && Math.abs(a.dy)<1e-7); assert.equal(a.self,255); assert.equal(a.front,255); assert.equal(a.rear,8); }
+    const toggle = await page.evaluate(() => {
+      const game = window.visionGame, scene = game.sceneManager.getCurrentScene();
+      const tick = () => scene.update(0, game.input);
+      const key = (type) => window.dispatchEvent(new KeyboardEvent(type, { key: 'g', code: 'KeyG' }));
+      key('keydown'); tick(); const off = scene.flashlight.isLightActive();
+      tick(); const held = scene.flashlight.isLightActive();
+      key('keyup'); tick(); key('keydown'); tick(); const on = scene.flashlight.isLightActive();
+      key('keyup'); tick();
+      return { off, held, on };
+    });
+    assert.deepEqual(toggle, { off: false, held: false, on: true }, 'G toggles the flashlight on key-down edges');
+
+    const alignment = await page.evaluate(() => {
+      const t = window.visionTest, scene = t.scene, game = window.visionGame;
+      scene.player.currentRotation = 0; scene.update(0, game.input);
+      const v = scene.player.getVisionState();
+      const followsBody = Math.abs(scene.flashlight.getDirection() - v.direction) < 1e-9;
+      scene.camera.shake(5, 1, .5, 20, 'linear'); scene.camera.follow(t.px, t.py, .01);
+      t.draw(true);
+      const view = scene.displayedView, mask = scene.visibilitySystem.getCanvas().getContext('2d');
+      const alpha = (x, y) => mask.getImageData(Math.round(x - view.x), Math.round(y - view.y), 1, 1).data[3];
+      return { followsBody, center: alpha(t.px, t.py), edge: alpha(t.px + 380, t.py), far: alpha(t.px + 460, t.py) };
+    });
+    assert.ok(alignment.followsBody, 'flashlight direction follows the actual body rotation');
+    assert.equal(alignment.center, 255);
+    assert.ok(alignment.edge > 8 && alignment.edge < 240, `fog edge feathers: ${alignment.edge}`);
+    assert.equal(alignment.far, 0);
+    await page.screenshot({ path: `${output}/fog-flashlight-dpr${dpr}.png` });
+
     await page.setViewportSize({ width: 1000, height: 720 });
     const resized = await page.evaluate(() => {
-      const t = visionTest; t.scene.handleResize(); t.render();
-      return { world: [t.scene.worldCanvas.width,t.scene.worldCanvas.height], mask: [t.scene.visibilitySystem.canvas.width,t.scene.visibilitySystem.canvas.height] };
+      const scene = window.visionTest.scene; scene.handleResize(); scene.draw(window.visionGame.renderer.ctx);
+      return { world: [scene.worldCanvas.width, scene.worldCanvas.height],
+        mask: [scene.visibilitySystem.getCanvas().width, scene.visibilitySystem.getCanvas().height] };
     });
-    assert.deepEqual(resized.mask,resized.world); assert.deepEqual(errors,[]);
-    results.push({ dpr,daily,raised,shot,occlusion,alignment,resized });
+    assert.deepEqual(resized.mask, resized.world);
+    assert.deepEqual(errors, []);
+    results.push({ dpr, scene, cone, toggle, alignment, resized });
+    console.log(`DPR ${dpr}: fog hides units only, flashlight cone and G toggle passed.`);
     await context.close();
   }
-  writeFileSync(`${output}/visibility-pixels.json`,JSON.stringify(results,null,2)+'\n');
-  console.log('Visibility passed: actual mouse poses, hand emission, focus, wall occlusion/destruction, hidden lights/loot/particles, player exemption, DPR/zoom/shake and resize.');
+  writeFileSync(`${output}/fog-pixels.json`, JSON.stringify(results, null, 2) + '\n');
+  console.log('Fog and flashlight passed: unit-only fog, terrain stays visible, 120° cone follows body, G toggles.');
 } finally { await browser.close(); }

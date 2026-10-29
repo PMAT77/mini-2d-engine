@@ -13,6 +13,28 @@ const WATER_DRAG_KEYS: Partial<Record<TileTypeId, keyof BulletWaterDrag>> = {
   [TileTypeId.ULTRA_DEEP_WATER]: 'ultraDeep',
 };
 
+/** 命中墙体、射程耗尽与出界时统一的白色烟尘色板。 */
+const IMPACT_SMOKE = ['#ffffff', '#e8e8e8', '#cfcfcf', '#b5b5b5'];
+
+/** 场景提供的可命中单位：返回最早接触比例和命中后的结算回调。 */
+export interface BulletEntityHit {
+  /** 沿本帧中心移动线段的比例，0–1。 */
+  fraction: number;
+  /** 世界坐标下的接触点，供命中特效定位。 */
+  x: number;
+  y: number;
+  apply: () => void;
+}
+
+/**
+ * 子弹每次位移时的单位命中查询。
+ * @param radius 子弹半径，命中半径由目标自行与本值相加
+ * @param damage 本颗子弹已结算增益后的伤害
+ */
+export type BulletEntityHitTest = (
+  startX: number, startY: number, endX: number, endY: number, radius: number, damage: number,
+) => BulletEntityHit | null;
+
 /**
  * 子弹类，负责处理子弹的物理运动、碰撞检测和渲染逻辑
  */
@@ -27,14 +49,21 @@ export class Bullet {
   private readonly initialSpeed: number;
   private readonly waterDrag: BulletWaterDrag;
 
-  /** 子弹大小（直径） */
+  /** 子弹大小（直径，碰撞圆仍按它计算） */
   private size = 10;
+
+  /** 上一帧中心点，绘制时用它拉出白色细线弹道。 */
+  private trailX = 0;
+  private trailY = 0;
 
   /** 子弹是否已被销毁的标志 */
   private isDestroyed = false;
 
+  /** 场景注入的单位命中查询；命中单位时子弹优先于该点之后的地形结算。 */
+  private entityHitTest?: BulletEntityHitTest;
+
   /** 子弹渲染颜色 */
-  private color = "yellow";
+  private color = "#ffffff";
 
   /** 子弹造成的伤害值 */
   private damage: number;
@@ -51,6 +80,7 @@ export class Bullet {
    * @param waterDragEnabled 发射时角色涉水，固定该颗子弹的水体阻力资格
    * @param waterDrag 各水深每秒扣除的发射速度比例，发射时复制
    * @param remainingDistance 本次发射允许飞行的距离，按实际位移扣除
+   * @param onLanded 子弹自然停止时回调（含水中耗尽），落点是否为地面由调用方判断
    */
   constructor(
     pos: Vector2,
@@ -59,7 +89,8 @@ export class Bullet {
     particleSystem?: ParticleSystem,
     private readonly waterDragEnabled = false,
     waterDrag: Partial<BulletWaterDrag> = DEFAULT_BULLET_WATER_DRAG,
-    private remainingDistance = DEFAULT_BALLISTICS.maxRange
+    private remainingDistance = DEFAULT_BALLISTICS.maxRange,
+    private readonly onLanded?: (x: number, y: number) => void
   ) {
     if (!Number.isFinite(remainingDistance) || remainingDistance < 0) throw new Error('子弹飞行距离必须是非负有限数值');
     // 克隆位置向量以避免引用同一对象
@@ -70,6 +101,8 @@ export class Bullet {
       this.pos.x - this.size / 2,
       this.pos.y - this.size / 2
     );
+    this.trailX = this.pos.x + this.size / 2;
+    this.trailY = this.pos.y + this.size / 2;
 
     // 克隆速度向量以避免引用同一对象
     this.velocity = velocity.clone();
@@ -97,7 +130,7 @@ export class Bullet {
     let remaining = delta;
     while (remaining > 0 && !this.isDestroyed) {
       const speed = this.velocity.length();
-      if (speed === 0) { this.annihilate(); return; }
+      if (speed === 0) { this.annihilate(map); return; }
       const body = circleCollider(this.pos.x + this.size / 2, this.pos.y + this.size / 2, this.size / 2);
       let deceleration = 0;
       for (const coverage of map.getTerrainCoverage(body)) {
@@ -112,7 +145,7 @@ export class Bullet {
       this.move(time * (1 - deceleration * time / (2 * speed)), map);
       if (this.isDestroyed) return;
       if (stops) {
-        this.annihilate();
+        this.annihilate(map);
         return;
       }
       this.velocity.scale(Math.max(0, speed - deceleration * time) / speed);
@@ -120,14 +153,13 @@ export class Bullet {
     }
   }
 
-  /** 水中耗尽动能时少量白色粒子散开，不造成命中伤害。 */
-  private annihilate(): void {
+  /** 水中耗尽动能或射程耗尽时停止；粒子与落地回调使用同一个终点。 */
+  private annihilate(map?: TileMap): void {
     this.velocity.set(0, 0);
     this.isDestroyed = true;
-    this.particleSystem?.createExplosion(
-      new Vector2(this.pos.x + this.size / 2, this.pos.y + this.size / 2),
-      4, 35, 2, 0.22, ['#ffffff']
-    );
+    const hitPos = new Vector2(this.pos.x + this.size / 2, this.pos.y + this.size / 2);
+    this.particleSystem?.createExplosion(hitPos, 4, 60, 4, 0.35, IMPACT_SMOKE);
+    if (map) this.onLanded?.(hitPos.x, hitPos.y);
   }
 
   /** Sweep the otherwise skipped body-to-hand segment so an extended arm cannot fire through walls. */
@@ -141,12 +173,12 @@ export class Bullet {
 
   private hitTerrain(hit: ShapeCastHit, map: TileMap): void {
     this.particleSystem?.createExplosion(new Vector2(this.pos.x + this.size / 2, this.pos.y + this.size / 2),
-      8, 400, 10, .2, this.color === 'yellow' ? ['yellow', 'orange', 'red'] : [this.color]);
+      10, 130, 7, .45, IMPACT_SMOKE);
     if (hit.obstacle.col >= 0) map.damageTile(hit.obstacle.col, hit.obstacle.row, this.damage);
     this.isDestroyed = true;
   }
 
-  /** 按当前速度推进给定等效时间，共用首次命中和出界处理。 */
+  /** 按当前速度推进给定等效时间，共用首次命中、单位命中和出界处理。 */
   private move(delta: number, map?: TileMap): void {
     const requestedDistance = this.velocity.length() * delta;
     const distance = Math.min(requestedDistance, this.remainingDistance);
@@ -154,23 +186,32 @@ export class Bullet {
     // Clip the swept segment before collision, so nothing beyond the endpoint can be hit.
     const newX = this.pos.x + this.velocity.x * delta * fraction;
     const newY = this.pos.y + this.velocity.y * delta * fraction;
+    const movement = { x: newX - this.pos.x, y: newY - this.pos.y };
+    const startX = this.pos.x + this.size / 2, startY = this.pos.y + this.size / 2;
+    const terrainHit = map ? map.castShape(circleCollider(startX, startY, this.size / 2), movement, 'projectile') : null;
+    // 单位线段检测使用中心点；如果地形更近，仍由地形先吞掉子弹。
+    const entityHit = this.entityHitTest?.(startX, startY, startX + movement.x, startY + movement.y,
+      this.size / 2, this.damage);
+    if (entityHit && (!terrainHit || entityHit.fraction < terrainHit.fraction - 1e-9)) {
+      this.pos.x += movement.x * entityHit.fraction;
+      this.pos.y += movement.y * entityHit.fraction;
+      this.isDestroyed = true;
+      entityHit.apply();
+      return;
+    }
 
     // 检查是否与地图发生碰撞
-    if (map) {
-      const movement = { x: newX - this.pos.x, y: newY - this.pos.y };
-      const hit = map.castShape(circleCollider(this.pos.x + this.size / 2, this.pos.y + this.size / 2, this.size / 2), movement, 'projectile');
-      if (hit) {
-        this.pos.x += movement.x * hit.fraction;
-        this.pos.y += movement.y * hit.fraction;
-        this.hitTerrain(hit, map);
-        return;
-      }
+    if (terrainHit && map) {
+      this.pos.x += movement.x * terrainHit.fraction;
+      this.pos.y += movement.y * terrainHit.fraction;
+      this.hitTerrain(terrainHit, map);
+      return;
+    }
 
+    if (map) {
       // 检查子弹是否超出地图范围
       const mapPixelWidth = map.width * map.tileSize;
       const mapPixelHeight = map.height * map.tileSize;
-
-      // 当子弹完全离开地图区域时销毁
       if (newX + this.size < 0 ||
         newX > mapPixelWidth ||
         newY + this.size < 0 ||
@@ -181,10 +222,12 @@ export class Bullet {
     }
 
     // 更新子弹位置
+    this.trailX = startX;
+    this.trailY = startY;
     this.pos.x = newX;
     this.pos.y = newY;
     this.remainingDistance = Math.max(0, this.remainingDistance - distance);
-    if (this.remainingDistance <= 1e-8) this.annihilate();
+    if (this.remainingDistance <= 1e-8) this.annihilate(map);
   }
 
   /**
@@ -198,38 +241,54 @@ export class Bullet {
     // 如果子弹已被销毁，则不进行渲染
     if (this.isDestroyed) return;
 
-    if (!map) { this.drawBody(ctx, offsetX, offsetY); return; }
-    const extent = this.size + 4, x = this.pos.x - 2, y = this.pos.y - 2;
+    const trail = this.getTrailSegment();
+    if (!map) { this.drawBody(ctx, offsetX, offsetY, trail); return; }
+    // 水面遮罩按线段轴对齐包围盒分配，细线本身只占几个像素。
+    const pad = 2;
+    const minX = Math.floor(Math.min(trail.x1, trail.x2) - pad);
+    const minY = Math.floor(Math.min(trail.y1, trail.y2) - pad);
+    const width = Math.max(1, Math.ceil(Math.abs(trail.x2 - trail.x1) + pad * 2));
+    const height = Math.max(1, Math.ceil(Math.abs(trail.y2 - trail.y1) + pad * 2));
+    // 单帧拉线最长 128px：长帧只截断可见弹道，不撑爆复用缓冲。
+    const extent = Math.min(128, Math.max(width, height));
     const canvas = Bullet.waterCanvas ??= document.createElement('canvas');
     if (canvas.width !== extent || canvas.height !== extent) { canvas.width = extent; canvas.height = extent; }
     const buffer = canvas.getContext('2d')!;
     buffer.clearRect(0, 0, extent, extent);
-    this.drawBody(buffer, x, y);
+    this.drawBody(buffer, minX, minY, trail);
     buffer.save();
     buffer.globalCompositeOperation = 'source-atop'; buffer.globalAlpha = 0.35;
-    map.drawWaterLayer(buffer, x, y, extent, extent);
+    map.drawWaterLayer(buffer, minX, minY, extent, extent);
     buffer.restore();
-    ctx.drawImage(canvas, x - offsetX, y - offsetY);
+    const sourceWidth = Math.min(width, extent), sourceHeight = Math.min(height, extent);
+    ctx.drawImage(canvas, 0, 0, sourceWidth, sourceHeight,
+      minX - offsetX, minY - offsetY, sourceWidth, sourceHeight);
   }
 
-  private drawBody(ctx: CanvasRenderingContext2D, offsetX: number, offsetY: number): void {
+  /** 本帧的白色细线弹道；几乎没动时沿速度方向补足 6px，静止的子弹也看得见。 */
+  private getTrailSegment(): { x1: number; y1: number; x2: number; y2: number } {
+    const x2 = this.pos.x + this.size / 2, y2 = this.pos.y + this.size / 2;
+    if (Math.hypot(x2 - this.trailX, y2 - this.trailY) >= 6) {
+      return { x1: this.trailX, y1: this.trailY, x2, y2 };
+    }
+    const speed = this.velocity.length();
+    const dx = speed > 1e-6 ? this.velocity.x / speed : 1, dy = speed > 1e-6 ? this.velocity.y / speed : 0;
+    return { x1: x2 - dx * 6, y1: y2 - dy * 6, x2, y2 };
+  }
 
+  private drawBody(ctx: CanvasRenderingContext2D, offsetX: number, offsetY: number,
+    trail: { x1: number; y1: number; x2: number; y2: number }): void {
     // 保存当前渲染状态
     ctx.save();
 
-    // 设置子弹颜色
-    ctx.fillStyle = this.color;
-
-    // 绘制圆形子弹
+    // 白色细线：线宽固定 1.6px，长度就是本帧实际位移
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.arc(
-      this.pos.x - offsetX + this.size / 2,
-      this.pos.y - offsetY + this.size / 2,
-      this.size / 2,
-      0,
-      Math.PI * 2
-    );
-    ctx.fill();
+    ctx.moveTo(trail.x1 - offsetX, trail.y1 - offsetY);
+    ctx.lineTo(trail.x2 - offsetX, trail.y2 - offsetY);
+    ctx.stroke();
 
     // 恢复之前的渲染状态
     ctx.restore();
@@ -241,6 +300,11 @@ export class Bullet {
    */
   getIsDestroyed(): boolean {
     return this.isDestroyed;
+  }
+
+  /** 注入/移除场景的单位命中查询；由玩家在发射时转发。 */
+  setEntityHitTest(test?: BulletEntityHitTest): void {
+    this.entityHitTest = test;
   }
 
   /**
@@ -256,10 +320,10 @@ export class Bullet {
       this.particleSystem.createExplosion(
         hitPos,
         6,
-        100,
-        4,
-        0.15,
-        this.color === "yellow" ? ["yellow", "orange", "red"] : [this.color]
+        90,
+        5,
+        0.4,
+        IMPACT_SMOKE
       );
     }
 

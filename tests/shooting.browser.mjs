@@ -30,21 +30,23 @@ try {
     });
     await page.mouse.move(500, 300); await page.mouse.down();
     await page.waitForFunction(() => liveShots >= 3); await page.mouse.up();
-    const live = await page.evaluate(() => ({ shots: liveShots, heat: shootingGame.sceneManager.getCurrentScene().player.getHeatPercentage() }));
-    assert.ok(live.heat > 0, 'real running frames fire using mouse input');
+    const live = await page.evaluate(() => ({ shots: liveShots, ammo: shootingGame.sceneManager.getCurrentScene().player.getMagazineAmmo() }));
+    assert.ok(live.ammo < 6, 'real running frames fire using mouse input');
     await page.evaluate(() => { window.requestAnimationFrame = () => 0; });
     await page.waitForTimeout(50);
     await page.evaluate(() => {
       const game = shootingGame, scene = game.sceneManager.getCurrentScene(), p = scene.player;
       scene.camera.reset(); scene.camera.x = 37.25; scene.camera.y = 19.75;
       p.x = p.y = 200.5; p.velocity.set(0, 0); p.bullets = []; p.fireCooldown = 0; p.recoil = 0;
-      p.setDebugState({ heatPercentage: 0 }); game.input.clear();
+      scene.chickens.forEach(c => { c.x = 1200; c.y = 1200; c.velocity.set(0, 0); });
+      p.setDebugState({ magazineAmmo: 6, chambered: true }); game.input.clear();
       window.mouseTest = {
         game, scene, shots: 0,
         tick(delta = 0) { scene.update(delta, game.input); scene.draw(game.renderer.ctx); },
         render() { scene.draw(game.renderer.ctx); },
+        pump(frames = 3) { for (let i = 0; i < frames; i++) { scene.deltaSinceLastFrame = .1; this.render(); } return scene.crosshairTighten; },
         client(x, y) { const v = scene.displayedView, r = scene.getCanvasViewport(); return { x: r.left + (x - v.x) * r.width / v.width, y: r.top + (y - v.y) * r.height / v.height }; },
-        reset() { p.bullets = []; p.fireCooldown = 0; p.recoil = 0; p.setDebugState({ heatPercentage: 0 }); this.shots = 0; },
+        reset() { p.bullets = []; p.fireCooldown = 0; p.recoil = 0; p.setDebugState({ magazineAmmo: 6, chambered: true }); this.shots = 0; },
       };
       p.setOnShootCallback(() => mouseTest.shots++); mouseTest.render();
     });
@@ -56,13 +58,13 @@ try {
         if (shake) { c.shake(8, 1, .7, 20, 'linear'); c.shakeTime = .08; }
         t.render();
         const r = t.scene.getCanvasViewport(), o = c.getOffset(), target = t.scene.screenToWorld(500, 300);
-        const data = [...t.game.renderer.ctx.getImageData(Math.floor((500 - r.left) * t.game.renderer.width / r.width), Math.floor((300 - r.top) * t.game.renderer.height / r.height), 1, 1).data];
+        const px = (x, y) => [...t.game.renderer.ctx.getImageData(Math.floor((x - r.left) * t.game.renderer.width / r.width), Math.floor((y - r.top) * t.game.renderer.height / r.height), 1, 1).data];
         const bounds = t.game.renderer.ctx.canvas.getBoundingClientRect();
-        return { target, border: { left: r.left - bounds.left, top: r.top - bounds.top, width: bounds.width - r.width, height: bounds.height - r.height }, expected: { x: o.x + (500 - r.left) * t.scene.worldCanvas.width / r.width, y: o.y + (300 - r.top) * t.scene.worldCanvas.height / r.height }, data, cursor: t.game.renderer.ctx.canvas.style.cursor };
+        return { target, border: { left: r.left - bounds.left, top: r.top - bounds.top, width: bounds.width - r.width, height: bounds.height - r.height }, expected: { x: o.x + (500 - r.left) * t.scene.worldCanvas.width / r.width, y: o.y + (300 - r.top) * t.scene.worldCanvas.height / r.height }, center: px(500, 300), arm: px(509, 300), cursor: t.game.renderer.ctx.canvas.style.cursor };
       }, shake);
       near(check.target.x, check.expected.x); near(check.target.y, check.expected.y);
       assert.deepEqual(check.border, { left: 2, top: 2, width: 4, height: 4 }, 'the bitmap excludes the existing canvas border');
-      assert.deepEqual(check.data, [216, 250, 255, 255]); assert.equal(check.cursor, 'none');
+      assert.deepEqual(check.center, [216, 250, 255, 255]); assert.ok(check.arm[0] > 120 && check.arm[1] > 150 && check.arm[2] > 150, 'idle crosshair arms are white'); assert.equal(check.cursor, 'none');
     }
     await page.screenshot({ path: join(output, 'mouse-aim-dpr' + dpr + '.png') });
     const coords = await page.evaluate(() => { mouseTest.scene.camera.reset(); mouseTest.render(); return mouseTest.client(625, 225); });
@@ -117,6 +119,38 @@ try {
     await page.keyboard.press('Escape'); await page.setViewportSize({ width: 900, height: 650 }); await page.mouse.move(400, 250);
     const resize = await page.evaluate(() => { const t = mouseTest; t.render(); const a = t.scene.screenToWorld(400, 250); t.scene.camera.x += 70; t.scene.camera.y += 30; t.render(); const b = t.scene.getPointerAim(t.game.input).target; return { dx: b.x - a.x, dy: b.y - a.y }; });
     near(resize.dx, 70); near(resize.dy, 30);
+    await page.evaluate(() => {
+      const t = mouseTest, s = t.scene, w = s.screenToWorld(400, 250);
+      if (!w) throw new Error('missing displayed view');
+      const chicken = s.chickens.find(c => c.isAlive());
+      if (!chicken) throw new Error('missing live chicken');
+      chicken.x = w.x - chicken.getSize() / 2;
+      chicken.y = w.y - chicken.getSize() / 2;
+      chicken.velocity.set(0, 0);
+      s.chickens = [chicken];
+    });
+    await page.mouse.move(400, 250);
+    await page.mouse.down({ button: 'right' });
+    assert.ok(await page.evaluate(() => mouseTest.pump()) > 0.9, 'aiming at a live chicken tightens the crosshair');
+    const aimed = await page.evaluate(() => {
+      const t = mouseTest, r = t.scene.getCanvasViewport(), c = t.game.renderer.ctx;
+      const px = (x, y) => [...c.getImageData(Math.floor((x - r.left) * t.game.renderer.width / r.width), Math.floor((y - r.top) * t.game.renderer.height / r.height), 1, 1).data];
+      return { center: px(400, 250), arm: px(405, 250) };
+    });
+    assert.deepEqual(aimed.center, [216, 250, 255, 255], 'crosshair centre stays white on target');
+    assert.ok(aimed.arm[0] > 150 && aimed.arm[1] < 120 && aimed.arm[2] < 120, 'crosshair arms turn red on a live chicken');
+    await page.screenshot({ path: join(output, 'mouse-crosshair-target-dpr' + dpr + '.png') });
+    await page.mouse.move(700, 250);
+    assert.ok(await page.evaluate(() => mouseTest.pump()) < 0.1, 'leaving the target relaxes the crosshair');
+    const relaxed = await page.evaluate(() => {
+      const t = mouseTest, r = t.scene.getCanvasViewport(), c = t.game.renderer.ctx;
+      return [...c.getImageData(Math.floor((709 - r.left) * t.game.renderer.width / r.width), Math.floor((250 - r.top) * t.game.renderer.height / r.height), 1, 1).data];
+    });
+    assert.ok(relaxed[0] > 120 && relaxed[1] > 150 && relaxed[2] > 150, 'crosshair arms return to white off target');
+    await page.mouse.move(400, 250);
+    assert.ok(await page.evaluate(() => mouseTest.pump()) > 0.9, 'returning to the target tightens again');
+    await page.mouse.up({ button: 'right' });
+    assert.ok(await page.evaluate(() => mouseTest.pump()) < 0.1, 'releasing right relaxes the crosshair');
     await page.evaluate(() => mouseTest.scene.onExit());
     assert.equal(await page.locator('canvas').evaluate(c => c.style.cursor), '');
     assert.deepEqual(errors, []);

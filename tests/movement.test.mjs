@@ -158,7 +158,7 @@ test('Shift smoothly reaches sprint speed in 160ms without changing base speed o
   advance(p, 0.34, input('d', 'Shift', 'MouseLeft'));
   near(p.getMaxSpeed(), 200); near(p.getVelocity().length(), 320);
   near(p.getStamina(), 87.5); assert.equal(p.getIsSprinting(), true);
-  assert.ok(p.getBullets().length >= 2); assert.ok(p.getHeatPercentage() > 0);
+  assert.ok(p.getBullets().length >= 2); assert.ok(p.getMagazineAmmo() < p.getMagazineSize());
   p.update(1 / 60, input('d')); near(p.getVelocity().length(), 200); assert.equal(p.getIsSprinting(), false);
   p.update(0.01, input('d', 'Shift')); assert.ok(p.getVelocity().length() > 200 && p.getVelocity().length() < 202.5);
 });
