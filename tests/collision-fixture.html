@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><title>碰撞与缓速验收</title>
+<style>
+body{margin:0;background:#111820;color:#e0ebef;font:14px system-ui}header{padding:20px 28px}h1{font-size:22px;margin:0 0 12px}nav{display:flex;flex-wrap:wrap;gap:14px;align-items:center}select,button{font:inherit;background:#24313c;color:#e0ebef;border:1px solid #536571;border-radius:4px;padding:5px 10px}label{display:flex;gap:6px;align-items:center}canvas{display:block;width:min(1000px,calc(100vw - 56px));height:auto;margin:0 28px 20px;border:1px solid #344450}p{margin:12px 0 0;color:#a3b5bf}output{font-variant-numeric:tabular-nums}
+</style>
+<header><h1>碰撞与缓速验收</h1><nav>
+<select id="scene" aria-label="场景"><option value="wall">单面直墙</option><option value="corner">墙角</option><option value="corridor">50 像素窄通道</option><option value="water">水域边界</option><option value="mineral">可破坏矿石</option></select>
+<select id="shape" aria-label="碰撞形状"><option value="circle">玩家圆形主体</option><option value="square">方形实体</option><option value="concave">凹多边形实体</option><option value="compound">复合形状实体</option></select>
+<button id="turn">原地转 90°</button><button id="reset">重置</button><button id="destroy">破坏矿石</button>
+<label>帧率<select id="fps"><option>60</option><option>30</option><option>144</option></select></label>
+<button id="long">模拟 0.5 秒长帧</button><label><input id="run" type="checkbox" checked>运行</label>
+</nav><p>WASD 移动，方向键转向。白线为碰撞轮廓，橙线为接触法线，水域中的轮廓区域以青色高亮。</p><p><output id="stats"></output></p></header><canvas width="1000" height="600"></canvas>
+<script type="module">
+import {TileMap} from '../src/map/TileMap.ts';
+import {Player} from '../src/objects/Player.ts';
+import {Entities} from '../src/objects/Entities.ts';
+import {Vector2} from '../src/math/Vector2.ts';
+import {DEFAULT_SHAPE} from '../src/physics/Collider.ts';
+const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
+const map=new TileMap(20,12,{generateWater:false}),keys=new Set();
+const input={isKeyDown:key=>keys.has(key)};
+const shapes={square:DEFAULT_SHAPE,circle:{type:'circle',radius:0.5},concave:{type:'polygon',vertices:[[-0.5,-0.5],[0.5,-0.5],[0.5,-0.15],[-0.15,-0.15],[-0.15,0.5],[-0.5,0.5]]},compound:{type:'compound',parts:[{type:'circle',radius:0.3,center:[-0.2,0]},{type:'polygon',vertices:[[-0.1,-0.4],[0.5,-0.4],[0.5,0.4],[-0.1,0.4]]}]}};
+class ShapeEntity extends Entities{
+  direction(input,keys){const d=new Vector2(Number(input.isKeyDown(keys[0]))-Number(input.isKeyDown(keys[1])),Number(input.isKeyDown(keys[2]))-Number(input.isKeyDown(keys[3])));return d.length()?d.normalize():d}
+  getMoveDirection(input){return this.direction(input,['d','a','s','w'])}
+  getLookDirection(input){return this.direction(input,['ArrowRight','ArrowLeft','ArrowDown','ArrowUp'])}
+  getBodyRotation(){return this.currentRotation-Math.PI/2}
+}
+let player, preset='wall',kind='circle';
+function setup(scene='wall',shape='circle'){
+  preset=scene;kind=shape;keys.clear();map.tiles.forEach(row=>row.fill('default'));map.tileHp.forEach(row=>row.fill(0));
+  if(scene==='wall'||scene==='corner'||scene==='corridor')map.tiles.forEach(row=>row[3]='wall');
+  if(scene==='corner')map.tiles[4].fill('wall');
+  if(scene==='corridor')map.tiles.forEach(row=>row[5]='wall');
+  if(scene==='water')map.tiles.forEach(row=>{for(let col=8;col<20;col++)row[col]='water'});
+  if(scene==='mineral')for(let row=0;row<12;row++){map.tiles[row][3]='mineral';map.tileHp[row][3]=100;}
+  player=new (shape==='circle'?Player:ShapeEntity)(scene==='water'?375.5:scene==='corridor'?200.5:200,250);player.currentRotation=0;player.setCollider(shapes[shape]);
+  if(scene==='corner'&&shape==='square'){player.x=215;player.y=265;}
+  player.update(0,input,map);
+  document.querySelector('#scene').value=scene;document.querySelector('#shape').value=shape;render();
+}
+function path(parts){
+  ctx.beginPath();for(const part of parts){if(part.type==='circle'){ctx.moveTo(part.center.x+part.radius,part.center.y);ctx.arc(part.center.x,part.center.y,part.radius,0,2*Math.PI)}else{part.vertices.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath()}}
+}
+function snapshot(){const b=player.getCollider();return{x:player.x,y:player.y,angle:player.currentRotation,bounds:b.bounds,factor:map.getShapeSpeedFactor(b),coverage:map.getTerrainCoverage(b),penetration:Math.max(0,...map.queryShape(b).map(c=>c.depth)),contacts:player.getCollisionContacts()};}
+function render(){
+  ctx.fillStyle='#1a222b';ctx.fillRect(0,0,1000,600);map.draw(ctx,0,0,1000,600,0);
+  const body=player.getCollider();if(kind==='circle')player.draw(ctx);else{path(body.parts);ctx.fillStyle='#d87963';ctx.fill();}
+  ctx.save();path(body.parts);ctx.clip();ctx.fillStyle='#70e8dd';for(let row=0;row<map.height;row++)for(let col=0;col<map.width;col++)if(map.tiles[row][col]==='water')ctx.fillRect(col*50,row*50,50,50);ctx.restore();
+  path(body.parts);ctx.strokeStyle='#f4f3e9';ctx.lineWidth=1.5;ctx.stroke();
+  ctx.strokeStyle='#ffb75e';ctx.lineWidth=2;for(const c of player.getCollisionContacts()){ctx.beginPath();ctx.moveTo(c.point.x,c.point.y);ctx.lineTo(c.point.x+c.normal.x*28,c.point.y+c.normal.y*28);ctx.stroke()}
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(body.pose.x,body.pose.y,2,0,Math.PI*2);ctx.fill();
+  const s=snapshot(),water=s.coverage.filter(c=>c.type==='water').reduce((n,c)=>n+c.fraction,0);
+  document.querySelector('#stats').textContent=`位置 ${s.x.toFixed(2)}, ${s.y.toFixed(2)} · 朝向 ${(s.angle*180/Math.PI).toFixed(2)}° · 入水 ${(water*100).toFixed(2)}% · 速度系数 ${s.factor.toFixed(3)} · 穿入 ${s.penetration.toFixed(4)} px`;
+}
+function step(delta=1/60,pressed=[]){keys.clear();pressed.forEach(key=>keys.add(key));player.update(delta,input,map);render();return snapshot();}
+function turn(delta=0.125){player.updateRotation(delta,new Vector2(0,-1),map);render();return snapshot();}
+window.fixture={setup,step,turn,snapshot,render,get player(){return player},map};
+document.querySelector('#scene').onchange=e=>setup(e.target.value,kind);document.querySelector('#shape').onchange=e=>setup(preset,e.target.value);
+document.querySelector('#reset').onclick=()=>setup(preset,kind);document.querySelector('#turn').onclick=()=>turn();document.querySelector('#long').onclick=()=>step(0.5,['ArrowUp']);
+document.querySelector('#destroy').onclick=()=>{for(let row=0;row<12;row++)map.damageTile(3,row,100);render()};
+window.addEventListener('keydown',e=>{if(e.target instanceof HTMLSelectElement)return;keys.add(e.key.length===1?e.key.toLowerCase():e.key);if(e.key.startsWith('Arrow')||e.key===' ')e.preventDefault()});window.addEventListener('keyup',e=>keys.delete(e.key.length===1?e.key.toLowerCase():e.key));window.addEventListener('blur',()=>keys.clear());
+let last=performance.now(),accumulator=0;function loop(now){const dt=1/Number(document.querySelector('#fps').value);accumulator+=Math.min(0.1,(now-last)/1000);last=now;if(document.querySelector('#run').checked){while(accumulator>=dt){player.update(dt,input,map);accumulator-=dt}render()}else accumulator=0;requestAnimationFrame(loop)}
+setup();requestAnimationFrame(loop);
+</script></html>

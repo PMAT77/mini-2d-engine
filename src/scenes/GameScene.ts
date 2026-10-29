@@ -2,10 +2,14 @@ import { AssetLoader } from "../core/AssetLoader";
 import { Camera } from "../core/Camera";
 import { Input } from "../core/Input";
 import { Scene } from "../core/Scene";
-import { TileMap } from "../map/TileMap";
+import { TileMap, TileMapOptions } from "../map/TileMap";
+import { solidPath } from '../map/SolidTerrain';
+import { TileTypeId, getTileType } from "../map/TileType";
 import { Vector2 } from "../math/Vector2";
 import { ParticleSystem } from "../objects/ParticleSystem";
 import { Player } from "../objects/Player";
+import { PlayerConfig } from "../objects/PlayerConfig";
+import { PlayerDebugPanel } from "../ui/PlayerDebugPanel";
 
 // 导入光照系统相关类
 import { ConfigLoader } from "../core/ConfigLoader";
@@ -14,6 +18,10 @@ import { LightingSystem } from "../core/LightingSystem";
 import { ModifierManager } from "../core/ModifierManager";
 
 import { PickupItem, PickupType } from "../objects/PickupItem";
+import { GoldPickup } from "../objects/GoldPickup";
+import { Torch } from "../objects/Torch";
+import { seededRandom } from "../map/WaterTerrain";
+import { ColliderShape, DEFAULT_SHAPE, compileShape, rectangleCollider, transformCollider } from "../physics/Collider";
 
 
 /**
@@ -23,9 +31,18 @@ export class GameScene extends Scene {
   private player!: Player;
   private map!: TileMap;
   private camera!: Camera;
+  private worldCanvas!: HTMLCanvasElement;
+  private worldContext!: CanvasRenderingContext2D;
   private assetLoader!: AssetLoader;
   private configLoader!: ConfigLoader;
   private loaded: boolean = false;
+  private loadingPromise?: Promise<void>;
+  private loadError = "";
+  private active = false;
+  private debugPanel?: PlayerDebugPanel;
+  private initialPlayerConfig?: PlayerConfig;
+  private initialPlayerLight?: { radius: number; intensity: number };
+  private readonly resizeListener = () => this.handleResize();
   private deltaSinceLastFrame: number = 0;
 
   // 添加玩家光源引用
@@ -33,6 +50,11 @@ export class GameScene extends Scene {
 
   // 常量定义
   private static readonly PLAYER_SIZE = 49;
+  private static readonly CAMERA_ZOOM = 0.85;
+  private static readonly GOLD_DROP_COUNT = 20;
+  private static readonly GOLD_DROP_THRESHOLDS = [0.9, 0.7, 0.5, 0.3, 0.1];
+  private goldPickups: GoldPickup[] = [];
+  private goldDroppedByTile = new Map<number, number>();
 
   // 粒子系统
   private particleSystem: ParticleSystem;
@@ -41,37 +63,44 @@ export class GameScene extends Scene {
   // 属性修改器
   private modifierManager: ModifierManager;
 
-  // 在GameScene类中添加以下属性
-  private pickupItems: PickupItem[] = [];      // 存储所有道具
-  private pickupSpawnInterval: number = 3;    // 道具生成间隔（秒）
-  private pickupSpawnTimer: number = 0;       // 道具生成计时器
-  private maxPickups: number = 5;             // 最大道具数量
-  private minDistanceFromPlayer: number = 200; // 生成道具时与玩家的最小距离
+  private pickupItems: PickupItem[] = []; // 仅由特殊矿完全击碎后生成
+  private torches: Torch[] = [];
 
   /**
    * 构造函数
    */
-  constructor() {
+  constructor(mapOptions?: TileMapOptions) {
     super();
 
-    // 初始化游戏地图，设置为1000x1000的大小
-    this.map = new TileMap(100, 100);
+    // 100×100 个瓦片，每格 50 像素
+    this.map = new TileMap(100, 100, mapOptions);
 
     // 获取设备像素比，默认为1
     const dpr = window.devicePixelRatio || 1;
 
-    // 初始化相机，设置视口大小为窗口的两倍，死区为800x500，缓动系数为5
-    this.camera = new Camera(window.innerWidth * dpr, window.innerHeight * dpr, 800, 500, 5);
+    // 扩大世界视口，合成到主画布时统一缩小世界与光照。
+    this.camera = new Camera(Math.ceil(window.innerWidth * dpr / GameScene.CAMERA_ZOOM),
+      Math.ceil(window.innerHeight * dpr / GameScene.CAMERA_ZOOM), 400, 250, 5);
 
     // 初始化粒子系统
     this.particleSystem = new ParticleSystem();
+    this.map.onTileDestroyed = (col, row, type) => {
+      if (type === TileTypeId.MINERAL) this.scatterGold(col, row, GameScene.GOLD_DROP_COUNT, true);
+      const pickupType = getTileType(type).pickupType;
+      if (pickupType !== undefined) {
+        const offset = (this.map.tileSize - PickupItem.DEFAULT_SIZE) / 2;
+        this.pickupItems.push(new PickupItem(col * this.map.tileSize + offset,
+          row * this.map.tileSize + offset, pickupType, this.particleSystem));
+      }
+    };
+    this.map.onTileDamaged = (col, row, type, hp, maxHp) => {
+      if (type !== TileTypeId.MINERAL) return;
+      const earned = GameScene.GOLD_DROP_THRESHOLDS.filter(threshold => hp / maxHp <= threshold + Number.EPSILON).length * 2;
+      this.scatterGold(col, row, earned, false);
+    };
 
     // 初始化光照系统
     this.lightingSystem = new LightingSystem();
-
-    // 初始化拾取物生成计时器
-    this.pickupSpawnTimer = this.pickupSpawnInterval;
-
 
     // 获取摄像头死区范围，用于在其中生成玩家初始位置
     const deadZoneLeft = this.camera.x + (this.camera.width - this.camera.deadZoneWidth) / 2;
@@ -80,19 +109,31 @@ export class GameScene extends Scene {
     const deadZoneHeight = this.camera.deadZoneHeight;
 
     // 在死区内生成可行走位置作为玩家出生点
-    const spawn = this.getSpawnPositionInArea(deadZoneLeft, deadZoneTop, deadZoneWidth, deadZoneHeight, GameScene.PLAYER_SIZE);
+    const spawn = this.getSpawnPositionInArea(
+      Math.max(0, Math.min(deadZoneLeft, this.map.width * this.map.tileSize - deadZoneWidth)),
+      Math.max(0, Math.min(deadZoneTop, this.map.height * this.map.tileSize - deadZoneHeight)),
+      Math.min(deadZoneWidth, this.map.width * this.map.tileSize),
+      Math.min(deadZoneHeight, this.map.height * this.map.tileSize), GameScene.PLAYER_SIZE, { type: "circle", radius: 0.5 });
     this.player = new Player(spawn.x, spawn.y, undefined, this.particleSystem);
 
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
     const playerCenter = new Vector2(playerCenterX, playerCenterY);
 
-    // 设置玩家光源（位置跟随玩家中心，半径600，白色，强度1） 
-    this.playerLight = new LightSource(playerCenter, 600, "#FFFFFF", 1.0);
+    // 设置玩家光源（位置跟随玩家中心，照射范围400，暖白色，强度1，发光半径16）
+    this.playerLight = new LightSource(playerCenter, 400, "#FFF4E8", 1.0, 16);
     this.lightingSystem.addLightSource(this.playerLight);
 
-    // 设置环境光（深色背景，带有微弱的环境光）
-    this.lightingSystem.setAmbientLight("rgba(30, 30, 40, 0.8)");
+    this.torches = Torch.generate(this.map, mapOptions?.seed === undefined ? Math.random : seededRandom(mapOptions.seed ^ 0x746f7263));
+    this.torches.forEach(torch => this.lightingSystem.addLightSource(torch.light));
+
+    // 从原环境光中分出微弱的左上方入射光，保持无遮挡暗区的原有亮度。
+    this.lightingSystem.setAmbientLight("#2F3843");
+    this.lightingSystem.setTerrainLight({
+      position: { x: -this.map.width * this.map.tileSize, y: -this.map.height * this.map.tileSize },
+      color: "#B4C8E0", intensity: 0.06,
+      shadowLength: this.map.tileSize * 0.4, softness: this.map.tileSize * 0.04,
+    });
 
     // 设置射击回调，配置震动参数
     this.player.setOnShootCallback((shootDir?: Vector2) => {
@@ -112,10 +153,6 @@ export class GameScene extends Scene {
 
 
     this.modifierManager = new ModifierManager(this.player);
-    // 设置属性变化回调，用于更新UI
-    this.player.setOnStatsChangeCallback(() => {
-      this.updatePlayerStatsUI();
-    });
 
     // 初始化资源加载器，配置需要加载的资源
     this.assetLoader = new AssetLoader({
@@ -131,21 +168,20 @@ export class GameScene extends Scene {
    * 初始化光照系统
    */
   private initLightingSystem(): void {
-    const dpr = window.devicePixelRatio || 1;
-    // 使用相机的实际尺寸而不是窗口尺寸
-    const width = this.camera.width;
-    const height = this.camera.height;
-    this.lightingSystem.initialize(width * dpr, height * dpr);
+    this.worldCanvas ??= document.createElement("canvas");
+    this.worldContext ??= this.worldCanvas.getContext("2d")!;
+    this.worldCanvas.width = this.camera.width;
+    this.worldCanvas.height = this.camera.height;
+    this.lightingSystem.initialize(this.camera.width, this.camera.height);
   }
 
   /**
    * 重置相机尺寸以适应窗口大小变化
    */
   private resizeCamera(): void {
-    const dpr = window.devicePixelRatio || 1;
-    // 更新相机视口大小为窗口的两倍
-    this.camera.width = window.innerWidth * dpr;
-    this.camera.height = window.innerHeight * dpr;
+    // 相机尺寸使用缩放前的世界像素。
+    this.camera.width = Math.ceil(this.game.renderer.width / GameScene.CAMERA_ZOOM);
+    this.camera.height = Math.ceil(this.game.renderer.height / GameScene.CAMERA_ZOOM);
     // 重置相机位置以保持玩家在视野中央
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
@@ -161,62 +197,72 @@ export class GameScene extends Scene {
     this.initLightingSystem();
   }
 
-  /**
-   * 类型保护函数：检查值是否为有效的 PickupType 枚举值
-   */
-  private isPickupType(value: any): value is PickupType {
-    return typeof value === 'number' && value >= 0 && value < Object.keys(PickupType).length / 2;
+  private scatterGold(col: number, row: number, earned: number, destroyed: boolean): void {
+    const key = row * this.map.width + col;
+    const dropped = this.goldDroppedByTile.get(key) ?? 0;
+    const count = earned - dropped;
+    if (count <= 0) return;
+    const tileSize = this.map.tileSize;
+    const tileX = col * tileSize, tileY = row * tileSize;
+    const size = GoldPickup.SIZE;
+    const origins: { x: number; y: number; angle: number }[] = [];
+    if (destroyed) {
+      origins.push({ x: tileX + (tileSize - size) / 2, y: tileY + (tileSize - size) / 2, angle: 0 });
+    } else {
+      // 活矿块仍是障碍：碎块的整个碰撞体必须从边缘外侧开始运动。
+      for (const offset of [0.2, 0.5, 0.8]) {
+        const x = tileX + tileSize * offset - size / 2;
+        const y = tileY + tileSize * offset - size / 2;
+        origins.push(
+          { x: tileX - size - 0.5, y, angle: Math.PI },
+          { x: tileX + tileSize + 0.5, y, angle: 0 },
+          { x, y: tileY - size - 0.5, angle: -Math.PI / 2 },
+          { x, y: tileY + tileSize + 0.5, angle: Math.PI / 2 }
+        );
+      }
+    }
+    const playerX = this.player.x + this.player.getSize() / 2;
+    const playerY = this.player.y + this.player.getSize() / 2;
+    const distanceFromPlayer = (origin: { x: number; y: number }) => Math.hypot(origin.x + size / 2 - playerX, origin.y + size / 2 - playerY);
+    const safeOrigins = origins.filter(origin => this.map.isShapeWalkable(rectangleCollider(origin.x, origin.y, size, size)))
+      .sort((a, b) => distanceFromPlayer(a) - distanceFromPlayer(b));
+    // 未生成的额度不计入 dropped，下一次受伤重试，击毁时统一补齐。
+    if (!safeOrigins.length) return;
+
+    const phase = Math.random() * Math.PI * 2;
+    for (let i = 0; i < count; i++) {
+      const origin = safeOrigins[i % Math.min(3, safeOrigins.length)];
+      const angle = destroyed ? phase + (i + Math.random() * 0.6) * Math.PI * 2 / count :
+        origin.angle + (Math.random() * 2 - 1) * Math.PI / 3;
+      const distance = 16 + Math.random() * 24;
+      const movement = { x: Math.cos(angle) * distance, y: Math.sin(angle) * distance };
+      const body = rectangleCollider(origin.x, origin.y, size, size);
+      const hit = this.map.castShape(body, movement);
+      const fraction = hit ? Math.max(0, hit.fraction - 0.001) : 1;
+      let x = origin.x + movement.x * fraction, y = origin.y + movement.y * fraction;
+      if (!this.map.isShapeWalkable(rectangleCollider(x, y, size, size))) {
+        x = origin.x; y = origin.y;
+      }
+      this.goldPickups.push(new GoldPickup(origin.x, origin.y, x, y));
+    }
+    if (destroyed) this.goldDroppedByTile.delete(key);
+    else this.goldDroppedByTile.set(key, dropped + count);
+    const origin = safeOrigins[0];
+    this.particleSystem.createExplosion(new Vector2(origin.x + size / 2, origin.y + size / 2),
+      destroyed ? 32 : 6, destroyed ? 160 : 80, destroyed ? 8 : 4, destroyed ? 0.55 : 0.25,
+      ["#ffd700", "#fff1a3", "#b77b26", "#77716a"]);
   }
 
-  // 添加生成单个道具的方法 
-  private spawnPickupItem(): void {
-    // 检查当前道具数量是否已达上限
-    if (this.pickupItems.length >= this.maxPickups) {
-      return;
-    }
-
-    try {
-      // 生成随机道具类型
-      const pickupTypes = Object.values(PickupType).filter(this.isPickupType);
-      const randomType = pickupTypes[Math.floor(Math.random() * pickupTypes.length)];
-
-      // 尝试生成一个距离玩家足够远的可行走位置
-      let attempts = 0;
-      const maxAttempts = 100;
-      let position: { x: number; y: number } | null = null;
-
-      while (attempts < maxAttempts) {
-        // 获取随机可行走位置
-        try {
-          const randomPos = this.map.getRandomWalkablePosition(PickupItem.DEFAULT_SIZE);
-
-          // 计算与玩家的距离
-          const playerCenterX = this.player.x + this.player.getSize() / 2;
-          const playerCenterY = this.player.y + this.player.getSize() / 2;
-          const dx = randomPos.x + PickupItem.DEFAULT_SIZE / 2 - playerCenterX;
-          const dy = randomPos.y + PickupItem.DEFAULT_SIZE / 2 - playerCenterY;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          // 如果距离足够远，则使用这个位置
-          if (distance >= this.minDistanceFromPlayer) {
-            position = randomPos;
-            break;
-          }
-        } catch (error) {
-          console.warn("无法生成道具位置:", error);
-        }
-        attempts++;
-      }
-
-      // 如果找到合适位置，创建并添加道具
-      if (position) {
-        const pickup = new PickupItem(position.x, position.y, randomType, this.particleSystem);
-        this.pickupItems.push(pickup);
-        console.log(`生成了道具: ${PickupType[randomType]} 在位置 [${position.x.toFixed(0)}, ${position.y.toFixed(0)}]`);
-      }
-    } catch (error) {
-      console.error("生成道具时出错:", error);
-    }
+  private updateGoldPickups(delta: number): void {
+    const body = this.player.getCollider();
+    this.goldPickups = this.goldPickups.filter(pickup => {
+      pickup.update(delta);
+      if (!pickup.isCollidingWithShape(body)) return true;
+      this.player.collectGold();
+      this.particleSystem.createExplosion(new Vector2(pickup.x + GoldPickup.SIZE / 2, pickup.y + GoldPickup.SIZE / 2),
+        6, 45, 3, 0.2, ["#ffd700", "#fff1a3"]);
+      return false;
+    });
   }
 
   // 添加更新道具的方法
@@ -239,7 +285,7 @@ export class GameScene extends Scene {
 
   // 添加检查玩家与道具碰撞的方法
   private checkPickupCollisions(): void {
-    const playerSize = this.player.getSize();
+    const playerCollider = this.player.getCollider();
     const collectedPickups: number[] = [];
 
     // 检查每个道具是否与玩家碰撞
@@ -247,7 +293,7 @@ export class GameScene extends Scene {
       const pickup = this.pickupItems[i];
 
       // 使用PickupItem类的碰撞检测方法
-      if (pickup.isCollidingWithRect(this.player.x, this.player.y, playerSize, playerSize)) {
+      if (pickup.isCollidingWithShape(playerCollider)) {
         // 收集道具
         this.collectPickup(pickup);
         collectedPickups.push(i);
@@ -267,16 +313,11 @@ export class GameScene extends Scene {
       const modifierEffect = pickup.getModifierEffect();
 
       // 应用效果
-      if (modifierEffect.stat === 'HEALTH') {
-        // 特殊处理生命值恢复
-        // 假设Player类有一个heal方法
-        // if (this.player['heal']) {
-        //   this.player['heal'](modifierEffect.value);
-        // }
+      if (modifierEffect.stat === 'health') {
+        this.player.heal(modifierEffect.value);
       } else {
         // 使用ModifierManager应用其他效果
         this.modifierManager.addModifier(modifierEffect);
-        console.log('fireRate', this.player.getFireRate())
       }
 
       // 触发粒子系统效果
@@ -370,15 +411,16 @@ export class GameScene extends Scene {
    * @returns 找到的可行走位置坐标
    * @throws 当在指定次数尝试后仍未找到可行走位置时抛出错误
    */
-  public getSpawnPositionInArea(x: number, y: number, width: number, height: number, size: number): { x: number; y: number } {
+  public getSpawnPositionInArea(x: number, y: number, width: number, height: number, size: number, shape: ColliderShape = DEFAULT_SHAPE): { x: number; y: number } {
     const MAX_ATTEMPTS = 1000;
+    const compiled = compileShape(shape);
     let attempts = 0;
 
     while (attempts < MAX_ATTEMPTS) {
       const posX = x + Math.random() * (width - size);
       const posY = y + Math.random() * (height - size);
 
-      if (this.map.isWalkableArea(posX, posY, size)) {
+      if (this.map.isShapeWalkable(transformCollider(compiled, { x: posX + size / 2, y: posY + size / 2, size, rotation: 0 }))) {
         return { x: posX, y: posY };
       }
       attempts++;
@@ -387,81 +429,65 @@ export class GameScene extends Scene {
     throw new Error("无法在死区范围内生成可通行位置");
   }
 
-  // 添加一个显示玩家状态的UI更新方法
-  private updatePlayerStatsUI(): void {
-    // 这里实现UI更新逻辑，例如显示当前的 buff 列表、属性值等
-    // 由于没有看到您的UI系统实现，这里仅提供一个框架
-    console.log('玩家属性已更新:');
-    // console.log('- 最大速度:', this.player.getMaxSpeed());
-    // console.log('- 射速:', this.player.getFireRate());
-    // console.log('- 子弹速度:', this.player.getBulletSpeed());
+  /** Loads the two actual resources once; callbacks count completed items, not bytes. */
+  load(onProgress?: (loaded: number, total: number) => void): Promise<void> {
+    if (this.loadingPromise) {
+      return this.loadingPromise.then(() => { onProgress?.(2, 2); });
+    }
+    let completed = 0;
+    onProgress?.(0, 2);
+    this.loadingPromise = (async () => {
+      await this.assetLoader.load(() => onProgress?.(++completed, 2));
+      await this.configLoader.load();
+      this.player.applyConfig(this.configLoader.getConfig("playerConfig"));
+      this.initialPlayerConfig = this.player.getConfigSnapshot();
+      this.initialPlayerLight = { radius: this.playerLight.getRadius(), intensity: this.playerLight.getIntensity() };
+      if (!this.map.isShapeWalkable(this.player.getCollider())) {
+        const body = this.player.getCollider();
+        const spawn = this.map.getRandomWalkablePosition(this.player.getSize(), body.compiled.shape, body.pose.rotation);
+        this.player.x = spawn.x;
+        this.player.y = spawn.y;
+      }
+      this.player.setSprite(this.assetLoader.getImage("player")!);
+      onProgress?.(++completed, 2);
+      this.loaded = true;
+    })();
+    return this.loadingPromise;
+  }
 
-    // 显示当前激活的修改器
-    const activeModifiers = this.modifierManager.getActiveModifiers();
-    if (activeModifiers.length > 0) {
-      console.log('激活的属性修改:');
-      activeModifiers.forEach(mod => {
-        console.log(`- ${mod.description}`);
-      });
+  async onEnter(): Promise<void> {
+    this.active = true;
+    // Also support direct entry through SceneManager, outside the normal loading flow.
+    try {
+      await this.load();
+      if (!this.active) return;
+      this.resizeCamera();
+      this.initLightingSystem();
+      this.debugPanel ??= new PlayerDebugPanel(this.player, this.game.input, this.game.renderer.ctx.canvas,
+        this.playerLight, this.initialPlayerConfig, this.initialPlayerLight);
+      window.addEventListener('resize', this.resizeListener);
+    } catch (error) {
+      if (this.active) this.loadError = error instanceof Error ? error.message : String(error);
     }
   }
 
-  /**
-   * 场景进入时的初始化逻辑
-   * 负责加载游戏资源并设置玩家精灵
-   */
-  async onEnter() {
-    await this.assetLoader.load();
-    await this.configLoader.load();
-    this.loaded = true;
-
-    // 获取并应用玩家配置
-    const playerConfig = this.configLoader.getConfig("playerConfig");
-    console.log("玩家配置:", playerConfig)
-    if (playerConfig) {
-      this.player.applyConfig(playerConfig);
-    }
-
-    // 设置玩家精灵
-    const sprite = this.assetLoader.getImage("player");
-    if (sprite) this.player.setSprite(sprite);
-
-    // 尝试播放背景音乐
-    const bgm = this.assetLoader.getAudio("bgm");
-    bgm?.play();
-
-    // 初始化光照系统尺寸
-    this.initLightingSystem();
-
-    // 监听窗口大小变化，同时更新相机和光照系统
-    window.addEventListener('resize', () => this.handleResize());
-  }
-
-  /**
-   * 场景退出时的清理逻辑
-   */
-  onExit() {
-    // 移除窗口大小变化的事件监听，避免内存泄漏
-    window.removeEventListener('resize', () => this.handleResize());
+  onExit(): void {
+    this.active = false;
+    this.debugPanel?.dispose();
+    this.debugPanel = undefined;
+    window.removeEventListener('resize', this.resizeListener);
   }
 
 
   /**
    * 场景更新逻辑，每帧调用
-   * @param delta 时间增量（毫秒）
+   * @param delta 时间增量（秒）
    * @param input 输入状态对象
    */
   update(delta: number, input: Input) {
     this.deltaSinceLastFrame = delta;
 
     if (!this.loaded) return;
-
-    // 更新道具生成计时器
-    this.pickupSpawnTimer -= delta;
-    if (this.pickupSpawnTimer <= 0) {
-      this.spawnPickupItem();
-      this.pickupSpawnTimer = this.pickupSpawnInterval;
-    }
 
     // 更新玩家状态
     this.player.update(delta, input, this.map);
@@ -470,16 +496,19 @@ export class GameScene extends Scene {
     this.particleSystem.update(delta);
 
     // 更新光照系统
+    this.torches.forEach(torch => torch.update(delta));
     this.lightingSystem.update(delta);
 
     // 更新属性修改器
     this.modifierManager.update(delta);
+    this.debugPanel?.update(delta);
 
     // 更新道具状态
     this.updatePickupItems(delta, input);
 
     // 检查玩家与道具的碰撞
     this.checkPickupCollisions();
+    this.updateGoldPickups(delta);
 
     // 相机跟随玩家中心位置
     const playerCenterX = this.player.x + this.player.getSize() / 2;
@@ -498,13 +527,30 @@ export class GameScene extends Scene {
     ctx.fillStyle = "#1a1a1a";
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-    if (!this.loaded) return;
+    if (!this.loaded) {
+      if (this.loadError) {
+        ctx.fillStyle = "#f16b67";
+        ctx.font = "20px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText("加载失败，请刷新页面重试", 40, 80);
+        ctx.fillText(this.loadError, 40, 120, Math.max(40, ctx.canvas.width - 80));
+      }
+      return;
+    }
+
+    // 在世界视口中绘制，再统一缩放；屏幕 HUD 保持原尺寸。
+    const screenContext = ctx;
+    ctx = this.worldContext;
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
     // 获取包含震动偏移的相机位置
     const cameraOffset = this.camera.getOffset();
 
     // 绘制地图，使用带震动偏移的相机位置
     this.map.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height, this.deltaSinceLastFrame);
+    this.torches.forEach(torch => torch.draw(ctx, cameraOffset.x, cameraOffset.y));
+    this.goldPickups.forEach(pickup => pickup.draw(ctx, cameraOffset.x, cameraOffset.y));
 
     // 绘制道具（在子弹上方，玩家下方）
     this.pickupItems.forEach(pickup => {
@@ -518,9 +564,9 @@ export class GameScene extends Scene {
       ctx.restore();
     });
 
-    // 绘制子弹（在玩家下方），使用相机的基础位置（不带震动偏移）
+    // 所有世界对象共用包含震动的相机偏移
     this.player.getBullets().forEach(bullet => {
-      bullet.draw(ctx, this.camera.x, this.camera.y);
+      bullet.draw(ctx, cameraOffset.x, cameraOffset.y, this.map);
     });
 
     // 绘制粒子（在子弹上方，玩家下方）
@@ -534,6 +580,32 @@ export class GameScene extends Scene {
 
     // 应用光照效果
     this.applyLighting(ctx, cameraOffset.x, cameraOffset.y);
+    // 分层绘制全部掉落物，后一个金块的光晕不能重新照亮前一个的投影。
+    this.goldPickups.forEach(pickup => pickup.drawGlow(ctx, cameraOffset.x, cameraOffset.y));
+    if (this.goldPickups.length) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      solidPath(ctx, this.map.getBlockingPolygons(cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height), cameraOffset.x, cameraOffset.y);
+      // 和地图共用像素边界，短投影及其柔边均不能覆盖墙壁、矿石的顶面。
+      ctx.clip("evenodd");
+      this.goldPickups.forEach(pickup => pickup.drawShadow(ctx, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition()));
+      ctx.restore();
+    }
+    this.goldPickups.forEach(pickup => pickup.drawSparkles(ctx, cameraOffset.x, cameraOffset.y));
+    this.player.drawUI(ctx, cameraOffset.x, cameraOffset.y);
+    screenContext.drawImage(this.worldCanvas, 0, 0, screenContext.canvas.width, screenContext.canvas.height);
+    ctx = screenContext;
+    ctx.save();
+    const dpr = window.devicePixelRatio || 1;
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = "#ffd700";
+    ctx.fillRect(24, 26, 12, 12);
+    ctx.font = "18px sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`黄金 ${this.player.getGold()}`, 46, 32);
+    ctx.restore();
   }
 
   /**
@@ -541,11 +613,11 @@ export class GameScene extends Scene {
    */
   private applyLighting(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number) {
     // 准备光照遮罩
-    const dpr = window.devicePixelRatio || 1;
-    // 使用相机的实际尺寸
+    // 使用与世界绘制一致的相机偏移
     this.lightingSystem.prepareLightingMask(
       cameraX,
       cameraY,
+      this.map,
     );
 
     // 应用光照效果到主画布

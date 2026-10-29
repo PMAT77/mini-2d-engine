@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>动态投影验收</title>
+<style>body{margin:0;background:#111820;color:#dfebef;font:14px system-ui}header{padding:20px 30px}h1{font-size:22px;margin:0 0 6px}p{margin:0;color:#a3b5bf}nav{margin-top:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}select,button{font:inherit;background:#24313c;color:#dfebef;border:1px solid #536571;border-radius:4px;padding:5px 10px}label{display:flex;gap:6px;align-items:center}canvas{display:block;width:960px;height:600px;margin:0 30px 24px;border:1px solid #344450}</style>
+<header><h1>动态地块投影 · <span id="label">单块</span></h1><p>固定地图验收场景 · 与游戏共用地图、光源和光照渲染代码</p><nav><select id="preset" aria-label="验收场景"><option value="single">单块</option><option value="wall">连续墙</option><option value="corner">墙角</option><option value="gap">窄缝</option><option value="mineral">矿石</option><option value="staircase">连续阶梯地形</option><option value="secondary">二次遮挡</option><option value="empty">无遮挡</option></select><label>投影<select id="shadowMode"><option value="soft">自然柔影</option><option value="hard">硬阴影对照</option></select></label><label>发光尺寸<input id="sourceSize" type="range" min="0" max="32" step="1" value="16"><output id="sizeLabel">16</output></label><label><input id="second" type="checkbox">第二光源</label><button id="destroy">破坏矿石</button><span>鼠标在地图上移动光源</span></nav></header><canvas></canvas>
+<script type="module">
+import { TileMap, tileScreenRect } from '../src/map/TileMap.ts';
+import { solidPath } from '../src/map/SolidTerrain.ts';
+import { LightSource } from '../src/core/LightSource.ts';
+import { LightingSystem } from '../src/core/LightingSystem.ts';
+import { Vector2 } from '../src/math/Vector2.ts';
+const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
+const dpr = devicePixelRatio || 1;
+canvas.width = 960 * dpr; canvas.height = 600 * dpr;
+const map = new TileMap(32, 24, { generateWater: false }); map.tileSize = 50 * dpr;
+const lighting = new LightingSystem(); lighting.initialize(canvas.width, canvas.height);
+lighting.setAmbientLight('#3A4450');
+const light = new LightSource(new Vector2(300 * dpr, 300 * dpr), 600 * dpr, '#FFF4E8', 1, 16 * dpr);
+const terrainLight = { position: { x: -map.width * map.tileSize, y: -map.height * map.tileSize },
+  color: '#B4C8E0', intensity: .06, shadowLength: map.tileSize * .4, softness: map.tileSize * .04 };
+const second = new LightSource(new Vector2(700 * dpr, 300 * dpr), 450 * dpr, '#9fdcff', 1, 16 * dpr);
+second.setActive(false); lighting.addLightSource(light); lighting.addLightSource(second);
+let preset = 'single', camera = [0,0], mode = 'soft', sourceSize = 16;
+function setShadow(value='soft', size=sourceSize){
+  mode=value;sourceSize=size;document.querySelector('#shadowMode').value=value;
+  document.querySelector('#sourceSize').value=size;document.querySelector('#sizeLabel').textContent=size;
+  for(const source of [light,second])source.setSourceRadius(mode==='hard'?0:sourceSize*dpr);
+  render();
+}
+const names = {single:'单块墙壁',wall:'连续墙',corner:'墙角',gap:'窄缝',mineral:'可破坏矿石',staircase:'连续阶梯地形',secondary:'投影遇到其他地形',empty:'无遮挡圆形光照'};
+function render(){
+  const [cx,cy] = camera;
+  for(let row=0;row<12;row++) for(let col=0;col<20;col++) {
+    ctx.fillStyle=(row+col)%2?'#73828d':'#7c8c96';
+    ctx.fillRect(col*50*dpr,row*50*dpr,50*dpr,50*dpr);
+  }
+  map.draw(ctx,cx,cy,canvas.width,canvas.height,0);
+  // Neutral ground makes geometric shadows easier to inspect than the game's dark floor.
+  ctx.save();ctx.beginPath();ctx.rect(0,0,canvas.width,canvas.height);
+  solidPath(ctx,map.getBlockingPolygons(cx,cy,canvas.width,canvas.height),cx,cy);ctx.clip('evenodd');
+  for(let row=0;row<map.height;row++) for(let col=0;col<map.width;col++) {
+    const rect=tileScreenRect({x:col*map.tileSize,y:row*map.tileSize,width:map.tileSize,height:map.tileSize},cx,cy);
+    ctx.fillStyle=(row+col)%2?'#73828d':'#7c8c96'; ctx.fillRect(rect.x,rect.y,rect.width,rect.height);
+  }
+  ctx.restore();
+  lighting.prepareLightingMask(cx,cy,map); lighting.applyLighting(ctx);
+  for(const source of [light,second]) if(source.isLightActive()) {
+    const pos=source.getPosition();ctx.fillStyle=source===light?'#fff4dd':'#9fdcff';ctx.beginPath();ctx.arc(pos.x-cx,pos.y-cy,7*dpr,0,Math.PI*2);ctx.fill();
+  }
+}
+function setup(name='single'){
+  preset=name;document.querySelector('#preset').value=name;document.querySelector('#second').checked=false; document.querySelector('#label').textContent=names[name];
+  map.tiles.forEach(row=>row.fill('default')); map.tileHp.forEach(row=>row.fill(0)); map.tileHighlight.forEach(row=>row.fill(0));
+  const put=(col,row,type='wall')=>{map.tiles[row][col]=type;map.tileHp[row][col]=type==='mineral'?100:0};
+  if(name==='single'||name==='mineral')put(9,5,name==='mineral'?'mineral':'wall');
+  if(name==='wall'||name==='gap')for(let r=1;r<11;r++)if(name!=='gap'||r!==5)put(9,r);
+  if(name==='corner'){for(let r=3;r<9;r++)put(9,r);for(let c=9;c<14;c++)put(c,8);}
+  if(name==='staircase')for(const [c,r] of [[5,2],[6,2],[6,3],[7,3],[8,3],[8,4],[9,4],[10,4]])put(c,r);
+  if(name==='secondary'){put(8,5);for(let r=4;r<=6;r++){put(12,r);put(13,r,'mineral');}}
+  light.setPosition(new Vector2((name==='staircase'?650:300)*dpr,(name==='staircase'?400:275)*dpr));second.setActive(false);camera=[0,0];render();
+}
+window.fixture={setup,render,map,lighting,light,second,canvas,setShadow,
+ terrainLight(active){lighting.setTerrainLight(active?terrainLight:null);lighting.setAmbientLight(active?'#2F3843':'#3A4450');render()},
+ move(x,y){light.setPosition(new Vector2(x*dpr,y*dpr));render()},
+ offset(x,y){camera=[x*dpr,y*dpr];render()},
+ fillLight(active){second.setActive(active);render()},
+ destroy(){map.damageTile(9,5,100);map.tileHighlight[5][9]=0;render()},
+ pixel(x,y){return [...ctx.getImageData(Math.round(x*dpr),Math.round(y*dpr),1,1).data]},
+};
+document.querySelector('#shadowMode').onchange=e=>setShadow(e.target.value);
+document.querySelector('#sourceSize').oninput=e=>setShadow(mode,Number(e.target.value));
+document.querySelector('#preset').onchange=e=>setup(e.target.value);
+document.querySelector('#second').onchange=e=>window.fixture.fillLight(e.target.checked);
+document.querySelector('#destroy').onclick=()=>window.fixture.destroy();
+canvas.onpointermove=e=>{const rect=canvas.getBoundingClientRect();window.fixture.move(e.clientX-rect.left,e.clientY-rect.top)};
+setup();
+</script></html>

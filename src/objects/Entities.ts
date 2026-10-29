@@ -2,12 +2,30 @@ import { GameObject } from "../core/GameObject";
 import { Input } from "../core/Input";
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
+import { Collider, ColliderShape, Contact, DEFAULT_SHAPE, Point, compileShape, isRotationInvariant, transformCollider } from "../physics/Collider";
+
+const defaultCollider = compileShape(DEFAULT_SHAPE);
+const normalizeAngle = (angle: number) => ((angle + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
 
 /**
  * 实体抽象类，定义游戏中所有可移动实体的基础行为
  * 包含移动、旋转、碰撞检测等核心功能
  */
 export abstract class Entities extends GameObject {
+  private colliderShape = defaultCollider;
+  private collisionContacts: Contact[] = [];
+  /** Last legal pose's terrain factor, independent of sprint and stat modifiers. */
+  protected terrainSpeedFactor = 1;
+  protected terrainWaterCoverage = { fraction: 0, depth: 0 };
+
+  public setCollider(shape: ColliderShape): void { this.colliderShape = compileShape(shape); }
+  public getCollider(): Collider {
+    return transformCollider(this.colliderShape, { x: this.x + this.size / 2, y: this.y + this.size / 2, size: this.size, rotation: this.getBodyRotation() });
+  }
+  public getCollisionContacts(): Contact[] { return this.collisionContacts.slice(); }
+  public getMaxSpeed(): number { return this.maxSpeed; }
+  protected getMovementSpeed(): number { return this.getMaxSpeed(); }
+  protected getBodyRotation(): number { return this.currentRotation; }
   /** 实体尺寸（像素） */
   protected size: number = 49;
 
@@ -79,6 +97,7 @@ export abstract class Entities extends GameObject {
    * @param newSize 新的尺寸值（像素）
    */
   public setSize(newSize: number): void {
+    if (!Number.isFinite(newSize) || newSize <= 0) throw new Error("实体尺寸必须是正有限数值");
     this.size = newSize;
   }
 
@@ -149,12 +168,12 @@ export abstract class Entities extends GameObject {
    * @param map 瓦片地图实例
    */
   protected limitPosition(map: TileMap): void {
-    const mapWidth = map.width * map.width;
+    const mapWidth = map.width * map.tileSize;
     const mapHeight = map.height * map.tileSize;
 
-    // 确保实体不会超出地图边界
-    this.x = Math.max(0, Math.min(mapWidth - this.size, this.x));
-    this.y = Math.max(0, Math.min(mapHeight - this.size, this.y));
+    const b = this.getCollider().bounds;
+    this.x += Math.max(0, -b.x) + Math.min(0, mapWidth - b.x - b.width);
+    this.y += Math.max(0, -b.y) + Math.min(0, mapHeight - b.y - b.height);
   }
 
   /**
@@ -210,32 +229,19 @@ export abstract class Entities extends GameObject {
    * @param map 可选的瓦片地图实例，用于碰撞检测
    */
   protected updatePosition(delta: number, map?: TileMap): void {
-    if (!map) {
-      // 无地图时直接更新位置
-      this.x += this.velocity.x * delta;
-      this.y += this.velocity.y * delta;
-      return;
-    }
+    this.moveAndRotate({ x: this.velocity.x * delta, y: this.velocity.y * delta }, 0, map);
+  }
 
-    // 提前计算新位置以减少计算次数
-    const newX = this.x + this.velocity.x * delta;
-    const newY = this.y + this.velocity.y * delta;
-
-    // 优化碰撞检测 - 先检查是否有速度再检测碰撞
-    if (Math.abs(this.velocity.x) > 0.1) {
-      if (!map.isCollidingRect(newX, this.y, this.size, this.size)) {
-        this.x = newX;
-      } else {
-        this.velocity.x = 0;
-      }
-    }
-
-    if (Math.abs(this.velocity.y) > 0.1) {
-      if (!map.isCollidingRect(this.x, newY, this.size, this.size)) {
-        this.y = newY;
-      } else {
-        this.velocity.y = 0;
-      }
+  protected moveAndRotate(movement: Point, angle: number, map?: TileMap): void {
+    if (!map) { this.x += movement.x; this.y += movement.y; this.currentRotation = normalizeAngle(this.currentRotation + angle); return; }
+    const before = this.getCollider(), result = map.resolveMotion(before, movement, angle);
+    this.x = result.collider.pose.x - this.size / 2;
+    this.y = result.collider.pose.y - this.size / 2;
+    this.currentRotation = normalizeAngle(this.currentRotation + result.collider.pose.rotation - before.pose.rotation);
+    this.collisionContacts.push(...result.contacts);
+    for (const { normal } of result.contacts) {
+      const inward = Math.min(0, this.velocity.x * normal.x + this.velocity.y * normal.y);
+      this.velocity.x -= normal.x * inward; this.velocity.y -= normal.y * inward;
     }
   }
 
@@ -244,7 +250,7 @@ export abstract class Entities extends GameObject {
    * @param delta 时间增量（秒）
    * @param inputDir 可选的输入方向向量
    */
-  protected updateRotation(delta: number, inputDir?: Vector2): void {
+  protected getRotationDelta(delta: number, inputDir?: Vector2): number {
     let targetAngle: number | null = null;
 
     // 优先使用输入方向
@@ -257,34 +263,21 @@ export abstract class Entities extends GameObject {
     }
 
     if (targetAngle === null) {
-      return;
+      return 0;
     }
 
     // 优化角度计算 - 使用更高效的角度标准化方法
-    let angleDiff = targetAngle - this.currentRotation;
-    angleDiff = ((angleDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+    const turn = Math.PI * 2;
+    const clockwise = ((targetAngle - this.currentRotation) % turn + turn) % turn;
+    let angleDiff = clockwise > Math.PI ? clockwise - turn : clockwise;
+    if (this.rotationStrategy === "cw") angleDiff = clockwise;
+    if (this.rotationStrategy === "ccw") angleDiff = clockwise === 0 ? 0 : clockwise - turn;
 
-    // 特殊处理180度情况
-    if (Math.abs(angleDiff) > Math.PI - 0.01 && Math.abs(angleDiff) < Math.PI + 0.01) {
-      if (this.rotationStrategy === "cw") {
-        angleDiff = Math.PI;
-      } else if (this.rotationStrategy === "ccw") {
-        angleDiff = -Math.PI;
-      } else {
-        angleDiff = Math.random() > 0.5 ? Math.PI : -Math.PI;
-      }
-    }
+    return Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), this.rotationSpeed * delta);
+  }
 
-    // 限制旋转速度并更新当前角度
-    const maxRotation = this.rotationSpeed * delta;
-    if (Math.abs(angleDiff) > maxRotation) {
-      this.currentRotation += Math.sign(angleDiff) * maxRotation;
-    } else {
-      this.currentRotation = targetAngle;
-    }
-
-    // 标准化当前角度
-    this.currentRotation = ((this.currentRotation + Math.PI) % (2 * Math.PI)) - Math.PI;
+  protected updateRotation(delta: number, inputDir?: Vector2, map?: TileMap): void {
+    this.moveAndRotate({ x: 0, y: 0 }, this.getRotationDelta(delta, inputDir), map);
   }
 
   /**
@@ -294,6 +287,8 @@ export abstract class Entities extends GameObject {
    * @param map 可选的瓦片地图实例
    */
   public update(delta: number, input: Input, map?: TileMap): void {
+    if (!Number.isFinite(delta) || delta < 0) return;
+    this.collisionContacts = [];
     if (map) {
       this.limitPosition(map);
     }
@@ -301,24 +296,27 @@ export abstract class Entities extends GameObject {
     const moveDir = this.getMoveDirection(input); // W/A/S/D 控制移动
     const lookDir = this.getLookDirection(input); // 方向键控制旋转
 
-    let maxSpeed = this.maxSpeed;
-    if ('getMaxSpeed' in this && typeof (this as any).getMaxSpeed === 'function') {
-      maxSpeed = (this as any).getMaxSpeed();
+    if (!map) { this.terrainWaterCoverage.fraction = 0; this.terrainWaterCoverage.depth = 0; }
+    this.terrainSpeedFactor = map?.getShapeSpeedFactor(this.getCollider(), this.terrainWaterCoverage) ?? 1;
+    if (map && map.queryShape(this.getCollider()).some(c => c.depth > 0.01)) { this.velocity.set(0, 0); return; }
+    const maxSpeed = this.getMovementSpeed();
+    let remaining = delta;
+    let terrainFactor = this.terrainSpeedFactor;
+    // ponytail: one controlled entity; reuse the tile grid rather than maintain a second spatial index.
+    for (let i = 0; remaining > 1e-9 && i < 4096; i++) {
+      const body = this.getCollider();
+      const invariant = isRotationInvariant(body);
+      const step = Math.min(remaining, 1 / 120, 1 / Math.max(1, this.velocity.length() + maxSpeed + (invariant ? 0 : this.rotationSpeed * body.radius)), invariant ? Infinity : 0.025 / this.rotationSpeed);
+      const speed = maxSpeed * terrainFactor;
+      this.updateVelocityNonlinear(moveDir.clone().scale(speed), moveDir, step);
+      if (this.velocity.length() > speed) this.velocity.scale(speed / this.velocity.length());
+      this.moveAndRotate({ x: this.velocity.x * step, y: this.velocity.y * step }, this.getRotationDelta(step, lookDir), map);
+      terrainFactor = map?.getShapeSpeedFactor(this.getCollider(), this.terrainWaterCoverage) ?? 1;
+      this.terrainSpeedFactor = terrainFactor;
+      const finalSpeed = maxSpeed * terrainFactor;
+      if (this.velocity.length() > finalSpeed) this.velocity.scale(finalSpeed / this.velocity.length());
+      remaining -= step;
     }
-
-    // 计算目标速度，考虑地图速度因子
-    const baseVel = moveDir.clone().scale(maxSpeed);
-    const speedFactor = map?.getSpeedFactor(this.x, this.y) || 1;
-    const targetVel = baseVel.scale(speedFactor);
-
-    // 更新速度
-    this.updateVelocityNonlinear(targetVel, moveDir, delta);
-
-    // 旋转优先使用方向键
-    this.updateRotation(delta, lookDir);
-
-    // 更新位置（碰撞检测）
-    this.updatePosition(delta, map);
   }
 
   /**
@@ -329,7 +327,7 @@ export abstract class Entities extends GameObject {
     ctx.save();
     // 平移到实体中心点并应用旋转
     ctx.translate(this.x + this.size / 2, this.y + this.size / 2);
-    ctx.rotate(this.currentRotation);
+    ctx.rotate(this.getBodyRotation());
 
     // 绘制精灵或默认矩形
     if (this.sprite) {

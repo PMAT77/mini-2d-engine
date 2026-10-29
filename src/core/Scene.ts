@@ -38,7 +38,7 @@ export abstract class Scene {
    * 场景进入时的钩子函数（可选）
    * 当场景被切换到前台时调用
    */
-  public onEnter?(): void;
+  public onEnter?(): void | Promise<void>;
 
   /**
    * 场景退出时的钩子函数（可选）
@@ -110,16 +110,17 @@ export class SceneManager {
    * @param duration 过渡动画持续时间（秒），默认为0.5秒
    */
   public changeScene(scene: Scene, duration = 0.5): void {
-    // 如果当前没有场景，直接设置新场景
-    if (!this.currentScene) {
-      scene._setGame(this.game);
+    if (this.isTransitioning || scene === this.currentScene) return;
+    scene._setGame(this.game);
+    if (!this.currentScene || duration <= 0) {
+      const previous = this.currentScene;
       this.currentScene = scene;
-      this.currentScene.onEnter?.();
+      this.nextScene = null;
+      this.isTransitioning = false;
+      previous?.onExit?.();
+      scene.onEnter?.();
       return;
     }
-
-    // 设置过渡动画参数
-    scene._setGame(this.game);
     this.nextScene = scene;
     this.transitionDuration = duration;
     this.transitionTime = 0;
@@ -138,23 +139,18 @@ export class SceneManager {
 
       // 检查过渡是否完成
       if (this.transitionTime >= this.transitionDuration) {
-        // 调用当前场景的退出钩子
-        this.currentScene.onExit?.();
-        // 切换到下一个场景
+        const previous = this.currentScene;
         this.currentScene = this.nextScene;
-        // 调用新场景的进入钩子
-        this.currentScene.onEnter?.();
-        // 重置过渡状态
         this.nextScene = null;
         this.isTransitioning = false;
+        previous.onExit?.();
+        this.currentScene.onEnter?.();
       }
     }
 
     // 更新当前场景
     this.currentScene?.update(delta, input);
 
-    // 如果正在过渡，也更新下一个场景以确保其状态正确
-    this.nextScene?.update(delta, input);
   }
 
   /**
@@ -162,53 +158,12 @@ export class SceneManager {
    * @param ctx Canvas 2D渲染上下文
    */
   public draw(ctx: CanvasRenderingContext2D): void {
-    // 获取画布尺寸信息
-    const width = ctx.canvas.width;
-    const height = ctx.canvas.height;
-
-    // 处理场景过渡绘制
-    if (this.isTransitioning && this.currentScene && this.nextScene) {
-      const t = this.transitionTime / this.transitionDuration;
-
-      // 创建临时画布用于绘制淡出效果
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = width;
-      tempCanvas.height = height;
-      const tempCtx = tempCanvas.getContext('2d');
-
-      if (!tempCtx) {
-        console.error('无法创建临时画布的2D渲染上下文');
-        // 降级处理：直接绘制当前场景
-        this.currentScene?.draw(ctx);
-        return;
-      }
-
-      // 重置变换矩阵以确保正确的绘制
-      tempCtx.setTransform(1, 0, 0, 1, 0, 0);
-
-      // 绘制当前场景到临时画布
-      this.currentScene.draw(tempCtx);
-
-      // 绘制半透明的黑色矩形，创造淡出效果
-      tempCtx.save();
-      tempCtx.fillStyle = `rgba(0, 0, 0, ${t})`;
-      tempCtx.fillRect(0, 0, width, height);
-      tempCtx.restore();
-
-      // 绘制下一个场景到主画布（淡入）
-      ctx.save();
-      ctx.globalAlpha = t;
+    ctx.save();
+    this.currentScene?.draw(ctx);
+    if (this.isTransitioning && this.nextScene) {
+      ctx.globalAlpha *= Math.min(1, this.transitionTime / this.transitionDuration);
       this.nextScene.draw(ctx);
-      ctx.restore();
-
-      // 绘制临时画布（包含当前场景和淡出效果）到主画布
-      ctx.save();
-      ctx.globalAlpha = 1 - t;
-      ctx.drawImage(tempCanvas, 0, 0);
-      ctx.restore();
-    } else {
-      // 正常绘制当前场景
-      this.currentScene?.draw(ctx);
     }
+    ctx.restore();
   }
 }

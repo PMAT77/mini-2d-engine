@@ -36,11 +36,10 @@ export class AssetLoader {
     const total = entries.length;
     let loaded = 0;
 
-    const promises = entries.map(([key, url]) => {
-      const ext = url.split('.').pop()?.toLowerCase();
+    const promises = entries.map(async ([key, url]) => {
+      const ext = url.split(/[?#]/)[0].split('.').pop()?.toLowerCase();
       if (!ext) {
-        console.warn(`无法识别资源扩展名: ${url}`);
-        return Promise.resolve();
+        throw new Error(`无法识别资源扩展名: ${url}`);
       }
 
       if (this.isImageExtension(ext)) {
@@ -54,8 +53,7 @@ export class AssetLoader {
           onProgress?.(loaded, total);
         });
       } else {
-        console.warn(`不支持的资源类型: ${url}`);
-        return Promise.resolve();
+        throw new Error(`不支持的资源类型: ${url}`);
       }
     });
 
@@ -119,19 +117,17 @@ export class AssetLoader {
    * @returns Promise<void> 加载完成时解析的Promise
    */
   private loadImage(key: string, url: string, onLoad: () => void): Promise<void> {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       const img = new Image();
-      img.src = url;
       img.onload = () => {
         this.images[key] = img;
         onLoad();
         resolve();
       };
       img.onerror = () => {
-        console.error(`图片加载失败: ${url}`);
-        onLoad(); // 即使失败也继续加载其他资源
-        resolve();
+        reject(new Error(`图片加载失败: ${url}`));
       };
+      img.src = url;
     });
   }
 
@@ -144,19 +140,17 @@ export class AssetLoader {
    * @returns Promise<void> 加载完成时解析的Promise
    */
   private loadAudio(key: string, url: string, onLoad: () => void): Promise<void> {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       const audio = new Audio();
-      audio.src = url;
       audio.onloadeddata = () => {
         this.audios[key] = audio;
         onLoad();
         resolve();
       };
       audio.onerror = () => {
-        console.error(`音频加载失败: ${url}`);
-        onLoad(); // 即使失败也继续加载其他资源
-        resolve();
+        reject(new Error(`音频加载失败: ${url}`));
       };
+      audio.src = url;
     });
   }
 }

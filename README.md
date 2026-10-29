@@ -1,286 +1,153 @@
 # Mini 2D Engine
 
-一个基于 Canvas 的轻量级 2D 游戏引擎，使用 TypeScript 开发，提供完整的游戏开发框架，包括渲染系统、场景管理、输入处理、物理系统、状态机和配置系统等核心功能。
+基于 TypeScript、Vite 和 Canvas 2D 的轻量游戏框架，附带俯视角射击演示。当前包含随机瓦片地图、碰撞移动、可破坏矿石、武器过热、道具增益、粒子与动态地块投影；尚未提供敌人、胜负条件或存档。
 
-<img src="https://raw.githubusercontent.com/PMAT77/PMAT77CDN/main/gif/demo.gif" width="100%" height="100%" />
+## 运行与验证
 
-## 🚀 技术栈
-
-- 编程语言 : TypeScript
-- 构建工具 : Vite
-- 渲染技术 : Canvas 2D API
-- 开发环境 : 支持现代浏览器
-
-## 📁 项目结构
-
-项目采用模块化架构设计，清晰分离了游戏核心系统、对象系统、地图系统和场景管理等组件。
-
-```
-├── README.md
-├── index.html
-├── package-lock.json
-├── package.json
-├── public/
-│   ├── assets/         # 游戏资源（图片、音频等）
-│   │   ├── audios/
-│   │   └── images/
-│   └── configs/        # 游戏配置文件
-│       ├── CONFIGURATION.md    # 配置文件说明文档
-│       └── playerConfig.json   # 玩家配置文件
-├── src/
-│   ├── core/           # 核心系统（游戏循环、渲染、场景管理等）
-│   │   ├── AssetLoader.ts      # 资源加载器
-│   │   ├── Camera.ts           # 相机系统
-│   │   ├── ConfigLoader.ts     # 配置加载器
-│   │   ├── Game.ts             # 游戏主类
-│   │   ├── GameObject.ts       # 游戏对象基类
-│   │   ├── Input.ts            # 输入系统
-│   │   ├── LightSource.ts      # 光源类
-│   │   ├── LightingSystem.ts   # 光照系统
-│   │   ├── Renderer.ts         # 渲染器
-│   │   └── Scene.ts            # 场景基类
-│   ├── main.ts         # 游戏入口文件
-│   ├── map/            # 地图系统（瓦片地图、地形生成等）
-│   │   ├── TileMap.ts          # 瓦片地图类
-│   │   └── TileType.ts         # 瓦片类型定义
-│   ├── math/           # 数学工具库（向量运算等）
-│   │   └── Vector2.ts          # 二维向量类
-│   ├── objects/        # 游戏对象系统（玩家、实体、子弹等）
-│   │   ├── Bullet.ts           # 子弹类
-│   │   ├── Entities.ts         # 实体基类
-│   │   ├── Particle.ts         # 粒子类
-│   │   ├── ParticleSystem.ts   # 粒子系统
-│   │   └── Player.ts           # 玩家类
-│   ├── scenes/         # 场景实现（菜单、游戏场景、加载场景等）
-│   │   ├── GameScene.ts        # 游戏主场景
-│   │   ├── LoadingScene.ts     # 加载场景
-│   │   └── MenuScene.ts        # 菜单场景
-│   ├── status/         # 状态机系统（玩家状态管理）
-│   │   ├── IdleState.ts        # 空闲状态
-│   │   ├── MovingState.ts      # 移动状态
-│   │   ├── ShootingState.ts    # 射击状态
-│   │   ├── State.ts            # 状态接口
-│   │   └── StateMachine.ts     # 状态机类
-│   └── utils/          # 工具函数
-│       └── colorUtils.ts       # 颜色工具函数
-├── tsconfig.json
-└── vite.config.ts
+```bash
+npm ci
+npm run dev
 ```
 
-## ✨ 核心功能
+按 Enter 开始，WASD 移动，方向键瞄准并射击，按住任意 Shift 疾跑。生命条和青蓝色体力条常驻角色下方，武器热量／过热冷却圆环位于角色右上角。
 
-### 🎮 游戏核心系统
+射击指针沿角色外侧的隐形圆轨道定位。同次射击中的相邻八向输入始终以 150 毫秒线性滑动跟随，按住一个方向多久都不影响下一次相邻过渡，新输入立即接管；首次输入或跨方向跳变立即定位。模型只跟随移动方向，静止时保留最后朝向，移动和模型转向不改变指针的世界方向。八方向只决定瞄准目标，子弹从角色中心按指针当前插值角度发射，可以沿 22.5°等中间角度飞出。射速保持不变，短暂过渡期间可能没有子弹射出。松键或方向抵消后立即隐藏，过热期间仍可瞄准。通过 `shooting.aimTurnDuration` 调整滑动时长。
 
-- 游戏循环 : 基于 requestAnimationFrame 实现的高性能游戏主循环
-- 时间管理 : 基于 delta time 的帧率无关更新系统
-- 场景管理 : 支持多场景切换和过渡动画效果
-- 输入处理 : 键盘输入检测和管理
-- 配置加载系统 : 支持从外部 JSON 文件加载游戏配置，实现热配置
+已有 Playwright 环境时，运行 `npm run test:shooting-browser` 检查真实移动／方向键、模型和瞄准独立、第一帧滑动、同帧多次变向与松键隐藏，并在 30／60／144 FPS、DPR 1／1.25／2 下验证默认射速的中间角度弹道和移动轨迹。小数相机与震动偏移检查指针和状态条避让，截图与采样结果保存至 `.review/`，浏览器环境变量与下述验收命令一致。
 
-### 🎨 渲染系统
+移动按下即获得 70% 速度，80 毫秒内以 ease-out 曲线补满；转向带 12 毫秒轻微阻尼，反向立即响应。松键后以 smoothstep 曲线减速收尾，时长不超过本次连续按键时长、最多 200 毫秒：短按用于微调位置，持续移动后常速满速收尾额外滑行约 40 像素。重新输入立即接管，收尾期间不消耗体力。基础移速为 400 像素/秒，按 Shift 后用 160 毫秒平滑升至 1.6 倍疾跑速度，继续受到地形及移速道具影响，疾跑时可以正常射击。可将 `movement.turnDamping` 调为 0 恢复即时转向，将 `movement.stopDuration` 调为 0 恢复松键即停。
 
-- Canvas 渲染 : 基于 Canvas 2D API 的高效渲染器
-- 高 DPI 支持 : 自动处理不同设备像素比的显示问题
-- 相机系统 : 支持跟随目标、死区控制和震动效果
-- 粒子系统 : 支持创建和管理粒子效果
+体力上限 100，疾跑每秒消耗 25，连续可跑 4 秒；停止消耗 0.6 秒后每秒恢复 35。静止或完全顶墙不消耗，滑墙移动正常消耗。耗尽后回到常速，必须松开过 Shift 且恢复至少 15% 才能再次疾跑。耗尽锁定时体力条变暗并显示橙色边框，仍可正常移动与射击。
 
-### 🗺️ 地图系统
+武器圆环从顶部顺时针随热量填充，过热时变红并随剩余冷却时间缩短；完全恢复后淡出。
 
-- 瓦片地图 : 可配置的网格地图系统
-- 地形生成 : 基于概率和噪声的随机地形生成
-- 碰撞检测 : 精确的矩形碰撞检测算法
-- 可破坏地形 : 支持瓦片血量和破坏效果
-
-### 🕹️ 游戏对象系统
-
-- 对象继承体系 : 基于抽象类的游戏对象层次结构
-- 实体系统 : 支持移动、旋转和动画的实体类
-- 玩家控制系统 : 支持移动、射击和状态管理的玩家类
-- 物理运动 : 支持加速度、减速度和非线性运动
-
-### 🧠 状态管理
-
-- 状态机 : 灵活的状态管理系统
-- 玩家状态 : 支持待机、移动和射击等多种状态
-- 动画控制 : 基于状态的动画效果管理
-
-### ⚙️ 配置系统
-
-- 外部配置文件 : 支持将游戏配置存储在外部 JSON 文件中
-- 配置加载器 : 异步加载和缓存配置文件
-- 配置应用 : 动态应用配置到游戏对象
-- 配置文档 : 详细的配置项说明文档
-
-## 🚀 快速开始
-
-### 安装依赖
-
-```Bash
-npm install
+```bash
+npm test
+npm run typecheck
+npm run build
+npm run preview
 ```
 
-### 开发模式
+测试使用现有 TypeScript 编译器及 Node 内置测试模块，不额外安装测试框架。依赖目录和构建结果不进入版本控制；安装依赖以 `package-lock.json` 为准。
 
-```Bash
-npm run dev
+已有 Playwright 环境时，启动开发服务后运行 `npm run test:movement-browser`，可检查真实 Shift 输入、圆环热量与冷却方向、体力耗尽显示，以及 DPR 1／1.25／2 和小数相机偏移。通过 `PLAYWRIGHT_MODULE` 指定现有模块路径、`BROWSER_EXECUTABLE` 指定浏览器路径；不为游戏增加浏览器依赖。
+
+## 代码结构
+
+进入游戏后点击右上角“调试 · F2”或按 F2，可实时修改血量、攻击力、射速、移动手感、体力、武器过热及角色光圈半径／强度。回车或失焦应用，Escape 收起，点击游戏画面恢复键盘控制。改动仅本次运行生效；“恢复初始参数”还原角色光照、回满资源并保留道具增益。完整字段见 [玩家配置](public/configs/CONFIGURATION.md)。启动开发服务后，运行 `npm run test:debug-browser` 验证面板操作与输入隔离，浏览器环境变量同下方其他验收命令。
+
+- `src/core`：游戏循环、场景、输入、相机、资源和配置加载、光照、增益管理。
+- `src/map`：随机地形、通行判断、瓦片伤害和投影边界。
+- `src/physics`：形状编译、精确碰撞、覆盖面积、连续检测和运动约束。
+- `src/objects`：玩家、子弹、道具及粒子。
+- `src/scenes`：菜单、真实资源加载和游戏场景。
+- `src/status`：待机、移动和射击状态。
+- `src/ui`：角色属性调试面板。
+- `public/configs`：玩家参数及配置说明。
+- `tests`：逻辑回归测试、固定布局光照与碰撞验收页。
+
+## 碰撞与地形缓速
+
+墙壁、黄金矿和特殊矿按相邻关系融合为连续地形，外凸角与内凹角均采用圆角，半径为地块尺寸的 30%（默认 15 像素）；仅共边连接，斜对角保持分离。异类连接保留各自颜色与图标，内凹补圆沿角平分线归属相邻两块。绘制、角色／子弹碰撞、地形覆盖与投影共用轮廓，矿石破坏后立即更新。运行 `npm run test:rounded-terrain-browser` 检查圆角、接缝、水面遮挡及 DPR／相机偏移，截图保存至 `.review/rounded-terrain-dpr*.png`。
+
+玩家主体固定为居中的圆形，默认直径 49 像素、半径 24.5 像素。移动、转向、地形缓速、拾取和出生校验只读取这个圆；皮肤、武器、方形精灵伸出的角及呼吸缩放只参与绘制，不改变通行能力。窄通道内可以转向、反向返回，沿墙及墙角移动保留切向速度。
+
+通用实体仍支持圆形、凸／凹多边形和复合形状。方形等非圆实体贴墙旋转时会因伸出的角逐渐挤离墙面，空间不足时停转；玩家不采用这类外观轮廓作为碰撞体。
+
+地图生成少量成片湖泊，按浅水、中水、深水、超深水分为四档，移速系数分别为 0.75、0.5、0.25、0。水深由岸边向内部逐级加深，四档采用由浅青蓝到暗蓝的颜色，不规则闭合边界有约 4 像素柔和过渡。超深水阻止角色和地面掉落物进入，所有水深均允许子弹与光线越过。
+
+角色开火时身体与水体有实际重叠，该颗子弹启用持续水体阻力；水外开火的子弹经过任何水深均保持正常速度。阻力资格和各水深减速参数在发射时固定，之后只按子弹圆形与各水深的实际覆盖比例计算线性减速度：浅水、中水、深水、超深水每秒分别扣除发射速度的 40%、80%、160%、320%，默认强度约为原来的一半。完全处于单一水深时，从原速到停止分别需 2.5、1.25、0.625、0.3125 秒；停止位置散出 4 颗约 0.22 秒淡出的细小白色湮灭粒子后消失，不造成伤害。跨水深时累积减速，离水保持剩余速度，再次入水继续减速；弹速增益计入发射速度。子弹按最多 1/120 秒且最多 1 像素的步长积分，沿实际位移检测首次命中。
+
+调试侧栏“子弹水体阻力”可分别修改四档“减速 %/秒”，设为 0 关闭对应水深的阻力，修改影响后续发射的子弹。“恢复初始参数”同时还原四项；配置文件对应 `bulletWaterDrag` 分组，使用每秒比例（界面 40 对应配置 0.4）。
+
+子弹与角色共用水体颜色遮罩规则：只在圆形与水面重叠的部分叠加 35% 的对应水深颜色，岸边和跨水深时分别着色，离水恢复原色。所有经过水面的子弹都有遮罩，水外发射的子弹仍不受阻力；绘制使用共用的小缓冲画布和现有水面图层，遮罩参与世界光照。
+
+水域速度系数按实际轮廓的覆盖面积加权；例如陆地与中水各覆盖一半时为 0.75，浅水与中水各覆盖一半时为 0.625。凹陷空白不计入，重叠复合部件只计一次。地形修正与疾跑、移速增益相乘，不影响转向速度和碰撞推出。圆形玩家通过解析面积计算跨水深减速，统一深度区域直接返回系数；水域三角网格在生成时合并，正常移动不创建覆盖明细，也不运行数值积分。子弹以真实圆形沿路径检测首次命中，拾取和出生校验也使用实际形状。
+
+`new TileMap(width, height, { seed: 8351 })` 可复现基础地形和水域；固定布局测试可用 `{ generateWater: false }` 关闭自动湖泊。`tiles` 存储基础瓦片，生成水域是独立连续图层；`getSpeedFactor(x, y)` 和 `getTerrainCoverage(body)` 会包含该图层，同一瓦片可以返回多个深度的覆盖面积。旧 `WATER / water` 继续表示中水。
+
+角色涉水时，左侧显示竖向排列的三个同色向下折箭头：浅水蓝色、中水紫色、深水红色，仅在水深交界按涉水部分的覆盖比例混色，陆地占比不改变水深颜色。标识约 80 毫秒淡入、离水后 120 毫秒淡出；静止、疾跑或获得移速增益时，仍按地形缓速状态显示。角色模型仅在与水面重叠的部分叠加 35% 的对应水深颜色，跨水深时分别着色，透明像素和陆地部分保持原样。遮罩随朝向、呼吸、相机及震动对齐，并参与世界光照；折箭头在光照之后显示。水深覆盖信息随移动系数在同一次查询中计算，显示复用该结果和缓存水面，渲染不重新求覆盖面积，也不读取画布像素。
+
+开发服务下打开 `/tests/water-fixture.html` 可检查固定种子的完整湖泊，WASD 移动、Shift 疾跑。运行 `npm run test:water-browser` 验收 DPR 1／1.25／2、四档颜色、接缝与曲线滑动；运行 `npm run test:water-performance` 在实际游戏中分别测量 DPR 1／2 下常速、疾跑往返穿越水深边界的表现，每组预热 1 秒并记录 5 秒，移动更新 p95 目标不超过 2 ms。结果保存至 `.review/water-performance.json`，使用相同的浏览器环境变量。
+
+```ts
+player.setCollider({ type: "circle", radius: 0.5 });
+const body = player.getCollider();
+map.isShapeWalkable(body);
+map.getTerrainCoverage(body); // 每个地块的 area 和 fraction
+map.getShapeSpeedFactor(body);
+const result = map.resolveMotion(body, { x: 10, y: 0 }, Math.PI / 4);
+// result.collider 为合法姿态；contacts 提供法线、深度及接触点。
+// rotationBlocked 表示转向受阻，exhausted 表示求解预算不足，未检查的运动不会提交。
 ```
 
-### 构建项目
+通用形状坐标相对实体中心，以 `size` 为一单位；旋转角采用 Canvas 弧度方向。`Entities.setCollider()` 接受多边形和复合体；`Player.setCollider()` 及玩家 JSON 只接受居中圆形。`size` 定义主体尺寸，皮肤和武器的视觉包围盒不得回写主体尺寸，也不得自动生成玩家碰撞体。圆形 JSON 示例见配置说明。
 
-```Bash
-npm run build
+开发服务下打开 `/tests/collision-fixture.html` 可检查单墙、墙角、窄通道、水域和矿石，显示轮廓、接触法线及入水比例。支持 30／60／144 FPS 和 0.5 秒长帧。已有浏览器环境时运行 `npm run test:collision-browser`；`npm run test:browser` 同时运行光照和碰撞浏览器验收，使用相同的 `PLAYWRIGHT_MODULE`、`BROWSER_EXECUTABLE` 和 `TEST_BASE_URL` 环境变量。
+
+这是运动约束系统，不模拟质量、惯性或动态刚体互推。几何接触容差为 0.01 像素；形状由代码／JSON 定义，不从图片提取轮廓，不接受自相交多边形和嵌套复合体。
+
+## 光照与动态投影
+
+角色中心有照射半径 400、发光半径 16 的暖白色圆盘光源（`#FFF4E8`），搭配低亮度冷灰环境光。墙壁和矿石挡光，地面和水域透光；接触处阴影较实，远处边缘逐渐展开为半影。矿石被破坏后立即透光，多个独立光源可以互相补光。距离衰减采用带近场稳定项的平方反比近似，最后 25% 范围平滑归零。
+
+地图左上方外部另有一盏固定弱光，位置为 `(-地图像素宽度, -地图像素高度)`，覆盖整个可见画面。颜色 `#B4C8E0`、强度 `0.06`，将墙壁和矿石的短影投向右下方；投影长度为瓦片尺寸的 40%，柔边为 4%（当前 20／2 个世界像素）。基础环境光从 `#3A4450` 分为 `#2F3843` 加这盏弱光，无遮挡暗区保持原有亮度，短影区域略暗。当前的远处昏暗效果保留，没有新增探索记忆或独立视野迷雾。
+
+`lighting.setTerrainLight({ position: { x, y }, color, intensity, shadowLength, softness })` 配置这盏全屏地形光；默认关闭，传入 `null` 关闭。颜色为六位十六进制，强度范围 0–1，长度和柔边使用世界像素。它允许从地图外入射，普通点光源的地图边界遮挡规则保持不变。短影只削弱该光源的贡献，角色光源仍可照亮投影区域。仅查询视口及投影边距内的地形，单个投影缓冲为视口尺寸加柔边，不分配全地图画布；顶面保护和像素边界与角色光照共用。
+
+地图只提取光源附近阻挡地块的外轮廓，忽略内部边。每个圆盘光源采用 8 个固定、对称的采样点，每次先合并投影再平均遮挡率；落在墙内的采样保留其遮挡权重。照明渐变始终以光源中心为基准。遮挡缓冲使用局部半分辨率画布，平均后仅做 1 个缓冲像素的轻微滤波。候选边超过 256 条时降为 4 次采样，低于 192 条后恢复。
+
+柔化后在完整分辨率上保护墙壁和矿石顶面，投影作用于地面和水域；其他地形自身继续挡光。实体轮廓绘制与顶面裁剪共用顶点和相机变换，同色地块合并填充，小数相机偏移不会在连续地形之间留下缝隙。各光源的遮挡缓存按位置、发光尺寸、采样质量和实际轮廓签名更新，也兼容直接修改瓦片数组；颜色、环境光和相机变化只重新合成。最后以 multiply 混合到世界画面，生命和过热 UI 在光照之后绘制。
+
+```ts
+const light = new LightSource(new Vector2(x, y), 500, "#FFF4E8", 1, 16);
+lighting.addLightSource(light);
+lighting.initialize(canvas.width, canvas.height);
+lighting.prepareLightingMask(cameraOffset.x, cameraOffset.y, map);
+lighting.applyLighting(ctx);
 ```
 
-### 预览构建结果
+`LightSource` 的第五个参数 `sourceRadius` 默认为 0，兼容原有四参数调用；通过 `getSourceRadius()` / `setSourceRadius(value)` 读取或调整，设为 0 时使用单次硬阴影路径。`TileMap.getShadowEdges(lightX, lightY, radius)` 返回世界坐标线段，`blocksLightAt(x, y)` 查询采样点是否被遮挡。`prepareLightingMask` 的第三个参数可省略，此时仅渲染圆形渐变光。光照画布与主画布使用相同的实际像素尺寸，调用方不要重复乘设备像素比。
 
-```Bash
-npm run preview
+这是二维顶面约定下的面光源近似，未引入物体高度或完整全局光照；暗部细节来自环境补光。
+
+开发服务下打开 `/tests/lighting-fixture.html` 可以切换硬阴影／自然柔影、调节发光尺寸，检查单块、连续墙、墙角、窄缝、矿石、阶梯和二次遮挡。该页仅用于验收，不进入生产构建入口。
+
+已有 Playwright 环境时，可启动开发服务后运行 `npm run test:browser` 执行全部浏览器验收；只验收光照可运行 `node tests/lighting.browser.mjs`。光照检查覆盖 DPR 1／1.25／2、小数相机偏移、近远半影宽度、地形顶面、多光源、矿石破坏及缓存稳定性。通过 `PLAYWRIGHT_MODULE` 指定现有模块路径、`BROWSER_EXECUTABLE` 指定浏览器路径，`TEST_BASE_URL` 可覆盖默认开发地址；不会为游戏安装浏览器依赖。
+
+`npm run test:terrain-light-browser` 检查新增弱光的暗区亮度预算、短柔影、重叠合并、顶面保护、矿石破坏、屏幕外地形、DPR 和相机偏移、窗口缩放及普通点光源边界规则，并将实际游戏前后对照截图和像素数据保存到 `.review/`。
+
+`npm run test:lighting-performance` 在实际游戏中以 1280×720、一个移动角色光源和一个固定辅助光源测试普通地形、DPR 2 与密集地形。各组预热 1 秒后记录 10 秒，将帧间隔、CPU 提交耗时和截图保存至 `.review/`。默认桌面组检查帧间隔 p95 不超过 16.7 ms；结果仅代表执行机器和浏览器，不包含独立 GPU 计时。
+
+## 场景与真实加载
+
+正常流程为菜单 → 图片和配置加载 → 游戏。进度按实际完成的资源项计算，不代表下载字节；加载失败会显示原因并提示刷新页面。没有模拟进度或固定等待。
+
+```ts
+const target = new GameScene();
+const loading = new LoadingScene(progress => target.load(progress), target);
+game.sceneManager.changeScene(loading, 0);
 ```
 
-## 📖 如何使用
+`GameScene.load(onProgress?)` 返回 Promise，同一场景的重复调用共用加载任务。`LoadingScene` 接收异步任务和目标场景，不再接收资源映射。退出加载场景后，未完成任务不会触发跳转。
 
-1. 创建游戏实例
+场景切换时调用 `onExit` / `onEnter`。零时长立即切换，过渡中的重复请求被忽略，尚未进入的场景不处理输入。
 
-```Typescript
-import { Game } from "./core/Game";
+## 道具与玩家配置
 
-// 获取HTML中的canvas元素
-const canvas = document.querySelector("canvas")!;
+- 新增回血、移速、射速、弹速、伤害五种稀有特殊矿，分别使用对应道具的颜色和图标。地图与水域生成后，每块剩余黄金矿有 5% 概率独立替换为特殊矿，五种等概率，不进行邻接继承；小地图不保证出现。特殊矿耐久均为 100，沿用黄金矿的碰撞、挡光、子弹阻挡、受击高亮与固定累积破损，破损颜色随矿种变化。
+- 特殊矿受伤期间不掉物，只有完全击碎才在原矿格中心掉落 1 个对应道具，不掉黄金；直接销毁同样生效，重复攻击不会重复掉落。地面道具不再定时随机生成，矿物掉落不受原先 5 个数量上限及距玩家 200 像素限制，未拾取时持续保留。
+- 黄金矿生命 100，普通攻击伤害 10、间隔 0.2 秒。生命降至 90%、70%、50%、30%、10% 时各散落 2 个小金块：第一发命中即有反馈，此后每两发掉落一次；击毁时集中补齐剩余数量，每块矿总计产出 20 黄金。一击跨过多个门槛会补发对应数量，一击击毁直接掉出 20 个。
+- 矿块首次受伤生成固定的随机破损图案，以与金块共用的 8×8 世界像素色块表现浅赭金、深金、棕褐和暗褐四档凹陷。当前 50×50 矿块内居中排列 6×6 格，显露数量为 `ceil(损血比例 × 24)`，首次普通命中显露 3 格，最多 24 格；旧色块保持位置与颜色，击毁时清除。破损在受击高亮之后绘制，只影响表面着色。
+- 活矿块的金块从朝向玩家的可通行边缘外侧弹出，起点、整条散落路径和落点均检查碰撞，避免进入墙壁、矿石、不可通行水域或越出地图。无安全出口时暂存额度，后续受伤重试，击毁后补齐。人物碰到落地金块自动拾取，每块增加 1 黄金，左上角显示本局累计数量。
+- 黄金保留弹跳、破碎碎屑、淡金色呼吸光晕及上浮闪光；少量掉落采用轻量碎屑，击毁采用完整破碎效果。背光短阴影在全部光晕之后合成，只作用于地面，不覆盖墙壁和矿石顶面。
+- 移速、射速、弹速、伤害道具各自独立；同类道具替换效果并刷新持续时间，不叠加。
+- 回血道具立即恢复 50 点生命，生命范围为 0–100。玩家提供 `getHealth()`、`getMaxHealth()`、`takeDamage(amount)`、`heal(amount)`；当前演示未添加造成玩家伤害的敌人和死亡流程。
+- 伤害增益影响之后发射的子弹，已发射子弹保留创建时伤害。
+- 修改 `public/configs/playerConfig.json` 后刷新页面生效，不自动热更新。参数说明见 [CONFIGURATION.md](public/configs/CONFIGURATION.md)。
 
-// 创建游戏实例
-export const game = new Game(canvas);
+已有浏览器环境时，运行 `npm run test:mining-browser` 检查矿块累积破损、分阶段掉落、轨迹安全、拾取总量以及实际合成画面的短阴影、相邻光晕和墙壁／矿石顶面保护，覆盖 DPR 1／1.25／2 和小数相机偏移；浏览器路径与开发地址使用前述环境变量。
 
-// 启动游戏
-game.start();
-```
-
-2. 创建和管理场景
-
-```Typescript
-import { MenuScene } from "./scenes/MenuScene";
-import { GameScene } from "./scenes/GameScene";
-
-// 创建场景
-const menuScene = new MenuScene();
-const gameScene = new GameScene();
-
-// 切换场景（带过渡效果）
-game.sceneManager.changeScene(gameScene, 0.5);
-```
-
-3. 定义自定义实体
-
-```Typescript
-import { Entities } from "./objects/Entities";
-import { Vector2 } from "./math/Vector2";
-import { Input } from "./core/Input";
-
-class CustomEntity extends Entities {
-  // 实现抽象方法
-  protected getMoveDirection(input: Input): Vector2 {
-    const dir = new Vector2();
-    // 实现移动逻辑
-    return dir;
-  }
-
-  protected getLookDirection(input: Input): Vector2 {
-    const dir = new Vector2();
-    // 实现朝向逻辑
-    return dir;
-  }
-}
-```
-
-4. 使用瓦片地图
-
-```Typescript
-import { TileMap } from "./map/TileMap";
-
-// 创建100x100的瓦片地图
-const map = new TileMap(100, 100);
-
-// 检查碰撞
-const isColliding = map.isCollidingRect(x, y, width, height);
-
-// 获取随机可行走位置
-const spawnPosition = map.getRandomWalkablePosition(size);
-```
-
-4. 加载和使用配置
-
-```Typescript
-import { ConfigLoader } from "./core/ConfigLoader";
-
-// 创建配置加载器实例
-const configLoader = new ConfigLoader({
-  playerConfig: "/configs/playerConfig.json"
-});
-
-// 加载所有配置
-await configLoader.load((loaded, total) => {
-  console.log(`加载进度: ${loaded}/${total}`);
-});
-
-// 获取配置
-const playerConfig = configLoader.getConfig("playerConfig");
-
-// 应用配置到玩家
-player.applyConfig(playerConfig);
-```
-
-## 🎯 主要类和接口
-
-核心类
-
-- Game : 游戏主类，协调各系统工作
-- Renderer : 渲染器，负责 Canvas 绘制
-- SceneManager : 场景管理器，处理场景切换
-- Input : 输入系统，管理用户输入
-- Camera : 相机系统，控制游戏视角
-- ConfigLoader : 配置加载器，负责加载和管理配置文件
-- AssetLoader : 资源加载器，负责加载游戏资源
-
-游戏对象
-
-- GameObject : 游戏对象基类
-- Entities : 实体类，支持移动和旋转
-- Player : 玩家类，处理玩家控制、射击和状态管理
-- Bullet : 子弹类
-- Particle : 粒子类
-- ParticleSystem : 粒子系统，管理粒子效果
-
-地图系统
-
-- TileMap: 瓦片地图类
-- TileType: 瓦片类型定义
-
-状态管理
-
-- StateMachine : 状态机类
-- State : 状态接口
-- IdleState : 空闲状态实现
-- MovingState : 移动状态实现
-- ShootingState : 射击状态实现
-
-场景系统
-
-- Scene : 场景基类
-- GameScene : 游戏主场景
-- MenuScene : 菜单场景
-- LoadingScene : 加载场景
-
-🛠️ 开发说明
-
-- 代码使用 TypeScript 编写，确保类型安全
-- 遵循 ES6 模块系统规范
-- 采用面向对象设计模式，强调继承和多态
-- 支持现代浏览器特性
-- 配置文件存储在 public/configs/ 目录下，支持热更新
-
-## 📝 许可证
+## 许可证
 
 MIT License
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request 来改进这个引擎！

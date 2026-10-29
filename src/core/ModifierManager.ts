@@ -39,12 +39,14 @@ export class ModifierManager {
    */
   addModifier(modifier: Omit<Modifier, 'id'>, id?: string): string {
     // 参数验证
-    if (!modifier.stat || typeof modifier.value !== 'number') {
+    if (!['maxSpeed', 'fireRate', 'bulletSpeed', 'damage'].includes(modifier.stat) || !Number.isFinite(modifier.value) || !Number.isFinite(modifier.duration) || modifier.duration < 0 || (modifier.isMultiplier && modifier.value <= -1)) {
       throw new Error('ModifierManager: Invalid modifier parameters');
     }
 
     // 生成唯一ID，优先使用自定义ID
-    const modifierId = id || `mod_${Date.now()}_${ModifierManager.idCounter++}`;
+    const existing = this.getModifiersByStat(modifier.stat)[0];
+    const modifierId = existing?.id || id || `mod_${Date.now()}_${ModifierManager.idCounter++}`;
+    if (!existing && this.activeModifiers.has(modifierId)) throw new Error('Modifier ID already used for another stat');
 
     // 创建完整的修改器对象并记录开始时间
     const fullModifier: Modifier = {
@@ -135,7 +137,7 @@ export class ModifierManager {
    */
   update(delta: number): void {
     // 验证时间增量
-    if (typeof delta !== 'number' || delta <= 0) {
+    if (!Number.isFinite(delta) || delta <= 0) {
       return;
     }
 

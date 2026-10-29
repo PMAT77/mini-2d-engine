@@ -1,19 +1,47 @@
 {
+  "collider": { "type": "circle", "radius": 0.5 },
   "base": {
+    "maxHealth": 100,
     "size": 49,
     "maxSpeed": 400,
     "rotationSpeed": 12.5664,
-    "rotationStrategy": "auto"
+    "rotationStrategy": "auto",
+    "accel": 4000,
+    "decel": 1200,
+    "nonlinearFactor": 0.5
+  },
+  "movement": {
+    "startSpeedRatio": 0.7,
+    "startupDuration": 0.08,
+    "turnDamping": 0.012,
+    "stopDuration": 0.2
+  },
+  "sprint": {
+    "speedMultiplier": 1.6,
+    "rampDuration": 0.16,
+    "maxStamina": 100,
+    "drainPerSecond": 25,
+    "regenPerSecond": 35,
+    "regenDelay": 0.6,
+    "restartThreshold": 0.15
   },
   "animation": {
     "breathingAmplitude": 3,
     "breathingSpeed": 2
   },
   "shooting": {
+    "damage": 10,
+    "aimTurnDuration": 0.15,
     "fireRate": 0.2,
     "bulletSpeed": 800,
     "maxShootingTime": 3.5,
     "maxOverheatCooldownTime": 1.0
+  },
+  "bulletWaterDrag": {
+    "shallow": 0.4,
+    "water": 0.8,
+    "deep": 1.6,
+    "ultraDeep": 3.2
   },
   "ui": {
     "fadeSpeed": 5

@@ -60,10 +60,6 @@ export class ConfigLoader {
         this.instanceConfigCache[key] = config;
         updateProgress();
         return config;
-      }).catch(error => {
-        console.error(`配置加载失败: ${url}`, error);
-        updateProgress();
-        return null;
       })
     );
 

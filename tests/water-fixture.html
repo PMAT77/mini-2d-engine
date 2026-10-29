@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>水域深度验收</title>
+<style>
+body{margin:0;background:#111820;color:#e2edf1;font:14px system-ui}header{padding:20px 28px 12px}h1{font-size:22px;margin:0 0 12px}nav{display:flex;gap:16px;flex-wrap:wrap;align-items:center}button{background:#24323e;color:inherit;border:1px solid #536571;border-radius:4px;padding:5px 10px;font:inherit}label{display:flex;gap:6px;align-items:center}i{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px}p{color:#b3c3ca}canvas{display:block;width:min(1000px,calc(100vw - 56px));height:auto;margin:0 28px 24px;border:1px solid #344450}output{font-variant-numeric:tabular-nums}
+</style>
+<header><h1>水域深度与曲线边界</h1><nav>
+<span><i style="background:#74c8d5"></i>浅水 ×0.75</span><span><i style="background:#409db8"></i>中水 ×0.5</span><span><i style="background:#286b91"></i>深水 ×0.25</span><span><i style="background:#143b61"></i>超深水 · 不可进入</span>
+<button id="reset">重置</button><label><input id="run" type="checkbox" checked>运行</label><label><input id="outline" type="checkbox">显示主体轮廓</label>
+</nav><p>WASD 移动，Shift 疾跑。种子 8351，展示真实地图中的第一处湖泊。</p><output id="stats"></output></header><canvas></canvas>
+<script type="module">
+import {TileMap} from '../src/map/TileMap.ts';
+import {Player} from '../src/objects/Player.ts';
+const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d'),dpr=devicePixelRatio||1;
+canvas.width=1000*dpr;canvas.height=760*dpr;
+const keys=new Set(),input={isKeyDown:key=>keys.has(key)};
+let map,player,lake,zoom,camera;
+function setup(){
+  map=new TileMap(100,100,{seed:8351});map.tiles.forEach(row=>row.fill('default'));
+  lake=map.water.lakes[0];const b=lake.bounds;
+  zoom=Math.min(1,940/(b.width*50),690/(b.height*50));
+  camera={x:lake.center.x*50-500/zoom+0.25,y:lake.center.y*50-380/zoom+0.75};
+  player=new Player(lake.center.x*50-254.5,lake.center.y*50-24.5);keys.clear();player.update(0,input,map);render();
+}
+function snapshot(){const body=player.getCollider();return{x:player.x,y:player.y,factor:map.getShapeSpeedFactor(body),coverage:map.getTerrainCoverage(body),penetration:Math.max(0,...map.queryShape(body).map(c=>c.depth))};}
+function render(){
+  ctx.setTransform(dpr*zoom,0,0,dpr*zoom,0,0);
+  map.draw(ctx,camera.x,camera.y,1000/zoom,760/zoom,0);
+  ctx.save();ctx.translate(-camera.x,-camera.y);player.draw(ctx);
+  if(document.querySelector('#outline').checked){const body=player.getCollider().parts[0];ctx.beginPath();ctx.arc(body.center.x,body.center.y,body.radius,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=1/zoom;ctx.stroke();}ctx.restore();
+  player.drawUI(ctx,camera.x,camera.y);
+  const state=snapshot();document.querySelector('#stats').textContent=`速度系数 ${state.factor.toFixed(3)} · 位置 ${state.x.toFixed(1)}, ${state.y.toFixed(1)} · 穿入 ${state.penetration.toFixed(4)} px`;
+}
+function step(delta=1/60,pressed=[]){keys.clear();pressed.forEach(key=>keys.add(key));player.update(delta,input,map);return snapshot();}
+window.waterFixture={setup,step,render,snapshot,get map(){return map},get player(){return player},get lake(){return lake},get camera(){return camera},get zoom(){return zoom}};
+document.querySelector('#reset').onclick=setup;document.querySelector('#outline').onchange=render;
+window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement)return;keys.add(e.key.length===1?e.key.toLowerCase():e.key);if(e.key.startsWith('Arrow'))e.preventDefault();});
+window.addEventListener('keyup',e=>keys.delete(e.key.length===1?e.key.toLowerCase():e.key));window.addEventListener('blur',()=>keys.clear());
+let last=performance.now();function loop(now){const dt=Math.min(.1,(now-last)/1000);last=now;if(document.querySelector('#run').checked){player.update(dt,input,map);render();}requestAnimationFrame(loop);}
+setup();requestAnimationFrame(loop);
+</script></html>

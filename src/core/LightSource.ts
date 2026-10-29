@@ -1,7 +1,7 @@
 import { Vector2 } from "../math/Vector2";
 
 /**
- * 光源类，表示游戏中的一个点光源
+ * 光源类，表示点光源或有限尺寸的圆盘光源
  */
 export class LightSource {
   private position: Vector2;
@@ -9,6 +9,9 @@ export class LightSource {
   private color: string;
   private intensity: number;
   private isActive: boolean;
+  private sourceRadius = 0;
+  /** 火炬等低位光源也会被前方障碍遮住其他地形顶面；默认保留玩家光的顶面照明。 */
+  shadowTerrain = false;
 
   /**
    * 构造函数
@@ -16,18 +19,28 @@ export class LightSource {
    * @param radius 光照半径
    * @param color 光照颜色
    * @param intensity 光照强度 (0-2)
+   * @param sourceRadius 发光体半径，0 保留硬阴影；与照射范围 radius 独立
    */
   constructor(
     position: Vector2,
     radius: number = 400, // 默认半径
     color: string = "#FFFFFF", // 光源颜色
-    intensity: number = 1 // 默认强度
+    intensity: number = 1, // 默认强度
+    sourceRadius: number = 0
   ) {
     this.position = position.clone();
     this.radius = radius;
     this.color = color;
     this.intensity = Math.max(0, Math.min(2, intensity)); // 提高强度上限到2
     this.isActive = true;
+    this.setSourceRadius(sourceRadius);
+  }
+
+  getSourceRadius(): number { return this.sourceRadius; }
+
+  setSourceRadius(radius: number): void {
+    if (!Number.isFinite(radius) || radius < 0) throw new Error("发光体半径必须是非负有限数值");
+    this.sourceRadius = radius;
   }
 
   /**

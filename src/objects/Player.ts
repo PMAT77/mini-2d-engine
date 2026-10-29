@@ -1,4 +1,4 @@
-import { Input } from "../core/Input";
+import { AimChange, Input } from "../core/Input";
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { IdleState } from "../status/IdleState";
@@ -8,11 +8,67 @@ import { StateMachine } from "../status/StateMachine";
 import { Bullet } from "./Bullet";
 import { Entities } from "./Entities";
 import { ParticleSystem } from "./ParticleSystem";
+import { DEFAULT_AIM, DEFAULT_MOVEMENT, DEFAULT_SPRINT, DEFAULT_BULLET_WATER_DRAG, parsePlayerCollider, parsePlayerConfig, PlayerConfig } from "./PlayerConfig";
+import { ColliderShape } from "../physics/Collider";
+
+const angleDelta = (from: number, to: number) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
+const WADING_COLORS = [[98, 186, 255], [177, 143, 178], [255, 100, 100], [255, 64, 64]];
+
+export interface PlayerDebugValues {
+  health: number;
+  stamina: number;
+  heatPercentage: number;
+  overheatCooldownRemaining: number;
+}
 
 /**
  * 玩家类 - 处理玩家的移动、射击和状态管理
  */
 export class Player extends Entities {
+  public setCollider(shape: ColliderShape): void { super.setCollider(parsePlayerCollider(shape)); }
+  protected getBodyRotation(): number { return this.currentRotation - Math.PI / 2; }
+  private health = 100;
+  private maxHealth = 100;
+  private gold = 0;
+
+  getGold(): number { return this.gold; }
+  collectGold(): void { this.gold++; }
+
+  private movement = { ...DEFAULT_MOVEMENT };
+  private sprint = { ...DEFAULT_SPRINT };
+  private movementTime = 0;
+  private movementDirection = new Vector2();
+  private stopTime = 0;
+  private stopDuration = 0;
+  private stopVelocity = new Vector2();
+  private stamina = DEFAULT_SPRINT.maxStamina;
+  private sprinting = false;
+  private sprintTime = 0;
+  private exhausted = false;
+  private releasedAfterExhaustion = false;
+  private staminaRegenDelay = 0;
+  private trailDistance = 0;
+  private wadingMap?: TileMap;
+  private wadingAlpha = 0;
+  private wadingColor = 'rgb(98, 186, 255)';
+  private wadingCanvas?: HTMLCanvasElement;
+
+  getStamina(): number { return this.stamina; }
+  getMaxStamina(): number { return this.sprint.maxStamina; }
+  getIsSprinting(): boolean { return this.sprinting; }
+
+  getHealth(): number { return this.health; }
+  getMaxHealth(): number { return this.maxHealth; }
+  takeDamage(amount: number): void {
+    if (!Number.isFinite(amount) || amount < 0) throw new Error("伤害必须是非负有限数值");
+    this.health = Math.max(0, this.health - amount);
+    this.onStatsChangeCallback?.();
+  }
+  heal(amount: number): void {
+    if (!Number.isFinite(amount) || amount < 0) throw new Error("回血量必须是非负有限数值");
+    this.health = Math.min(this.maxHealth, this.health + amount);
+    this.onStatsChangeCallback?.();
+  }
   // 动画相关属性
   private idleTime: number = 0; // 玩家待机状态的计时器
   private walkTime: number = 0; // 玩家移动状态的计时器
@@ -22,12 +78,24 @@ export class Player extends Entities {
 
   // 射击相关属性
   private isShooting: boolean = false; // 玩家是否正在开火
+  private aim = { ...DEFAULT_AIM };
+  private aimAngle = 0;
+  private aimTarget = 0;
+  private aimFrom = 0;
+  private aimArc = 0;
+  private aimStarted = 0;
+  private aimTime = 0;
+  private aimPrevious: number | null = null;
+  private aimVisible = false;
+  private aimUsesEvents = false;
   private bullets: Bullet[] = []; // 存储玩家发射的子弹
 
-  private fireRate: number = 0.1; // 射速（秒/发）
+  private fireRate: number = 0.2; // 射速（秒/发）
   private fireCooldown: number = 0; // 开火冷却计时器（控制射速）
 
   private bulletSpeed: number = 800; // 子弹速度 
+  private bulletWaterDrag = { ...DEFAULT_BULLET_WATER_DRAG };
+  private damage = 10;
 
   private maxShootingTime: number = 3.5; // 最长持续射击时间（秒）
   private shootingTimeRemaining: number = this.maxShootingTime; // 当前剩余可射击时间
@@ -39,7 +107,6 @@ export class Player extends Entities {
   private cooldownBarAlpha: number = 0; // 进度条透明度（0-1）
   private isBarVisible: boolean = false; // 进度条是否应该可见
   private fadeSpeed: number = 5; // 淡入淡出速度系数
-  private overheatBorderPulse: number = 0; // 用于控制过热状态下边框闪烁的脉冲值
 
   // 回调函数定义
   private onShootCallback?: (shootDir: Vector2) => void; // 射击回调，用于触发摄像机震动等效果
@@ -68,6 +135,7 @@ export class Player extends Entities {
     particleSystem?: ParticleSystem
   ) {
     super(x, y, sprite);
+    this.setCollider({ type: "circle", radius: 0.5 });
 
     // 初始化状态机
     this.stateMachine = new StateMachine<Player>(this);
@@ -97,32 +165,236 @@ export class Player extends Entities {
     return dir;
   }
 
+  protected getMovementSpeed(): number {
+    return this.getMaxSpeed() * (this.sprinting ? this.sprint.speedMultiplier : 1);
+  }
+
+  /** A tiny angular damping softens turns without slowing movement or delaying reversals. */
+  protected updateVelocityNonlinear(targetVel: Vector2, dir: Vector2, delta: number): void {
+    this.sprintTime = this.sprinting ? Math.min(this.sprint.rampDuration, this.sprintTime + delta) : 0;
+    if (dir.length() === 0) {
+      if (this.stopTime === 0) {
+        this.stopVelocity = this.velocity.clone();
+        // A quick tap must not receive the full sustained-movement braking tail.
+        this.stopDuration = Math.min(this.movement.stopDuration, this.movementTime);
+      }
+      this.movementTime = 0;
+      this.movementDirection.set(0, 0);
+      this.stopTime = Math.min(this.stopDuration, this.stopTime + delta);
+      const remaining = this.stopDuration - this.stopTime < 1e-9 ? 0 : 1 - this.stopTime / this.stopDuration;
+      this.velocity = this.stopVelocity.clone().scale(remaining * remaining * (3 - 2 * remaining));
+      return;
+    }
+    this.stopTime = 0;
+    this.movementTime = Math.min(Math.max(this.movement.startupDuration, this.movement.stopDuration), this.movementTime + delta);
+    const t = this.movement.startupDuration === 0 ? 1 : Math.min(1, this.movementTime / this.movement.startupDuration);
+    const ratio = 1 - (1 - this.movement.startSpeedRatio) * Math.pow(1 - t, 3);
+    const dot = this.movementDirection.x * dir.x + this.movementDirection.y * dir.y;
+    if (this.movementDirection.length() === 0 || this.movement.turnDamping === 0 || dot < 0) {
+      this.movementDirection = dir.clone();
+    } else {
+      const angle = Math.atan2(this.movementDirection.y, this.movementDirection.x);
+      const turn = Math.atan2(this.movementDirection.x * dir.y - this.movementDirection.y * dir.x, dot);
+      const next = angle + turn * (1 - Math.exp(-delta / this.movement.turnDamping));
+      this.movementDirection.set(Math.cos(next), Math.sin(next));
+    }
+    // Smoothstep spreads the walk-to-sprint transition over time without affecting steering.
+    const sprintProgress = this.sprint.rampDuration === 0 ? 1 : this.sprintTime / this.sprint.rampDuration;
+    const blend = sprintProgress * sprintProgress * (3 - 2 * sprintProgress);
+    const sprintRatio = this.sprinting ? (1 + (this.sprint.speedMultiplier - 1) * blend) / this.sprint.speedMultiplier : 1;
+    this.velocity = this.movementDirection.clone().scale(targetVel.length() * ratio * sprintRatio);
+  }
+
+  private updateMovement(delta: number, input: Input, map?: TileMap): void {
+    const shift = input.isKeyDown("Shift");
+    const moving = this.getMoveDirection(input).length() > 0;
+    if (!shift && this.exhausted) this.releasedAfterExhaustion = true;
+    this.unlockSprint();
+    this.sprinting = shift && moving && !this.exhausted && this.stamina > 0;
+
+    // Split the movement when stamina runs out, so low FPS never grants free sprint time.
+    const sprintDelta = this.sprinting ? Math.min(delta, this.stamina / this.sprint.drainPerSecond) : 0;
+    let consumed = false;
+    if (sprintDelta > 0) {
+      const x = this.x, y = this.y;
+      super.update(sprintDelta, input, map);
+      const dx = this.x - x, dy = this.y - y;
+      consumed = Math.hypot(dx, dy) > 0.001;
+      if (consumed) {
+        this.stamina = Math.max(0, this.stamina - sprintDelta * this.sprint.drainPerSecond);
+        this.staminaRegenDelay = this.sprint.regenDelay;
+        this.emitSprintTrail(x, y, dx, dy);
+        if (this.stamina < 1e-8) {
+          this.stamina = 0;
+          this.exhausted = true;
+          this.releasedAfterExhaustion = false;
+        }
+      }
+      this.sprinting = consumed && !this.exhausted;
+    }
+
+    const remaining = delta - sprintDelta;
+    if (remaining > 1e-9 || sprintDelta === 0) {
+      this.sprinting = false;
+      super.update(remaining, input, map);
+    }
+    if (!this.sprinting) { this.trailDistance = 0; this.sprintTime = 0; }
+    if (this.exhausted) {
+      const speed = this.getMaxSpeed() * (map?.getShapeSpeedFactor(this.getCollider()) ?? 1);
+      if (this.velocity.length() > speed) this.velocity.scale(speed / this.velocity.length());
+    }
+
+    const restDelta = consumed ? remaining : delta;
+    const regenDelta = Math.max(0, restDelta - this.staminaRegenDelay);
+    this.staminaRegenDelay = Math.max(0, this.staminaRegenDelay - restDelta);
+    this.stamina = Math.min(this.sprint.maxStamina, this.stamina + regenDelta * this.sprint.regenPerSecond);
+    this.unlockSprint();
+  }
+
+  private unlockSprint(): void {
+    if (this.exhausted && this.releasedAfterExhaustion && this.stamina >= this.sprint.maxStamina * this.sprint.restartThreshold) {
+      this.exhausted = false;
+    }
+  }
+
+  private emitSprintTrail(x: number, y: number, dx: number, dy: number): void {
+    const distance = Math.hypot(dx, dy);
+    this.trailDistance += distance;
+    const count = Math.min(8, Math.floor(this.trailDistance / 24));
+    this.trailDistance %= 24;
+    for (let i = 0; i < count; i++) {
+      const fraction = (i + 0.5) / count;
+      this.particleSystem?.addParticle({
+        x: x + dx * fraction + this.size / 2 - dx / distance * this.size * 0.35,
+        y: y + dy * fraction + this.size / 2 - dy / distance * this.size * 0.35,
+        size: 3, color: "#75dfe9", speed: 12, angle: Math.atan2(-dy, -dx), lifetime: 0.16,
+      });
+    }
+  }
+
   /**
    * 获取朝向方向（基于方向键）
    * @param input 输入系统引用
    * @returns 归一化的朝向向量
    */
-  protected getLookDirection(input: Input): Vector2 {
+  private readShootingDirection(input: Input): Vector2 {
     const dir = new Vector2();
     if (input.isKeyDown("ArrowUp")) dir.y -= 1;
     if (input.isKeyDown("ArrowDown")) dir.y += 1;
     if (input.isKeyDown("ArrowLeft")) dir.x -= 1;
     if (input.isKeyDown("ArrowRight")) dir.x += 1;
 
-    // 根据方向键状态更新射击状态
-    if (input.isKeyDown("ArrowUp") ||
-      input.isKeyDown("ArrowDown") ||
-      input.isKeyDown("ArrowLeft") ||
-      input.isKeyDown("ArrowRight")) {
-      this.isShooting = true;
-    } else {
-      // 当所有方向键都松开时，取消射击状态
-      this.isShooting = false;
-    }
-
     // 归一化方向向量
     if (dir.length() > 0) dir.normalize();
     return dir;
+  }
+
+  protected getLookDirection(_input: Input): Vector2 {
+    return this.aimVisible ? new Vector2(Math.cos(this.aimAngle), Math.sin(this.aimAngle)) : new Vector2();
+  }
+
+  protected getRotationDelta(delta: number, _inputDir?: Vector2): number {
+    // Body facing follows movement velocity; aiming stays in world space.
+    return super.getRotationDelta(delta);
+  }
+
+  getAimState(): { angle: number; targetAngle: number; visible: boolean; x: number; y: number; radius: number } {
+    const radius = this.size / Math.SQRT2 + 8;
+    return { angle: this.aimAngle, targetAngle: this.aimTarget, visible: this.aimVisible, radius,
+      x: this.x + this.size / 2 + Math.cos(this.aimAngle) * radius,
+      y: this.y + this.size / 2 + Math.sin(this.aimAngle) * radius };
+  }
+
+  private resetAim(): void {
+    this.aimVisible = false;
+    this.aimPrevious = null;
+    this.aimFrom = this.aimAngle;
+    this.aimTarget = this.aimAngle;
+    this.aimArc = 0;
+  }
+
+  private advanceAim(time: number): void {
+    const t = this.aim.aimTurnDuration === 0 ? 1 : Math.min(1, Math.max(0, (time - this.aimStarted) / this.aim.aimTurnDuration));
+    this.aimAngle = angleDelta(0, this.aimFrom + this.aimArc * t);
+    this.aimTime = time;
+  }
+
+  private changeAim({ x, y, time }: AimChange): void {
+    this.advanceAim(time);
+    if (x === 0 && y === 0) { this.resetAim(); return; }
+    const target = Math.atan2(y, x);
+    if (this.aimPrevious !== null && Math.abs(angleDelta(this.aimPrevious, target)) < 1e-9) return;
+    const adjacent = this.aimPrevious !== null && Math.abs(Math.abs(angleDelta(this.aimPrevious, target)) - Math.PI / 4) < 1e-9;
+    // A held direction is still active aim; only release/reset breaks the sweep.
+    this.aimFrom = adjacent ? this.aimAngle : target;
+    this.aimArc = adjacent ? angleDelta(this.aimAngle, target) : 0;
+    this.aimTarget = target;
+    this.aimStarted = time;
+    this.aimPrevious = target;
+    this.aimVisible = true;
+  }
+
+  private updateAim(delta: number, input: Input): void {
+    const direction = this.readShootingDirection(input);
+    // Polling remains supported by deterministic simulation/test inputs.
+    const sample = input.consumeAimChanges?.();
+    if (this.aimUsesEvents !== !!sample) {
+      this.resetAim();
+      this.aimTime = sample ? sample.now - delta : 0;
+      this.aimUsesEvents = !!sample;
+    }
+    const start = this.aimTime, now = sample?.now ?? start + delta;
+    if (sample?.reset) this.resetAim();
+    for (const change of sample?.changes ?? []) this.changeAim(change);
+    const rawAngle = direction.length() > 0 ? Math.atan2(direction.y, direction.x) : null;
+    if (rawAngle === null ? this.aimVisible : this.aimPrevious === null || Math.abs(angleDelta(this.aimPrevious, rawAngle)) > 1e-9) {
+      this.changeAim({ x: direction.x, y: direction.y, time: sample ? now : start });
+    }
+    this.advanceAim(now);
+    this.isShooting = this.aimVisible;
+  }
+
+  private getOverlayLayout(offsetX = 0, offsetY = 0): { healthX: number; healthY: number; heatX: number; heatY: number; debuffX: number; debuffY: number } {
+    const centerX = this.x - offsetX + this.size / 2, centerY = this.y - offsetY + this.size / 2;
+    const radius = this.getAimState().radius, heatOffset = (radius + 28) / Math.SQRT2;
+    return { healthX: centerX - this.size / 2, healthY: centerY + radius + 15,
+      heatX: centerX + heatOffset, heatY: centerY - heatOffset,
+      debuffX: centerX - radius - 18, debuffY: centerY };
+  }
+
+  private drawWadingIndicator(ctx: CanvasRenderingContext2D, offsetX: number, offsetY: number): void {
+    if (this.wadingAlpha <= 0) return;
+    const { debuffX: x, debuffY: y } = this.getOverlayLayout(offsetX, offsetY);
+    ctx.save();
+    ctx.globalAlpha *= this.wadingAlpha;
+    ctx.beginPath(); ctx.roundRect(x - 10, y - 15, 20, 30, 7);
+    ctx.fillStyle = 'rgba(12, 18, 26, 0.8)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(116, 200, 213, 0.45)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      const top = y - 10 + i * 7;
+      ctx.beginPath();ctx.moveTo(x - 5, top);ctx.lineTo(x, top + 4);ctx.lineTo(x + 5, top);
+      ctx.strokeStyle = '#0b1721';ctx.lineWidth = 4.4;ctx.stroke();
+      ctx.strokeStyle = this.wadingColor;ctx.lineWidth = 2.4;ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  private drawAimPointer(ctx: CanvasRenderingContext2D, offsetX: number, offsetY: number): void {
+    const aim = this.getAimState();
+    if (!aim.visible) return;
+    ctx.save();
+    ctx.translate(aim.x - offsetX, aim.y - offsetY);
+    ctx.rotate(aim.angle);
+    ctx.scale(1.1, 1.1);
+    ctx.beginPath();
+    ctx.moveTo(5, 0); ctx.lineTo(-5, -4); ctx.lineTo(-5, 4); ctx.closePath();
+    ctx.fillStyle = "#c9f8ff";
+    ctx.strokeStyle = "#14212b";
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
   }
 
   /**
@@ -133,94 +405,36 @@ export class Player extends Entities {
     return this.velocity.length() === 0 && !this.isShooting;
   }
 
-  /**
-   * 更新呼吸动画计时器
-   * @param delta 时间增量
-   */
-  private updateBreathAnimation(delta: number): void {
-    if (this.isIdle()) {
-      this.idleTime += delta;
-    } else {
-      this.idleTime = 0;
-    }
-  }
-
-  /**
-   * 绘制竖向冷却进度条
-   * @param ctx Canvas渲染上下文
-   * @param offsetX 绘制偏移X
-   * @param offsetY 绘制偏移Y
-   */
-  private drawCooldownBar(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
-    // 如果透明度为0，不绘制进度条
-    if (this.cooldownBarAlpha <= 0) {
-      return;
-    }
-
+  /** Weapon heat grows clockwise; the red overheat arc shrinks during recovery. */
+  private drawCooldownRing(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
+    if (this.cooldownBarAlpha <= 0) return;
+    const { heatX: x, heatY: y } = this.getOverlayLayout(offsetX, offsetY);
+    const progress = Math.max(0, Math.min(1, this.isOverheated
+      ? 1 - this.getOverheatCooldownProgress() : this.getHeatPercentage()));
     ctx.save();
-
-    const drawX = this.x - offsetX;
-    const drawY = this.y - offsetY;
-
-    // 进度条配置
-    const barWidth = 10; // 进度条宽度
-    const barHeight = this.size * 1.5; // 进度条高度
-    const barOffset = this.size / 2 + 40; // 与玩家的距离
-    const barX = drawX + barOffset; // 进度条X坐标（玩家右侧）
-    const barY = drawY - barHeight / 2 + this.size / 2; // 进度条Y坐标（居中对齐玩家）
-
-    // 设置透明度
     ctx.globalAlpha = this.cooldownBarAlpha;
-
-    // 绘制进度条背景
-    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-    ctx.fillRect(barX, barY, barWidth, barHeight);
-
-    // 根据状态设置边框样式
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(12, 18, 26, 0.8)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(210, 225, 240, 0.25)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    if (progress > 0) {
+      ctx.beginPath();
+      ctx.arc(x, y, 11, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+      ctx.strokeStyle = this.isOverheated ? "#ff6b64" : `hsl(${185 * (1 - progress)}, 85%, 65%)`;
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
     if (this.isOverheated) {
-      // 过热状态：红色高亮闪烁边框
-      // 计算边框亮度（根据脉冲值在0.5到1之间变化）
-      const borderIntensity = 0.5 + this.overheatBorderPulse * 0.5;
-      // 计算边框宽度（根据脉冲值在1到3之间变化）
-      const borderWidth = 1 + Math.round(this.overheatBorderPulse * 2);
-
-      ctx.strokeStyle = `rgba(255, ${Math.round(100 * borderIntensity)}, ${Math.round(100 * borderIntensity)}, 1)`;
-      ctx.lineWidth = borderWidth;
-    } else {
-      // 正常状态：普通边框
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+      ctx.strokeStyle = "#ff6b64";
       ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 4); ctx.lineTo(x, y + 1);
+      ctx.moveTo(x, y + 3); ctx.lineTo(x, y + 4);
+      ctx.stroke();
     }
-
-    ctx.strokeRect(barX, barY, barWidth, barHeight);
-
-    // 根据状态绘制进度条填充
-    if (this.isOverheated) {
-      // 过热冷却状态 - 显示冷却进度（从满格向下消退）
-      const coolDownProgress = 1 - this.getOverheatCooldownProgress(); // 反转进度值
-      const fillHeight = barHeight * coolDownProgress;
-
-      // 创建渐变效果（上热下冷）
-      const gradient = ctx.createLinearGradient(barX, barY, barX, barY + barHeight);
-      gradient.addColorStop(1, "#33ff33"); // 绿色（冷却）
-      gradient.addColorStop(0, "#ff3333"); // 红色（热）
-
-      ctx.fillStyle = gradient;
-      ctx.fillRect(barX, barY + barHeight - fillHeight, barWidth, fillHeight); // 从顶部开始填充
-    } else {
-      // 正常状态 - 显示射击热量（绿色到红色渐变）
-      const heatProgress = this.getHeatPercentage();
-      const fillHeight = barHeight * heatProgress;
-
-      // 创建渐变效果
-      const gradient = ctx.createLinearGradient(barX, barY, barX, barY + barHeight);
-      gradient.addColorStop(1, "#33ff33"); // 绿色（冷）
-      gradient.addColorStop(0, "#ff3333"); // 红色（热）
-
-      ctx.fillStyle = gradient;
-      ctx.fillRect(barX, barY + barHeight - fillHeight, barWidth, fillHeight);
-    }
-
     ctx.restore();
   }
 
@@ -228,30 +442,25 @@ export class Player extends Entities {
    * 应用配置到玩家实例
    * @param config 配置对象，包含基础属性、动画属性、射击属性和UI属性
    */
-  applyConfig(config: {
-    base?: {
-      size?: number;
-      maxSpeed?: number;
-      accel?: number;
-      decel?: number;
-      nonlinearFactor?: number;
-    };
-    animation?: {
-      breathingAmplitude?: number;
-      breathingSpeed?: number;
-    };
-    shooting?: {
-      fireRate?: number;
-      bulletSpeed?: number;
-      maxShootingTime?: number;
-      maxOverheatCooldownTime?: number;
-    };
-    ui?: {
-      fadeSpeed?: number;
-    };
-  }): void {
+  applyConfig(config: PlayerConfig): void {
+    config = parsePlayerConfig(config);
+    if (config.bulletWaterDrag) this.bulletWaterDrag = { ...this.bulletWaterDrag, ...config.bulletWaterDrag };
+    if (config.movement) this.movement = { ...this.movement, ...config.movement };
+    if (config.sprint) {
+      const fraction = this.stamina / this.sprint.maxStamina;
+      this.sprint = { ...this.sprint, ...config.sprint };
+      this.stamina = fraction * this.sprint.maxStamina;
+      this.unlockSprint();
+    }
+    if (config.collider) this.setCollider(config.collider);
     // 应用基础属性
     if (config.base) {
+      if (config.base.maxHealth !== undefined) {
+        this.health = this.health / this.maxHealth * config.base.maxHealth;
+        this.maxHealth = config.base.maxHealth;
+      }
+      if (config.base.rotationSpeed !== undefined) this.rotationSpeed = config.base.rotationSpeed;
+      if (config.base.rotationStrategy !== undefined) this.rotationStrategy = config.base.rotationStrategy;
       if (config.base.size !== undefined) {
         this.setSize(config.base.size);
       }
@@ -281,6 +490,8 @@ export class Player extends Entities {
 
     // 应用射击属性
     if (config.shooting) {
+      if (config.shooting.damage !== undefined) this.damage = config.shooting.damage;
+      if (config.shooting.aimTurnDuration !== undefined) this.aim.aimTurnDuration = config.shooting.aimTurnDuration;
       if (config.shooting.fireRate !== undefined) {
         this.fireRate = config.shooting.fireRate;
       }
@@ -288,7 +499,9 @@ export class Player extends Entities {
         this.bulletSpeed = config.shooting.bulletSpeed;
       }
       if (config.shooting.maxShootingTime !== undefined) {
+        const remainingFraction = this.shootingTimeRemaining / this.maxShootingTime;
         this.maxShootingTime = config.shooting.maxShootingTime;
+        this.shootingTimeRemaining = remainingFraction * this.maxShootingTime;
         // 同时更新剩余射击时间，确保一致性
         if (!this.isOverheated) {
           this.shootingTimeRemaining = Math.min(
@@ -298,14 +511,9 @@ export class Player extends Entities {
         }
       }
       if (config.shooting.maxOverheatCooldownTime !== undefined) {
+        const fraction = this.overheatCooldownRemaining / this.maxOverheatCooldownTime;
         this.maxOverheatCooldownTime = config.shooting.maxOverheatCooldownTime;
-        // 同时更新剩余冷却时间，确保一致性
-        if (this.isOverheated) {
-          this.overheatCooldownRemaining = Math.min(
-            this.overheatCooldownRemaining,
-            this.maxOverheatCooldownTime
-          );
-        }
+        this.overheatCooldownRemaining = (this.isOverheated ? fraction : 1) * this.maxOverheatCooldownTime;
       }
     }
 
@@ -317,6 +525,71 @@ export class Player extends Entities {
     }
 
     // 触发属性变化事件
+    this.onStatsChangeCallback?.();
+  }
+
+  /** Detached base configuration; temporary pickup modifiers are not baked into it. */
+  getConfigSnapshot(): PlayerConfig {
+    return {
+      collider: parsePlayerCollider(this.getCollider().compiled.shape),
+      base: { size: this.size, maxHealth: this.maxHealth, maxSpeed: this.maxSpeed, accel: this.accel,
+        decel: this.decel, nonlinearFactor: this.nonlinearFactor, rotationSpeed: this.rotationSpeed, rotationStrategy: this.rotationStrategy },
+      movement: { ...this.movement }, sprint: { ...this.sprint },
+      bulletWaterDrag: { ...this.bulletWaterDrag },
+      animation: { breathingAmplitude: this.breathingAmplitude, breathingSpeed: this.breathingSpeed },
+      shooting: { ...this.aim, damage: this.damage, fireRate: this.fireRate, bulletSpeed: this.bulletSpeed,
+        maxShootingTime: this.maxShootingTime, maxOverheatCooldownTime: this.maxOverheatCooldownTime },
+      ui: { fadeSpeed: this.fadeSpeed },
+    };
+  }
+
+  getDebugState() {
+    return {
+      health: this.health, stamina: this.stamina, heatPercentage: this.getHeatPercentage() * 100,
+      overheatCooldownRemaining: this.isOverheated ? this.overheatCooldownRemaining : 0,
+      isOverheated: this.isOverheated, exhausted: this.exhausted,
+      effectiveSpeed: this.getMaxSpeed(), effectiveSprintSpeed: this.getMaxSpeed() * this.sprint.speedMultiplier,
+      effectiveDamage: this.getModifiedValue(this.damage, 'damage'),
+      effectiveFireRate: 1 / this.getFireRate(), effectiveBulletSpeed: this.getBulletSpeed(),
+    };
+  }
+
+  /** Validate the entire patch first; changing current resources never changes their capacity. */
+  setDebugState(values: Partial<PlayerDebugValues>): void {
+    if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('调试状态必须是对象');
+    for (const [key, value] of Object.entries(values)) {
+      if (!['health', 'stamina', 'heatPercentage', 'overheatCooldownRemaining'].includes(key)
+        || typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`无效调试值: ${key}`);
+    }
+    const willOverheat = values.heatPercentage === undefined ? this.isOverheated : values.heatPercentage >= 100;
+    if (values.overheatCooldownRemaining !== undefined && values.overheatCooldownRemaining > 0
+      && !willOverheat) throw new Error('仅过热时可设置剩余冷却');
+    const clamp = (value: number, max: number) => Math.max(0, Math.min(max, value));
+    if (values.health !== undefined) this.health = clamp(values.health, this.maxHealth);
+    if (values.stamina !== undefined) {
+      this.stamina = clamp(values.stamina, this.sprint.maxStamina);
+      this.exhausted = this.stamina === 0;
+      this.releasedAfterExhaustion = false;
+      this.staminaRegenDelay = 0;
+      if (this.exhausted) this.sprinting = false;
+    }
+    if (values.heatPercentage !== undefined) {
+      const heat = clamp(values.heatPercentage, 100);
+      this.isOverheated = false;
+      this.fireCooldown = 0;
+      this.shootingTimeRemaining = (1 - heat / 100) * this.maxShootingTime;
+      this.overheatCooldownRemaining = this.maxOverheatCooldownTime;
+      if (heat === 100) this.startOverheat();
+    }
+    if (values.overheatCooldownRemaining !== undefined) {
+      this.overheatCooldownRemaining = clamp(values.overheatCooldownRemaining, this.maxOverheatCooldownTime);
+      if (this.overheatCooldownRemaining === 0) {
+        this.isOverheated = false;
+        this.shootingTimeRemaining = this.maxShootingTime;
+        this.fireCooldown = 0;
+        this.overheatCooldownRemaining = this.maxOverheatCooldownTime;
+      }
+    }
     this.onStatsChangeCallback?.();
   }
 
@@ -445,7 +718,7 @@ export class Player extends Entities {
    * @param inputDir 射击方向
    * @param damage 子弹伤害值
    */
-  shoot(inputDir: Vector2, damage: number = 10): void {
+  shoot(inputDir: Vector2, damage: number = this.damage): void {
     // 验证射击方向
     if (!inputDir || inputDir.length() === 0) return;
 
@@ -469,7 +742,8 @@ export class Player extends Entities {
     const bulletPos = new Vector2(this.x + this.size / 2, this.y + this.size / 2);
     // 使用修改后的子弹速度
     const bulletVel = inputDir.clone().scale(this.getBulletSpeed());
-    const bullet = new Bullet(bulletPos, bulletVel, damage, this.particleSystem);
+    const bullet = new Bullet(bulletPos, bulletVel, this.getModifiedValue(damage, "damage"),
+      this.particleSystem, this.terrainWaterCoverage.fraction > 1e-6, this.bulletWaterDrag);
     this.bullets.push(bullet);
 
     // 触发射击回调（用于摄像机震动等效果）
@@ -488,6 +762,7 @@ export class Player extends Entities {
     this.isOverheated = true;
     this.shootingTimeRemaining = 0;
     this.fireCooldown = 0;
+    this.overheatCooldownRemaining = this.maxOverheatCooldownTime;
     // 可以在这里添加过热特效或音效
   }
 
@@ -498,8 +773,16 @@ export class Player extends Entities {
    * @param map 可选的地图引用，用于碰撞检测
    */
   update(delta: number, input: Input, map?: TileMap): void {
-    // 调用父类的移动逻辑
-    super.update(delta, input, map);
+    if (!Number.isFinite(delta) || delta < 0) return;
+    this.updateAim(delta, input);
+    this.updateMovement(delta, input, map);
+    this.wadingMap = this.terrainSpeedFactor < 1 - 1e-6 && this.terrainWaterCoverage.fraction > 1e-6 ? map : undefined;
+    if (this.wadingMap) {
+      const depth = Math.max(0, Math.min(3, this.terrainWaterCoverage.depth)), lower = Math.floor(depth), blend = depth - lower;
+      const a = WADING_COLORS[lower], b = WADING_COLORS[Math.min(3, lower + 1)];
+      this.wadingColor = `rgb(${a.map((value, i) => Math.round(value + (b[i] - value) * blend)).join(', ')})`;
+    }
+    this.wadingAlpha = this.wadingMap ? Math.min(1, this.wadingAlpha + delta / 0.08) : Math.max(0, this.wadingAlpha - delta / 0.12);
 
     // 更新射击冷却和过热状态
     if (this.isOverheated) {
@@ -512,8 +795,6 @@ export class Player extends Entities {
         this.overheatCooldownRemaining = this.maxOverheatCooldownTime; // 重置过热冷却时间
       }
 
-      // 更新过热边框闪烁脉冲值（使用正弦函数创建周期性变化）
-      this.overheatBorderPulse = Math.sin(Date.now() * 0.01) * 0.5 + 0.5;
     } else {
       // 常规射击冷却
       if (this.fireCooldown > 0) {
@@ -546,9 +827,8 @@ export class Player extends Entities {
     }
 
     // 处理射击逻辑
-    const lookDir = this.getLookDirection(input);
-    if (lookDir.length() > 0) {
-      this.shoot(lookDir);
+    if (this.aimVisible) {
+      this.shoot(this.getLookDirection(input));
     }
 
     // 根据当前状态切换状态机状态
@@ -561,7 +841,6 @@ export class Player extends Entities {
     }
 
     // 更新动画和状态机
-    this.updateBreathAnimation(delta);
     this.stateMachine.update(delta);
 
     // 优化子弹更新和清理
@@ -605,19 +884,37 @@ export class Player extends Entities {
    * @param offsetY 绘制偏移Y
    */
   draw(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
-    ctx.save();
-    const drawX = this.x - offsetX;
-    const drawY = this.y - offsetY;
+    const centerX = this.x + this.size / 2, centerY = this.y + this.size / 2;
+    if (!this.wadingMap) {
+      this.drawModel(ctx, centerX - offsetX, centerY - offsetY);
+      return;
+    }
+    // A fixed maximum extent avoids reallocating the buffer on every breathing frame.
+    const extent = Math.ceil(this.size * Math.SQRT2 * (1 + this.breathingAmplitude / 100)) + 4;
+    const canvas = this.wadingCanvas ??= document.createElement('canvas');
+    if (canvas.width !== extent || canvas.height !== extent) { canvas.width = extent; canvas.height = extent; }
+    const buffer = canvas.getContext('2d')!;
+    buffer.clearRect(0, 0, extent, extent);
+    this.drawModel(buffer, extent / 2, extent / 2);
+    buffer.save();
+    buffer.globalCompositeOperation = 'source-atop'; buffer.globalAlpha = 0.35;
+    this.wadingMap.drawWaterLayer(buffer, centerX - extent / 2, centerY - extent / 2, extent, extent);
+    buffer.restore();
+    ctx.drawImage(canvas, centerX - extent / 2 - offsetX, centerY - extent / 2 - offsetY);
+  }
 
-    // 计算呼吸动画缩放比例
+  private drawModel(ctx: CanvasRenderingContext2D, centerX: number, centerY: number): void {
+    ctx.save();
+
+    // Visual breathing only: getCollider() uses size and never this render scale.
     let scale = 1;
     if (this.isIdle()) {
-      scale = 1 + Math.sin(this.idleTime * this.breathingSpeed) * (this.breathingAmplitude / 100);
+      scale = Math.max(0, 1 + Math.sin(this.idleTime * this.breathingSpeed) * this.breathingAmplitude / 100);
     }
 
     // 应用变换并绘制
-    ctx.translate(drawX + this.size / 2, drawY + this.size / 2);
-    ctx.rotate(this.currentRotation - Math.PI / 2); // 调整旋转角度以匹配精灵朝向
+    ctx.translate(centerX, centerY);
+    ctx.rotate(this.getBodyRotation());
     ctx.scale(scale, scale);
 
     // 绘制玩家精灵或占位符
@@ -629,8 +926,28 @@ export class Player extends Entities {
     }
 
     ctx.restore();
+  }
 
-    // 调用单独的方法绘制冷却进度条
-    this.drawCooldownBar(ctx, offsetX, offsetY);
+  /** Screen-space overlays are drawn after lighting. */
+  drawUI(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
+    this.drawWadingIndicator(ctx, offsetX, offsetY);
+    this.drawAimPointer(ctx, offsetX, offsetY);
+    this.drawCooldownRing(ctx, offsetX, offsetY);
+    ctx.save();
+    const { healthX: x, healthY: y } = this.getOverlayLayout(offsetX, offsetY);
+    ctx.fillStyle = "#181d24";
+    ctx.fillRect(x - 1, y - 1, this.size + 2, 7);
+    ctx.fillStyle = this.health / this.maxHealth <= 0.25 ? "#f16b67" : "#79e2a0";
+    ctx.fillRect(x, y, this.size * this.health / this.maxHealth, 5);
+    ctx.fillStyle = "#181d24";
+    ctx.fillRect(x - 1, y + 9, this.size + 2, 6);
+    ctx.fillStyle = this.exhausted ? "#50616b" : "#75dfe9";
+    ctx.fillRect(x, y + 10, this.size * this.stamina / this.sprint.maxStamina, 4);
+    if (this.exhausted) {
+      ctx.strokeStyle = "#ffbc70";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 1, y + 9, this.size + 2, 6);
+    }
+    ctx.restore();
   }
 }

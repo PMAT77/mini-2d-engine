@@ -1,6 +1,7 @@
 import { GameObject } from "../core/GameObject";
 import { Input } from "../core/Input";
 import { Modifier } from "../core/ModifierManager";
+import { Collider, circleCollider, collide, rectangleCollider } from "../physics/Collider";
 
 /**
  * 道具类型枚举
@@ -12,6 +13,15 @@ export enum PickupType {
   BULLET_SPEED_BOOST,
   DAMAGE_BOOST
 }
+
+/** 矿块和掉落物共用同一组类型标记。 */
+export const PICKUP_ICONS: Record<PickupType, string> = {
+  [PickupType.HEALTH]: "❤️",
+  [PickupType.SPEED_BOOST]: "🪽",
+  [PickupType.FIRE_RATE_BOOST]: "⚡️",
+  [PickupType.BULLET_SPEED_BOOST]: "💨",
+  [PickupType.DAMAGE_BOOST]: "💥"
+};
 
 /**
  * 可拾取道具类
@@ -65,6 +75,7 @@ export class PickupItem extends GameObject {
   getModifierEffect(): Omit<Modifier, 'id'> {
     const baseDuration = 5 + Math.random() * 3; // 5-8秒随机持续时间 
 
+    const boost = Math.random();
     switch (this.type) {
       case PickupType.HEALTH:
         return {
@@ -77,34 +88,34 @@ export class PickupItem extends GameObject {
       case PickupType.SPEED_BOOST:
         return {
           stat: 'maxSpeed',
-          value: 0.3 + Math.random() * 0.2, // 30%-50%速度提升
+          value: 0.3 + boost * 0.2, // 30%-50%速度提升
           duration: baseDuration,
           isMultiplier: true,
-          description: `移速提升 ${Math.round((0.3 + Math.random() * 0.2) * 100)}% (${Math.round(baseDuration)}秒)`
+          description: `移速提升 ${Math.round((0.3 + boost * 0.2) * 100)}% (${Math.round(baseDuration)}秒)`
         };
       case PickupType.FIRE_RATE_BOOST:
         return {
           stat: 'fireRate',
-          value: 0.3 + Math.random() * 0.2, // 30%-50%射速提升
+          value: 0.3 + boost * 0.2, // 30%-50%射速提升
           duration: baseDuration,
           isMultiplier: true,
-          description: `射速提升 ${Math.round((0.3 + Math.random() * 0.2) * 100)}% (${Math.round(baseDuration)}秒)`
+          description: `射速提升 ${Math.round((0.3 + boost * 0.2) * 100)}% (${Math.round(baseDuration)}秒)`
         };
       case PickupType.BULLET_SPEED_BOOST:
         return {
           stat: 'bulletSpeed',
-          value: 0.4 + Math.random() * 0.3, // 40%-70%子弹速度提升
+          value: 0.4 + boost * 0.3, // 40%-70%子弹速度提升
           duration: baseDuration,
           isMultiplier: true,
-          description: `子弹速度提升 ${Math.round((0.4 + Math.random() * 0.3) * 100)}% (${Math.round(baseDuration)}秒)`
+          description: `子弹速度提升 ${Math.round((0.4 + boost * 0.3) * 100)}% (${Math.round(baseDuration)}秒)`
         };
       case PickupType.DAMAGE_BOOST:
         return {
           stat: 'damage',
-          value: 0.5 + Math.random() * 0.5, // 50%-100%伤害提升
+          value: 0.5 + boost * 0.5, // 50%-100%伤害提升
           duration: baseDuration,
           isMultiplier: true,
-          description: `伤害提升 ${Math.round((0.5 + Math.random() * 0.5) * 100)}% (${Math.round(baseDuration)}秒)`
+          description: `伤害提升 ${Math.round((0.5 + boost * 0.5) * 100)}% (${Math.round(baseDuration)}秒)`
         };
       default:
         return {
@@ -280,44 +291,16 @@ export class PickupItem extends GameObject {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    switch (this.type) {
-      case PickupType.HEALTH:
-        ctx.fillText("❤️", centerX, centerY);
-        break;
-      case PickupType.SPEED_BOOST:
-        ctx.fillText("🪽", centerX, centerY);
-        break;
-      case PickupType.FIRE_RATE_BOOST:
-        ctx.fillText("⚡️", centerX, centerY);
-        break;
-      case PickupType.BULLET_SPEED_BOOST:
-        ctx.fillText("💨", centerX, centerY);
-        break;
-      case PickupType.DAMAGE_BOOST:
-        ctx.fillText("💥", centerX, centerY);
-        break;
-    }
+    ctx.fillText(PICKUP_ICONS[this.type], centerX, centerY);
   }
 
   /**
    * 检查是否与矩形碰撞
    */
   isCollidingWithRect(x: number, y: number, width: number, height: number): boolean {
-    // 获取圆的中心点和半径
-    const circleCenterX = this.x + this.size / 2;
-    const circleCenterY = this.y + this.size / 2;
-    const radius = this.size / 2;
-
-    // 找到矩形上离圆心最近的点
-    const closestX = Math.max(x, Math.min(circleCenterX, x + width));
-    const closestY = Math.max(y, Math.min(circleCenterY, y + height));
-
-    // 计算圆心到最近点的距离的平方（避免使用Math.sqrt提高性能）
-    const distanceSquared =
-      Math.pow(circleCenterX - closestX, 2) +
-      Math.pow(circleCenterY - closestY, 2);
-
-    // 比较距离的平方和半径的平方（避免开根号）
-    return distanceSquared < Math.pow(radius, 2);
+    return this.isCollidingWithShape(rectangleCollider(x, y, width, height));
   }
+
+  getCollider(): Collider { return circleCollider(this.x + this.size / 2, this.y + this.size / 2, this.size / 2); }
+  isCollidingWithShape(collider: Collider): boolean { return collide(collider, this.getCollider()).length > 0; }
 }

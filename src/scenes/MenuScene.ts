@@ -1,6 +1,7 @@
 import { Input } from "../core/Input";
 import { Scene } from "../core/Scene";
 import { GameScene } from "./GameScene";
+import { LoadingScene } from "./LoadingScene";
 
 /**
  * 游戏主菜单场景类
@@ -8,6 +9,8 @@ import { GameScene } from "./GameScene";
  * 继承自基础Scene类
  */
 export class MenuScene extends Scene {
+  private starting = false;
+  public onEnter(): void { this.starting = false; }
   /**
    * 更新场景逻辑
    * @param delta 时间增量，以秒为单位
@@ -15,8 +18,10 @@ export class MenuScene extends Scene {
    */
   public update(delta: number, input: Input): void {
     // 检测玩家是否按下Enter键，如果是则切换到游戏场景
-    if (input.isKeyDown("Enter")) {
-      this.game.sceneManager.changeScene(new GameScene());
+    if (!this.starting && input.isKeyDown("Enter")) {
+      this.starting = true;
+      const target = new GameScene();
+      this.game.sceneManager.changeScene(new LoadingScene(onProgress => target.load(onProgress), target), 0);
     }
   }
 
