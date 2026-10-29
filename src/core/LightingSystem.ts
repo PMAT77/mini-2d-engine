@@ -97,7 +97,7 @@ export class LightingSystem {
   getLightCount(): number { return this.lightSources.length + (this.terrainLight ? 1 : 0); }
   update(delta: number): void { this.lightSources.forEach(light => light.update(delta)); }
 
-  private shadowPath(ctx: CanvasRenderingContext2D, edges: ShadowEdge[], x: number, y: number, radius: number, length?: number): void {
+  static drawShadows(ctx: CanvasRenderingContext2D, edges: ShadowEdge[], x: number, y: number, radius: number, length?: number): void {
     ctx.beginPath();
     let near: number[] = [], far: number[] = [];
     const flush = () => {
@@ -163,7 +163,7 @@ export class LightingSystem {
       const edges = map.getShadowEdges(cameraX + width / 2, cameraY + height / 2,
         Math.hypot(width, height) / 2 + light.shadowLength + padding);
       // This light deliberately enters from outside the map; point-light containment is unchanged.
-      this.shadowPath(shadow, edges, light.position.x, light.position.y, light.shadowLength, light.shadowLength);
+      LightingSystem.drawShadows(shadow, edges, light.position.x, light.position.y, light.shadowLength, light.shadowLength);
       ctx.save();
       ctx.translate(-cameraX, -cameraY);
       this.clipGround(ctx, map, cameraX, cameraY);
@@ -177,7 +177,7 @@ export class LightingSystem {
   }
 
   private softShadow(light: LightSource, map: TileMap, edges: ShadowEdge[]): ShadowCache | undefined {
-    const pos = light.getPosition(), radius = light.getRadius(), size = light.getSourceRadius();
+    const pos = light.getPosition(), radius = light.getEffectiveRadius(), size = light.getSourceRadius();
     const previous = this.shadowCaches.get(light);
     let samples: 4 | 8 = previous?.samples ?? 8;
     if (edges.length > 256) samples = 4;
@@ -213,7 +213,7 @@ export class LightingSystem {
       if (blocked[i]) sample.fillRect(0, 0, width, height);
       else {
         sample.setTransform(0.5, 0, 0, 0.5, -x / 2, -y / 2);
-        this.shadowPath(sample, edges, pos.x + points[i].x, pos.y + points[i].y, radius + size);
+        LightingSystem.drawShadows(sample, edges, pos.x + points[i].x, pos.y + points[i].y, radius + size);
       }
       average.drawImage(this.sampleCanvas, 0, 0);
     }
@@ -240,7 +240,7 @@ export class LightingSystem {
     this.prepareTerrainLight(cameraX, cameraY, map);
 
     for (const light of this.lightSources) {
-      const pos = light.getPosition(), radius = light.getRadius();
+      const pos = light.getPosition(), radius = light.getEffectiveRadius();
       if (!light.isLightActive() || !Number.isFinite(radius) || radius <= 0 || !Number.isFinite(light.getIntensity()) || light.getIntensity() <= 0) continue;
       if (pos.x + radius < cameraX || pos.y + radius < cameraY || pos.x - radius > cameraX + width || pos.y - radius > cameraY + height) continue;
       if (light.getSourceRadius() === 0 && map?.blocksLightAt(pos.x, pos.y)) continue;
@@ -272,7 +272,7 @@ export class LightingSystem {
         lightCtx.globalCompositeOperation = "destination-out";
         lightCtx.fillStyle = "black";
         if (soft) lightCtx.drawImage(soft.canvas, soft.x, soft.y, soft.canvas.width * 2, soft.canvas.height * 2);
-        else if (light.getSourceRadius() === 0) this.shadowPath(lightCtx, edges, pos.x, pos.y, radius);
+        else if (light.getSourceRadius() === 0) LightingSystem.drawShadows(lightCtx, edges, pos.x, pos.y, radius);
         lightCtx.restore();
       }
       ctx.globalCompositeOperation = "lighter";

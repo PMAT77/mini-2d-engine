@@ -76,19 +76,24 @@ try {
     });
 
     await page.keyboard.down('d');
-    const walk = await page.evaluate(() => movementTest.tick(0.1));
-    assert.ok(Math.abs(walk.speed - 400) < 0.001);
+    const startup = await page.evaluate(() => [movementTest.tick(0.000001).speed,
+      movementTest.tick(0.019999).speed, movementTest.tick(0.02).speed]);
+    assert.ok(startup[0] < 0.001, 'startup begins at rest without an immediate speed jump');
+    assert.ok(Math.abs(startup[1] - 31.25) < 0.001);
+    assert.ok(Math.abs(startup[2] - 100) < 0.001);
+    const walk = await page.evaluate(() => movementTest.tick(0.04));
+    assert.ok(Math.abs(walk.speed - 200) < 0.001);
     await page.keyboard.down('ShiftLeft'); await page.keyboard.down('w');
     const sprint = await page.evaluate(() => movementTest.tick(0.1));
-    assert.equal(sprint.sprinting, true); assert.ok(sprint.speed > 400 && sprint.speed < 640);
+    assert.equal(sprint.sprinting, true); assert.ok(sprint.speed > 200 && sprint.speed < 320);
     assert.ok(sprint.stamina < 100);
     const fullSprint = await page.evaluate(() => movementTest.tick(0.06));
-    assert.ok(Math.abs(fullSprint.speed - 640) < 0.001, 'Shift smoothly reaches full sprint speed after 160ms');
+    assert.ok(Math.abs(fullSprint.speed - 320) < 0.001, 'Shift smoothly reaches full sprint speed after 160ms');
     await page.keyboard.down('ShiftRight'); await page.keyboard.up('ShiftLeft'); await page.keyboard.up('d');
     assert.equal((await page.evaluate(() => movementTest.tick(0.1))).sprinting, true);
     await page.keyboard.up('w'); await page.keyboard.up('ShiftRight');
     const coasting = await page.evaluate(() => movementTest.tick(1 / 60));
-    assert.ok(coasting.speed > 250 && coasting.speed <= 400, 'release preserves a perceptible braking tail');
+    assert.ok(coasting.speed > 125 && coasting.speed <= 200, 'release preserves a perceptible braking tail');
     assert.equal(coasting.sprinting, false);
     const stopped = await page.evaluate(() => movementTest.advance(0.25));
     assert.equal(stopped.speed, 0); assert.equal(stopped.stamina, coasting.stamina);
@@ -104,8 +109,8 @@ try {
       return { duration: t.scene.player.movement.stopDuration, earlySpeed: early.speed, travel: end.x - x, endSpeed: end.speed };
     });
     assert.equal(braking.duration, 0.2, 'the actual loaded game configuration uses the new braking duration');
-    assert.ok(Math.abs(braking.earlySpeed - 337.5) < 0.001, 'first 50ms preserves momentum rather than braking immediately');
-    assert.ok(braking.travel > 38 && braking.travel < 42, `actual braking distance: ${braking.travel}`);
+    assert.ok(Math.abs(braking.earlySpeed - 168.75) < 0.001, 'first 50ms preserves momentum rather than braking immediately');
+    assert.ok(braking.travel > 19 && braking.travel < 21, `actual braking distance: ${braking.travel}`);
     assert.equal(braking.endSpeed, 0);
     console.log(`DPR ${dpr}: loaded stop duration ${braking.duration}s, braking distance ${braking.travel.toFixed(2)}px.`);
 

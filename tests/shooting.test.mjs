@@ -77,7 +77,8 @@ test('range is actual distance, independent of bullet speed, and clamps far diag
   for (const speed of [400, 800, 1600]) {
     const p = makePlayer(); p.applyConfig({ shooting: { maxRange: 300, bulletSpeed: speed } });
     p.shootAt({ x: 3225, y: 4225 }); const bullet = p.getBullets()[0];
-    bullet.update(20); near(center(bullet).x, 405); near(center(bullet).y, 465);
+    const start = center(bullet);
+    bullet.update(20); near(center(bullet).x, start.x + 180); near(center(bullet).y, start.y + 240);
     assert.equal(bullet.getIsDestroyed(), true);
   }
 });
@@ -89,12 +90,12 @@ test('sweeps hit the first wall or mineral and cannot damage terrain beyond an e
     const bullet = p.getBullets()[0]; bullet.update(seconds, m);
     assert.equal(bullet.getIsDestroyed(), true); near(center(bullet).x, 295); assert.equal(m.tileHp[4][8], 100);
   }
-  for (const [targetX, range, shouldHit] of [[289, 1000, false], [295, 1000, true], [900, 64, false], [900, 70, true]]) {
+  for (const [targetX, range, shouldHit] of [[289, 1000, false], [295, 1000, true], [900, 30, false], [900, 32, true]]) {
     const m = map(), p = makePlayer(); m.tiles[4][6] = 'mineral'; m.tileHp[4][6] = 100;
     p.applyConfig({ shooting: { maxRange: range } }); p.shootAt({ x: targetX, y: 225 });
-    const bullet = p.getBullets()[0]; bullet.update(10, m);
+    const bullet = p.getBullets()[0], start = center(bullet); bullet.update(10, m);
     assert.equal(m.tileHp[4][6], shouldHit ? 90 : 100);
-    near(center(bullet).x, shouldHit ? 295 : Math.min(targetX, 225 + range));
+    near(center(bullet).x, shouldHit ? 295 : Math.min(targetX, start.x + range));
   }
 });
 

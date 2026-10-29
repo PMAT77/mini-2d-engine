@@ -23,7 +23,7 @@ test('debug configuration keeps defaults, owns snapshots and rejects invalid pat
   for (const patch of [{ base: { maxSpeed: 700, maxHealth: 0 } }, { shooting: { fireRate: 0.1, damage: -1 } }, { base: { maxHealth: Infinity } }]) {
     assert.throws(() => player.applyConfig(patch));
   }
-  assert.equal(player.getMaxSpeed(), 400); assert.equal(player.getFireRate(), 0.2);
+  assert.equal(player.getMaxSpeed(), 200); assert.equal(player.getFireRate(), 0.2);
   const before = player.getDebugState();
   for (const patch of [{ health: 20, stamina: NaN }, { health: 20, unknown: 1 }, { overheatCooldownRemaining: 0.5 }, null, []]) {
     assert.throws(() => player.setDebugState(patch)); assert.deepEqual(player.getDebugState(), before);
@@ -93,7 +93,7 @@ test('restoring a detached initial configuration refills resources without remov
   assert.deepEqual(player.getConfigSnapshot(), initial);
   assert.equal(player.getHealth(), 100); assert.equal(player.getStamina(), 100);
   assert.equal(player.getIsOverheated(), false); assert.equal(player.getDebugState().exhausted, false);
-  assert.equal(player.getMaxSpeed(), 600); assert.equal(player.getDebugState().effectiveDamage, 20);
+  assert.equal(player.getMaxSpeed(), 300); assert.equal(player.getDebugState().effectiveDamage, 20);
 });
 
 test('keyboard ownership clears held movement and aim and ignores game keys until released by UI', t => {

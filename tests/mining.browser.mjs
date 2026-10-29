@@ -89,6 +89,7 @@ try {
       scene.map.tiles[4][7] = 'wall';
       scene.goldPickups = []; scene.particleSystem.clear(); scene.deltaSinceLastFrame = 0;
       scene.player.x = scene.player.y = 200;
+      scene.player.currentRotation = Math.PI;
       scene.playerLight.setPosition(new (scene.player.getVelocity().constructor)(224.5, 224.5));
       scene.camera.x = 37.25; scene.camera.y = 19.75;
       const ctx = scene.worldContext;
@@ -179,6 +180,7 @@ try {
         scene.map.tileHighlight.forEach(row => row.fill(0));
         scene.pickupItems = []; scene.particleSystem.clear();
         scene.player.x = side === 'left' ? 200 : 570; scene.player.y = 279.5;
+        scene.player.currentRotation = side === 'left' ? Math.PI : 0;
         const Vector2 = scene.player.getVelocity().constructor;
         scene.playerLight.setPosition(new Vector2(scene.player.x + scene.player.getSize() / 2, 304));
         scene.camera.x = 37.25; scene.camera.y = 19.75;
@@ -258,6 +260,7 @@ try {
       scene.particleSystem.clear(); scene.modifierManager.clearAllModifiers();
       scene.player.heal(100); scene.player.takeDamage(80);
       scene.player.x = 475.5; scene.player.y = 100.5;
+      scene.player.currentRotation = -Math.PI / 2;
       scene.playerLight.setPosition(new (scene.player.getVelocity().constructor)(500, 125));
       scene.camera.x = 37.25; scene.camera.y = 19.75;
       const ores = SPECIAL_MINERAL_TYPES.map((type, i) => ({ type, col: 6 + i * 2, row: 5 }));

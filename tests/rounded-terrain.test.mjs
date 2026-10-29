@@ -92,7 +92,7 @@ test('polygon and compound actors retain tangent movement on rounded terrain', (
 test('shadow strips remove internal radial edges without changing the projected area', () => {
   const m=empty();m.tiles[3][3]='wall';const edges=m.getShadowEdges(175,175,400),paths=[];
   const ctx={beginPath(){},moveTo(x,y){paths.push([{x,y}])},lineTo(x,y){paths.at(-1).push({x,y})},closePath(){},fill(){}};
-  new LightingSystem().shadowPath(ctx,edges,-1000,-600,20,20);
+  LightingSystem.drawShadows(ctx,edges,-1000,-600,20,20);
   const quads=edges.map(e=>projectShadow(e,-1000,-600,20,20)).filter(Boolean);
   const expected=quads.reduce((n,p)=>n+area({vertices:Array.from({length:4},(_,i)=>({x:p[i*2],y:p[i*2+1]}))}),0);
   assert.ok(paths.length<quads.length/2,'rounded arc quads are merged before Canvas fills them');

@@ -6,7 +6,7 @@
   "base": {
     "maxHealth": 100,
     "size": 49,
-    "maxSpeed": 400,
+    "maxSpeed": 200,
     "rotationSpeed": 12.5664,
     "rotationStrategy": "auto",
     "accel": 4000,
@@ -14,7 +14,7 @@
     "nonlinearFactor": 0.5
   },
   "movement": {
-    "startSpeedRatio": 0.7,
+    "startSpeedRatio": 0,
     "startupDuration": 0.08,
     "turnDamping": 0.012,
     "stopDuration": 0.2

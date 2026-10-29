@@ -26,7 +26,7 @@ test('wading indicator follows cached terrain slowdown while idle, sprinting and
   p.update(.04,input(),m);near(p.terrainSpeedFactor,.75);near(p.wadingAlpha,.5);assert.equal(p.wadingMap,m);
   p.update(.04,input(),m);near(p.wadingAlpha,1);
   p.addModifier('maxSpeed',1,0,true);p.update(.2,input('d','Shift'),m);
-  assert.ok(p.getVelocity().length()>400);near(p.terrainSpeedFactor,.75);near(p.wadingAlpha,1);
+  assert.ok(p.getVelocity().length()>200);near(p.terrainSpeedFactor,.75);near(p.wadingAlpha,1);
   m.tiles.forEach(row=>row.fill('default'));
   p.update(0,input(),m);near(p.terrainSpeedFactor,1);assert.equal(p.wadingMap,undefined);near(p.wadingAlpha,1);
   p.update(.06,input(),m);near(p.wadingAlpha,.5);p.update(.06,input(),m);near(p.wadingAlpha,0);
@@ -105,7 +105,7 @@ test('four water factors, mixed-depth footprints, buffs and sprint preserve the 
   m.tiles.forEach(row => row.fill('deep_water'));
   const p = new Player(200, 200); p.addModifier('maxSpeed', 0.5, 0, true);
   for (let i = 0; i < 30; i++) p.update(1 / 60, input('d', 'Shift'), m);
-  near(p.getVelocity().length(), 400 * 0.25 * 1.5 * 1.6);
+  near(p.getVelocity().length(), 200 * 0.25 * 1.5 * 1.6);
 });
 
 test('seeded lakes occupy about ten percent, stay separated and have closed nested contours', () => {

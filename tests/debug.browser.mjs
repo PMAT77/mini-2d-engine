@@ -29,15 +29,18 @@ try {
       scene.map = new TileMap(40, 30, { generateWater: false });
       scene.map.tiles.forEach(row => row.fill('default'));
       scene.pickupItems = [];
+      scene.torches.forEach(torch => scene.lightingSystem.removeLightSource(torch.light)); scene.torches = [];
       scene.player.x = 200; scene.player.y = 250;
       window.debugTest = {
         scene,
+        initialSpeed: scene.player.getConfigSnapshot().base.maxSpeed,
         initialLight: { radius: scene.playerLight.getRadius(), intensity: scene.playerLight.getIntensity() },
         brightness() {
           scene.draw(debugGame.renderer.ctx);
-          const offset = scene.camera.getOffset(), p = scene.player;
-          const data = debugGame.renderer.ctx.getImageData(Math.round(p.x + p.getSize() / 2 - offset.x + 220),
-            Math.round(p.y + p.getSize() / 2 - offset.y + 35), 8, 8).data;
+          const offset = scene.displayedView, v = scene.player.getVisionState();
+          // Sample visible ground in world pixels; screen coordinates include DPR and zoom.
+          const data = scene.worldContext.getImageData(Math.round(v.x + Math.cos(v.direction) * 220 - offset.x) - 4,
+            Math.round(v.y + Math.sin(v.direction) * 220 - offset.y) - 4, 8, 8).data;
           return data.reduce((sum, value, index) => sum + (index % 4 === 3 ? 0 : value), 0);
         },
         tick(delta = 0) { scene.update(delta, debugGame.input); scene.draw(debugGame.renderer.ctx); },
@@ -187,18 +190,19 @@ try {
 
     await page.evaluate(() => debugTest.scene.player.addModifier('maxSpeed', 0.5, 0, true));
     await page.getByRole('button', { name: '恢复初始参数', exact: true }).click();
-    assert.equal(await field('base.maxSpeed').inputValue(), '400');
+    const initialSpeed = await page.evaluate(() => debugTest.initialSpeed);
+    assert.equal(await field('base.maxSpeed').inputValue(), String(initialSpeed));
     assert.equal(await field('shooting.damage').inputValue(), '10');
     assert.equal(await field('shooting.maxRange').inputValue(), '1000');
     assert.equal(await field('shooting.spreadHorizontal').inputValue(), '0.6');
     for(const [key,value] of [['shallow',40],['water',80],['deep',160],['ultraDeep',320]]) assert.equal(await field(`bulletWaterDrag.${key}`).inputValue(),String(value));
-    assert.equal(await page.evaluate(() => debugTest.scene.player.getMaxSpeed()), 600);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getMaxSpeed()), initialSpeed * 1.5);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getHealth()), 100);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getStamina()), 100);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getIsOverheated()), false);
     assert.deepEqual(await page.evaluate(() => ({ radius: debugTest.scene.playerLight.getRadius(), intensity: debugTest.scene.playerLight.getIntensity() })),
       await page.evaluate(() => debugTest.initialLight));
-    assert.ok((await panel.innerText()).includes('实际 600'));
+    assert.ok((await panel.innerText()).includes(`实际 ${initialSpeed * 1.5}`));
     await panel.locator('.debug-content').evaluate(element => { element.scrollTop = 0; });
     await page.screenshot({ path: join(output, `debug-panel-dpr-${dpr}.png`) });
 
@@ -216,7 +220,7 @@ try {
     assert.equal(await page.locator('[data-player-debug]').count(), 1);
     await page.keyboard.press('F2'); assert.equal(await panel.isVisible(), true);
     await page.getByRole('button', { name: '恢复初始参数', exact: true }).click();
-    assert.equal(await field('base.maxSpeed').inputValue(), '400', 'reentry retains original reset baseline');
+    assert.equal(await field('base.maxSpeed').inputValue(), String(initialSpeed), 'reentry retains original reset baseline');
     assert.equal(await field('light.radius').inputValue(), String(await page.evaluate(() => debugTest.initialLight.radius)));
 
     await page.setViewportSize({ width: 360, height: 640 });

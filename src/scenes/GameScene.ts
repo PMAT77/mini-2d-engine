@@ -1,4 +1,3 @@
-import { AssetLoader } from "../core/AssetLoader";
 import { Camera } from "../core/Camera";
 import { Input } from "../core/Input";
 import { Scene } from "../core/Scene";
@@ -15,6 +14,7 @@ import { PlayerDebugPanel } from "../ui/PlayerDebugPanel";
 import { ConfigLoader } from "../core/ConfigLoader";
 import { LightSource } from "../core/LightSource";
 import { LightingSystem } from "../core/LightingSystem";
+import { VisibilitySystem } from "../core/VisibilitySystem";
 import { ModifierManager } from "../core/ModifierManager";
 
 import { PickupItem, PickupType } from "../objects/PickupItem";
@@ -34,7 +34,6 @@ export class GameScene extends Scene {
   private worldCanvas!: HTMLCanvasElement;
   private worldContext!: CanvasRenderingContext2D;
   private displayedView?: { x: number; y: number; width: number; height: number };
-  private assetLoader!: AssetLoader;
   private configLoader!: ConfigLoader;
   private loaded: boolean = false;
   private loadingPromise?: Promise<void>;
@@ -61,6 +60,7 @@ export class GameScene extends Scene {
   private particleSystem: ParticleSystem;
   // 光照系统
   private lightingSystem: LightingSystem;
+  private visibilitySystem = new VisibilitySystem();
   // 属性修改器
   private modifierManager: ModifierManager;
 
@@ -155,11 +155,6 @@ export class GameScene extends Scene {
 
     this.modifierManager = new ModifierManager(this.player);
 
-    // 初始化资源加载器，配置需要加载的资源
-    this.assetLoader = new AssetLoader({
-      "player": "/assets/images/avatar.png",
-    });
-
     this.configLoader = new ConfigLoader({
       "playerConfig": "/configs/playerConfig.json",
     });
@@ -174,6 +169,7 @@ export class GameScene extends Scene {
     this.worldCanvas.width = this.camera.width;
     this.worldCanvas.height = this.camera.height;
     this.lightingSystem.initialize(this.camera.width, this.camera.height);
+    this.visibilitySystem.initialize(this.camera.width, this.camera.height);
   }
 
   /**
@@ -431,15 +427,13 @@ export class GameScene extends Scene {
     throw new Error("无法在死区范围内生成可通行位置");
   }
 
-  /** Loads the two actual resources once; callbacks count completed items, not bytes. */
+  /** The procedural player needs only configuration; report the actual resource count. */
   load(onProgress?: (loaded: number, total: number) => void): Promise<void> {
     if (this.loadingPromise) {
-      return this.loadingPromise.then(() => { onProgress?.(2, 2); });
+      return this.loadingPromise.then(() => { onProgress?.(1, 1); });
     }
-    let completed = 0;
-    onProgress?.(0, 2);
+    onProgress?.(0, 1);
     this.loadingPromise = (async () => {
-      await this.assetLoader.load(() => onProgress?.(++completed, 2));
       await this.configLoader.load();
       this.player.applyConfig(this.configLoader.getConfig("playerConfig"));
       this.initialPlayerConfig = this.player.getConfigSnapshot();
@@ -450,8 +444,7 @@ export class GameScene extends Scene {
         this.player.x = spawn.x;
         this.player.y = spawn.y;
       }
-      this.player.setSprite(this.assetLoader.getImage("player")!);
-      onProgress?.(++completed, 2);
+      onProgress?.(1, 1);
       this.loaded = true;
     })();
     return this.loadingPromise;
@@ -600,6 +593,8 @@ export class GameScene extends Scene {
       ctx.restore();
     }
     this.goldPickups.forEach(pickup => pickup.drawSparkles(ctx, cameraOffset.x, cameraOffset.y));
+    this.visibilitySystem.apply(ctx, cameraOffset.x, cameraOffset.y, this.player.getVisionState(), this.map,
+      mask => this.player.drawVisibilitySilhouette(mask, cameraOffset.x, cameraOffset.y));
     this.player.drawUI(ctx, cameraOffset.x, cameraOffset.y);
     screenContext.drawImage(this.worldCanvas, 0, 0, screenContext.canvas.width, screenContext.canvas.height);
     ctx = screenContext;
@@ -665,6 +660,7 @@ export class GameScene extends Scene {
    * 应用光照效果
    */
   private applyLighting(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number) {
+    this.playerLight.setRangeScale(this.player.getVisionState().range / 400);
     // 准备光照遮罩
     // 使用与世界绘制一致的相机偏移
     this.lightingSystem.prepareLightingMask(

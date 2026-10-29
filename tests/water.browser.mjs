@@ -13,29 +13,31 @@ async function checkWading(page){
     const {TILE_TYPES}=await import('/src/map/TileType.ts');
     const map=new TileMap(8,8,{generateWater:false}),p=new Player(75.5,75.5),empty={isKeyDown:()=>false};
     p.applyConfig({animation:{breathingAmplitude:0}});
-    const sprite=document.createElement('canvas');sprite.width=sprite.height=32;
-    const art=sprite.getContext('2d');art.fillStyle='#a0a0a0';art.fillRect(0,0,32,32);art.clearRect(12,12,8,8);p.setSprite(sprite);
     const canvas=document.createElement('canvas'),dpr=devicePixelRatio;canvas.width=240*dpr;canvas.height=220*dpr;
     const ctx=canvas.getContext('2d');let camera=[0,0],checks=0;
     const expect=(value,message)=>{if(!value)throw Error(message);checks++;};
     const pixel=(x,y)=>[...ctx.getImageData(Math.floor((x-camera[0])*dpr),Math.floor((y-camera[1])*dpr),1,1).data];
     const render=(ui=true)=>{ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);ctx.setTransform(dpr,0,0,dpr,0,0);p.draw(ctx,...camera);if(ui)p.drawUI(ctx,...camera);};
     const color=(actual,expected,message)=>expect(actual[3]===255&&expected.every((v,i)=>Math.abs(actual[i]-v)<=3),`${message}: ${actual} vs ${expected}`);
-    const tinted=type=>{const hex=TILE_TYPES[type].color;return[1,3,5].map(i=>Math.round(160*.65+parseInt(hex.slice(i,i+2),16)*.35));};
+    const tinted=(type,x=112,y=112)=>{
+      const water=p.wadingMap;p.wadingMap=undefined;render(false);const dry=pixel(x,y);p.wadingMap=water;render();
+      if(!type)return dry.slice(0,3);
+      const hex=TILE_TYPES[type].color;return dry.slice(0,3).map((v,i)=>Math.round(v*.65+parseInt(hex.slice(i*2+1,i*2+3),16)*.35));
+    };
     const arrowColors={shallow_water:[98,186,255],water:[177,143,178],deep_water:[255,100,100]};
     const chevrons=rgb=>{const layout=p.getOverlayLayout(...camera);for(const dy of [-6,1,8])color(pixel(layout.debuffX+camera[0],layout.debuffY+camera[1]+dy),rgb,'all chevrons use the depth color');};
     map.tiles.forEach(row=>row.fill('default'));p.update(.12,empty,map);render();
-    color(pixel(112,112),[160,160,160],'dry model');
+    expect(pixel(112,112)[3]===255,'cylinder body is opaque');
     expect(p.wadingAlpha===0,'dry land has no debuff');
     map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<2?'default':'shallow_water'));
     p.update(.04,empty,map);expect(Math.abs(p.wadingAlpha-.5)<1e-7,'80ms fade-in midpoint');
     p.update(.04,empty,map);render();
-    color(pixel(88,112),[160,160,160],'dry half remains unchanged');color(pixel(112,112),tinted('shallow_water'),'wet half tint');
+    color(pixel(88,112),tinted(undefined,88,112),'dry half remains unchanged');color(pixel(112,112),tinted('shallow_water'),'wet half tint');
     chevrons(arrowColors.shallow_water);
-    expect(pixel(100,100)[3]===0,'transparent sprite hole remains transparent');expect(pixel(140,100)[3]===0,'mask cannot tint the background');
+    expect(pixel(100,100)[3]===255,'cylinder head stays opaque');expect(pixel(140,100)[3]===0,'mask cannot tint the background');
     const buffer=p.wadingCanvas;
     map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<2?'shallow_water':'deep_water'));p.update(0,empty,map);render();
-    color(pixel(88,112),tinted('shallow_water'),'shallow half of depth transition');color(pixel(112,112),tinted('deep_water'),'deep half of depth transition');
+    color(pixel(88,112),tinted('shallow_water',88,112),'shallow half of depth transition');color(pixel(112,112),tinted('deep_water'),'deep half of depth transition');
     chevrons([177,143,178]);
     map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<2?'default':'deep_water'));p.update(0,empty,map);render();
     chevrons(arrowColors.deep_water);
@@ -51,18 +53,17 @@ async function checkWading(page){
     camera=[.375,.625];const bounds=JSON.stringify(p.getCollider().bounds);
     for(const angle of [0,Math.PI/4,Math.PI,Math.PI*1.5]){
       p.currentRotation=angle;p.aimAngle=angle;p.aimVisible=true;p.cooldownBarAlpha=1;render();
-      expect(pixel(100,100)[3]===0,'rotated sprite transparency');expect(JSON.stringify(p.getCollider().bounds)===bounds,'render rotation must not alter the circular collider');
+      expect(pixel(100,100)[3]===255,'rotated head remains intact');expect(JSON.stringify(p.getCollider().bounds)===bounds,'render rotation must not alter the circular collider');
       const {debuffX,debuffY}=p.getOverlayLayout(...camera);color(pixel(debuffX+camera[0],debuffY+camera[1]-6),arrowColors.deep_water,'rotation does not rotate the debuff');
     }
     p.applyConfig({animation:{breathingAmplitude:30}});p.aimVisible=false;p.velocity.set(0,0);
-    for(const time of [Math.PI/4,Math.PI*3/4]){p.setIdleTime(time);render();expect(pixel(100,100)[3]===0,'breathing sprite transparency');expect(JSON.stringify(p.getCollider().bounds)===bounds,'breathing does not change the body');}
+    for(const time of [Math.PI/4,Math.PI*3/4]){p.setIdleTime(time);render();expect(pixel(100,100)[3]===255,'breathing head remains intact');expect(JSON.stringify(p.getCollider().bounds)===bounds,'breathing does not change the body');}
     const breathingBuffer=p.wadingCanvas,extent=breathingBuffer.width;p.setIdleTime(0);render();
     expect(p.wadingCanvas===breathingBuffer&&breathingBuffer.width===extent,'breathing must not reallocate the buffer');
     p.sprite=undefined;p.applyConfig({animation:{breathingAmplitude:0}});render();
-    const base=[255,0,0],hex=TILE_TYPES.deep_water.color;
-    color(pixel(100,100),base.map((v,i)=>Math.round(v*.65+parseInt(hex.slice(i*2+1,i*2+3),16)*.35)),'placeholder model tint');
+    color(pixel(100,100),tinted('deep_water',100,100),'cylinder head tint');
     const speedQuery=map.getShapeSpeedFactor;map.getShapeSpeedFactor=()=>{throw Error('draw requested terrain speed');};map.getTerrainCoverage=()=>{throw Error('draw requested coverage');};render();map.getShapeSpeedFactor=speedQuery;
-    map.tiles.forEach(row=>row.fill('default'));p.update(0,empty,map);render();color(pixel(100,100),[255,0,0],'leaving water immediately clears model tint');
+    map.tiles.forEach(row=>row.fill('default'));p.update(0,empty,map);render();color(pixel(100,100),tinted(undefined,100,100),'leaving water immediately clears model tint');
     p.update(.06,empty,map);expect(Math.abs(p.wadingAlpha-.5)<1e-7,'120ms fade-out midpoint');p.update(.06,empty,map);render();
     expect(p.wadingAlpha===0,'debuff fades out completely');
     const layout=p.getOverlayLayout(...camera);expect(pixel(layout.debuffX+camera[0],layout.debuffY+camera[1])[3]===0,'dry debuff pixels are gone');

@@ -2,6 +2,7 @@ import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { ParticleSystem } from "./ParticleSystem";
 import { circleCollider } from "../physics/Collider";
+import type { ShapeCastHit } from "../physics/Motion";
 import { TileTypeId } from "../map/TileType";
 import { BulletWaterDrag, DEFAULT_BULLET_WATER_DRAG, DEFAULT_BALLISTICS } from "./PlayerConfig";
 
@@ -129,6 +130,22 @@ export class Bullet {
     );
   }
 
+  /** Sweep the otherwise skipped body-to-hand segment so an extended arm cannot fire through walls. */
+  checkLaunchPath(origin: Vector2, map: TileMap): void {
+    const movement = { x: this.pos.x + this.size / 2 - origin.x, y: this.pos.y + this.size / 2 - origin.y };
+    const hit = map.castShape(circleCollider(origin.x, origin.y, this.size / 2), movement, 'projectile');
+    if (!hit) return;
+    this.pos.set(origin.x + movement.x * hit.fraction - this.size / 2, origin.y + movement.y * hit.fraction - this.size / 2);
+    this.hitTerrain(hit, map);
+  }
+
+  private hitTerrain(hit: ShapeCastHit, map: TileMap): void {
+    this.particleSystem?.createExplosion(new Vector2(this.pos.x + this.size / 2, this.pos.y + this.size / 2),
+      8, 400, 10, .2, this.color === 'yellow' ? ['yellow', 'orange', 'red'] : [this.color]);
+    if (hit.obstacle.col >= 0) map.damageTile(hit.obstacle.col, hit.obstacle.row, this.damage);
+    this.isDestroyed = true;
+  }
+
   /** 按当前速度推进给定等效时间，共用首次命中和出界处理。 */
   private move(delta: number, map?: TileMap): void {
     const requestedDistance = this.velocity.length() * delta;
@@ -145,27 +162,7 @@ export class Bullet {
       if (hit) {
         this.pos.x += movement.x * hit.fraction;
         this.pos.y += movement.y * hit.fraction;
-        // 创建爆炸效果
-        if (this.particleSystem) {
-          const hitPos = new Vector2(
-            this.pos.x + this.size / 2,
-            this.pos.y + this.size / 2
-          );
-          // 根据子弹颜色生成相应的爆炸效果
-          this.particleSystem.createExplosion(
-            hitPos,
-            8,
-            400,
-            10,
-            0.2,
-            this.color === "yellow" ? ["yellow", "orange", "red"] : [this.color]
-          );
-        }
-
-        // 对命中的瓦片造成伤害
-        if (hit.obstacle.col >= 0) map.damageTile(hit.obstacle.col, hit.obstacle.row, this.damage);
-        // 标记子弹为已销毁
-        this.isDestroyed = true;
+        this.hitTerrain(hit, map);
         return;
       }
 

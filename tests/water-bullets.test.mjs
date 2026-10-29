@@ -69,7 +69,7 @@ test('firing snapshots partial body contact, independently of the bullet footpri
   const wet = playerAt(390 - 24.5, 225 - 24.5);
   wet.update(0, idle, map, aimRight(wet));
   const wetBullet = wet.getBullets()[0];
-  near(center(wetBullet), 390); // Bullet is wholly dry, but the character overlaps water.
+  near(center(wetBullet), wet.getMuzzlePosition().x);
   assert.ok(wet.terrainWaterCoverage.fraction > 1e-6 && wet.terrainWaterCoverage.fraction < 1);
   wet.x = 200; wet.update(0, idle, map);
   wetBullet.update(.1, map);
@@ -78,9 +78,10 @@ test('firing snapshots partial body contact, independently of the bullet footpri
   const dry = playerAt(350 - 24.5, 225 - 24.5);
   dry.update(0, idle, map, aimRight(dry));
   const dryBullet = dry.getBullets()[0];
+  const dryStart = center(dryBullet);
   dry.x = 425; dry.update(0, idle, map);
   dryBullet.update(.3, map);
-  near(dryBullet.velocity.length(), 800); near(center(dryBullet), 350 + 240);
+  near(dryBullet.velocity.length(), 800); near(center(dryBullet), dryStart + 240);
 
   const edge = playerAt(375.5 - 24.5, 225 - 24.5); // Only tangent to water.
   edge.update(0, idle, map); edge.shoot(new Vector2(1, 0));

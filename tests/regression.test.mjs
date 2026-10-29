@@ -82,15 +82,15 @@ test('same-stat pickup refreshes one stable ID and expires from the latest picku
   manager.update(0.8);
   assert.equal(manager.addModifier({ ...effect, value: 0.3, duration: 5 }), id);
   assert.equal(manager.getModifierCount(), 1);
-  manager.update(0.3); assert.equal(player.getMaxSpeed(), 520);
-  manager.update(4.8); assert.equal(player.getMaxSpeed(), 400);
+  manager.update(0.3); assert.equal(player.getMaxSpeed(), 260);
+  manager.update(4.8); assert.equal(player.getMaxSpeed(), 200);
   assert.equal(manager.getModifierCount(), 0);
 });
 test('independent stats and permanent effects retain their own lifetimes', () => {
   const p = new Player(0, 0), manager = new ModifierManager(p);
   manager.addModifier({ stat: 'maxSpeed', value: 1, duration: 1, isMultiplier: true, description: '' });
   manager.addModifier({ stat: 'bulletSpeed', value: 1, duration: 0, isMultiplier: true, description: '' });
-  manager.update(2); assert.equal(p.getMaxSpeed(), 400); assert.equal(p.getBulletSpeed(), 1600);
+  manager.update(2); assert.equal(p.getMaxSpeed(), 200); assert.equal(p.getBulletSpeed(), 1600);
   assert.throws(() => manager.addModifier({ stat: 'damage', value: NaN, duration: 1 }), /Invalid/);
   manager.clearAllModifiers(); assert.equal(p.getBulletSpeed(), 800);
 });
@@ -123,7 +123,7 @@ test('configuration validates atomically and applies rotation and heat capacity'
   assert.equal(p.rotationSpeed, 1); assert.equal(p.rotationStrategy, 'ccw'); assert.equal(p.getHeatPercentage(), 0);
   for (const config of [null, [], { base: { size: 0 } }, { shooting: { fireRate: -1 } }, { base: { rotationStrategy: 'x' } }, { ui: { fadeSpeed: Infinity } }, { unknown: {} }]) assert.throws(() => parsePlayerConfig(config));
   assert.throws(() => p.applyConfig({ base: { maxSpeed: 700 }, shooting: { fireRate: 0 } }));
-  assert.equal(p.getMaxSpeed(), 400);
+  assert.equal(p.getMaxSpeed(), 200);
 });
 test('movement facing takes the shortest wrap and respects forced rotation independently of aim', () => {
   const p = new Player(0, 0); const dir = new Vector2(-1, 0);
@@ -192,14 +192,13 @@ test('game load is idempotent, completes real resources and preserves one resize
     constructor() { panels++; }
     dispose() { panels--; }
   };
-  const scene = new GameScene(); let assets = 0, configs = 0;
-  scene.assetLoader = { async load(report) { assets++; report(1, 1); }, getImage() { return {}; } };
+  const scene = new GameScene(); let configs = 0;
   scene.configLoader = { async load() { configs++; }, getConfig() { return {}; } };
   scene.initLightingSystem = () => {};
   scene._setGame({ renderer: { width: 1200, height: 800, ctx: { canvas: {} } }, input: { setPointerEnabled() {}, clear() {} } });
   const progress = [];
   await Promise.all([scene.load((a, b) => progress.push([a, b])), scene.load()]);
-  assert.deepEqual(progress, [[0, 2], [1, 2], [2, 2]]); assert.equal(assets, 1); assert.equal(configs, 1);
+  assert.deepEqual(progress, [[0, 1], [1, 1]]); assert.equal(configs, 1);
   await scene.onEnter(); assert.equal(listeners.size, 1); assert.equal(panels, 1);
   await scene.onEnter(); assert.equal(panels, 1);
   scene.onExit(); assert.equal(listeners.size, 0); assert.equal(panels, 0);

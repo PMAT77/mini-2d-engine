@@ -10,6 +10,7 @@ import { Entities } from "./Entities";
 import { ParticleSystem } from "./ParticleSystem";
 import { DEFAULT_BALLISTICS, DEFAULT_MOVEMENT, DEFAULT_SPRINT, DEFAULT_BULLET_WATER_DRAG, parsePlayerCollider, parsePlayerConfig, PlayerConfig } from "./PlayerConfig";
 import { ColliderShape } from "../physics/Collider";
+import type { VisionState } from "../core/VisibilitySystem";
 
 const WADING_COLORS = [[98, 186, 255], [177, 143, 178], [255, 100, 100], [255, 64, 64]];
 
@@ -30,6 +31,7 @@ export interface PlayerDebugValues {
  * 玩家类 - 处理玩家的移动、射击和状态管理
  */
 export class Player extends Entities {
+  protected maxSpeed = 200;
   public setCollider(shape: ColliderShape): void { super.setCollider(parsePlayerCollider(shape)); }
   protected getBodyRotation(): number { return this.currentRotation - Math.PI / 2; }
   private health = 100;
@@ -85,6 +87,11 @@ export class Player extends Entities {
   private isShooting: boolean = false; // 玩家是否正在开火
   private ballistics = { ...DEFAULT_BALLISTICS };
   private pointerAim?: PlayerAimInput;
+  private armLift = 0;
+  private armAngle = -Math.PI;
+  private armDistance = Infinity;
+  private shotPoseTime = 0;
+  private focus = 0;
   private recoil = 0;
   private timeSinceShot = Infinity;
   private bullets: Bullet[] = []; // 存储玩家发射的子弹
@@ -168,7 +175,7 @@ export class Player extends Entities {
     return this.getMaxSpeed() * (this.sprinting ? this.sprint.speedMultiplier : 1);
   }
 
-  /** A tiny angular damping softens turns without slowing movement or delaying reversals. */
+  /** Smooth startup acceleration; angular damping does not slow turns or delay reversals. */
   protected updateVelocityNonlinear(targetVel: Vector2, dir: Vector2, delta: number): void {
     this.sprintTime = this.sprinting ? Math.min(this.sprint.rampDuration, this.sprintTime + delta) : 0;
     if (dir.length() === 0) {
@@ -187,7 +194,7 @@ export class Player extends Entities {
     this.stopTime = 0;
     this.movementTime = Math.min(Math.max(this.movement.startupDuration, this.movement.stopDuration), this.movementTime + delta);
     const t = this.movement.startupDuration === 0 ? 1 : Math.min(1, this.movementTime / this.movement.startupDuration);
-    const ratio = 1 - (1 - this.movement.startSpeedRatio) * Math.pow(1 - t, 3);
+    const ratio = this.movement.startSpeedRatio + (1 - this.movement.startSpeedRatio) * t * t * (3 - 2 * t);
     const dot = this.movementDirection.x * dir.x + this.movementDirection.y * dir.y;
     if (this.movementDirection.length() === 0 || this.movement.turnDamping === 0 || dot < 0) {
       this.movementDirection = dir.clone();
@@ -275,6 +282,40 @@ export class Player extends Entities {
     if (!this.pointerAim?.face) return new Vector2();
     return new Vector2(this.pointerAim.target.x - this.x - this.size / 2,
       this.pointerAim.target.y - this.y - this.size / 2);
+  }
+
+  getVisionState(): Readonly<VisionState> {
+    return { x: this.x + this.size / 2, y: this.y + this.size / 2,
+      direction: this.currentRotation - Math.PI,
+      angle: (120 - 75 * this.focus) * Math.PI / 180, range: 400 + 400 * this.focus };
+  }
+
+  private updateAimPose(delta: number): void {
+    this.shotPoseTime = Math.max(0, this.shotPoseTime - delta);
+    const aim = this.pointerAim;
+    const dx = aim ? aim.target.x - this.x - this.size / 2 : 0;
+    const dy = aim ? aim.target.y - this.y - this.size / 2 : 0;
+    const distance = Math.hypot(dx, dy);
+    const raised = !!(aim?.face || aim?.fire || this.shotPoseTime > 0);
+    this.armLift = Math.max(0, Math.min(1, this.armLift + (raised ? 1 : -1) * delta / .1));
+    if ((aim?.face || aim?.fire) && distance > 1e-6) {
+      this.armAngle = Math.atan2(dy, dx); this.armDistance = distance;
+    }
+    const t = aim?.face ? Math.max(0, Math.min(1, (distance - 100) / 700)) : 0;
+    const target = t * t * (3 - 2 * t);
+    // Exponential smoothing reaches 95% in 120ms, independent of frame rate.
+    this.focus += (target - this.focus) * (1 - Math.exp(-delta * 25));
+    if (Math.abs(target - this.focus) < 1e-5) this.focus = target;
+  }
+
+  /** World-space hand endpoint shared by rendering and projectile creation. */
+  getMuzzlePosition(): { x: number; y: number } {
+    const facing = this.currentRotation - Math.PI;
+    const restX = Math.cos(facing) * .04 - Math.sin(facing) * .46;
+    const restY = Math.sin(facing) * .04 + Math.cos(facing) * .46;
+    const reach = Math.min(this.size * .78, Math.max(0, this.armDistance - 5));
+    return { x: this.x + this.size / 2 + restX * this.size * (1 - this.armLift) + Math.cos(this.armAngle) * reach * this.armLift,
+      y: this.y + this.size / 2 + restY * this.size * (1 - this.armLift) + Math.sin(this.armAngle) * reach * this.armLift };
   }
 
   protected getRotationDelta(delta: number, _inputDir?: Vector2): number {
@@ -654,14 +695,14 @@ export class Player extends Entities {
    * @param inputDir 射击方向
    * @param damage 子弹伤害值
    */
-  shoot(inputDir: Vector2, damage: number = this.damage): void {
+  shoot(inputDir: Vector2, damage: number = this.damage, map?: TileMap): void {
     if (!inputDir || !Number.isFinite(inputDir.x) || !Number.isFinite(inputDir.y) || inputDir.length() === 0) return;
-    const target = inputDir.clone().normalize().scale(this.ballistics.maxRange);
-    this.shootAt(new Vector2(this.x + this.size / 2 + target.x, this.y + this.size / 2 + target.y), damage);
+    const target = inputDir.clone().normalize().scale(this.ballistics.maxRange + this.size * .78);
+    this.shootAt(new Vector2(this.x + this.size / 2 + target.x, this.y + this.size / 2 + target.y), damage, map);
   }
 
   /** 发射时冻结世界落点；方向辅助方法和鼠标输入共用热量、散布与碰撞。 */
-  shootAt(target: { x: number; y: number }, damage: number = this.damage): void {
+  shootAt(target: { x: number; y: number }, damage: number = this.damage, map?: TileMap): void {
     if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) return;
     const inputDir = new Vector2(target.x - this.x - this.size / 2, target.y - this.y - this.size / 2);
     // 验证射击方向
@@ -685,18 +726,26 @@ export class Player extends Entities {
     this.shootingTimeRemaining -= this.getFireRate();
 
     // 生成子弹
-    const bulletPos = new Vector2(this.x + this.size / 2, this.y + this.size / 2);
+    // A click fires immediately; the firing pose must already show the emitting hand.
+    this.armAngle = Math.atan2(inputDir.y, inputDir.x);
+    this.armDistance = inputDir.length();
+    this.armLift = 1; this.shotPoseTime = .1;
+    const muzzle = this.getMuzzlePosition();
+    const bulletPos = new Vector2(muzzle.x, muzzle.y);
     // 使用修改后的子弹速度
     const distance = inputDir.length(), spread = this.getRecoilState();
     const radians = Math.PI / 180;
     inputDir.x += (Math.random() * 2 - 1) * distance * Math.tan(spread.horizontal * radians);
     inputDir.y += (Math.random() * 2 - 1) * distance * Math.tan(spread.vertical * radians);
+    inputDir.x += this.x + this.size / 2 - bulletPos.x;
+    inputDir.y += this.y + this.size / 2 - bulletPos.y;
     const travelDistance = Math.min(inputDir.length(), this.ballistics.maxRange);
     const direction = inputDir.clone().normalize();
     const bulletVel = direction.clone().scale(this.getBulletSpeed());
     const bullet = new Bullet(bulletPos, bulletVel, this.getModifiedValue(damage, "damage"),
       this.particleSystem, this.terrainWaterCoverage.fraction > 1e-6, this.bulletWaterDrag, travelDistance);
-    this.bullets.push(bullet);
+    if (map) bullet.checkLaunchPath(new Vector2(this.x + this.size / 2, this.y + this.size / 2), map);
+    if (!bullet.getIsDestroyed()) this.bullets.push(bullet);
     this.recoil = Math.min(1, this.recoil + this.ballistics.recoilPerShot);
     this.timeSinceShot = 0;
 
@@ -732,6 +781,7 @@ export class Player extends Entities {
     this.isShooting = !!this.pointerAim?.fire;
     this.updateRecoil(delta);
     this.updateMovement(delta, input, map);
+    this.updateAimPose(delta);
     this.wadingMap = this.terrainSpeedFactor < 1 - 1e-6 && this.terrainWaterCoverage.fraction > 1e-6 ? map : undefined;
     if (this.wadingMap) {
       const depth = Math.max(0, Math.min(3, this.terrainWaterCoverage.depth)), lower = Math.floor(depth), blend = depth - lower;
@@ -784,7 +834,7 @@ export class Player extends Entities {
     }
 
     // 处理射击逻辑
-    if (this.pointerAim?.fire) this.shootAt(this.pointerAim.target);
+    if (this.pointerAim?.fire) this.shootAt(this.pointerAim.target, this.damage, map);
 
     // 根据当前状态切换状态机状态
     if (this.isShooting) {
@@ -840,45 +890,72 @@ export class Player extends Entities {
    */
   draw(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
     const centerX = this.x + this.size / 2, centerY = this.y + this.size / 2;
-    if (!this.wadingMap) {
-      this.drawModel(ctx, centerX - offsetX, centerY - offsetY);
-      return;
-    }
+    // The same local raster on land and water prevents a shading/resolution pop at the shoreline.
     // A fixed maximum extent avoids reallocating the buffer on every breathing frame.
-    const extent = Math.ceil(this.size * Math.SQRT2 * (1 + this.breathingAmplitude / 100)) + 4;
+    const extent = Math.ceil(this.size * 2 * (1 + this.breathingAmplitude / 100)) + 4;
     const canvas = this.wadingCanvas ??= document.createElement('canvas');
     if (canvas.width !== extent || canvas.height !== extent) { canvas.width = extent; canvas.height = extent; }
     const buffer = canvas.getContext('2d')!;
     buffer.clearRect(0, 0, extent, extent);
     this.drawModel(buffer, extent / 2, extent / 2);
-    buffer.save();
-    buffer.globalCompositeOperation = 'source-atop'; buffer.globalAlpha = 0.35;
-    this.wadingMap.drawWaterLayer(buffer, centerX - extent / 2, centerY - extent / 2, extent, extent);
-    buffer.restore();
+    if (this.wadingMap) {
+      buffer.save();
+      buffer.globalCompositeOperation = 'source-atop'; buffer.globalAlpha = 0.35;
+      this.wadingMap.drawWaterLayer(buffer, centerX - extent / 2, centerY - extent / 2, extent, extent);
+      buffer.restore();
+    }
     ctx.drawImage(canvas, centerX - extent / 2 - offsetX, centerY - extent / 2 - offsetY);
   }
 
-  private drawModel(ctx: CanvasRenderingContext2D, centerX: number, centerY: number): void {
+  drawVisibilitySilhouette(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
+    this.drawModel(ctx, this.x + this.size / 2 - offsetX, this.y + this.size / 2 - offsetY, true);
+  }
+
+  private drawModel(ctx: CanvasRenderingContext2D, centerX: number, centerY: number, silhouette = false): void {
     ctx.save();
 
     // Visual breathing only: getCollider() uses size and never this render scale.
     let scale = 1;
-    if (this.isIdle()) {
+    if (this.isIdle() && this.armLift === 0) {
       scale = Math.max(0, 1 + Math.sin(this.idleTime * this.breathingSpeed) * this.breathingAmplitude / 100);
     }
 
     // 应用变换并绘制
     ctx.translate(centerX, centerY);
-    ctx.rotate(this.getBodyRotation());
+    const facing = this.currentRotation - Math.PI;
+    ctx.rotate(facing);
     ctx.scale(scale, scale);
-
-    // 绘制玩家精灵或占位符
-    if (this.sprite) {
-      ctx.drawImage(this.sprite, -this.size / 2, -this.size / 2, this.size, this.size);
-    } else {
-      ctx.fillStyle = "red";
-      ctx.fillRect(-this.size / 2, -this.size / 2, this.size, this.size);
-    }
+    const s = this.size, c = Math.cos(facing), sn = Math.sin(facing);
+    const muzzle = this.getMuzzlePosition();
+    const dx = muzzle.x - this.x - s / 2, dy = muzzle.y - this.y - s / 2;
+    const hand = { x: dx * c + dy * sn, y: -dx * sn + dy * c };
+    const disc = (x: number, y: number, r: number, color: string | CanvasGradient) => {
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = silhouette ? 'white' : color; ctx.fill();
+    };
+    const capsule = (ax: number, ay: number, bx: number, by: number, width: number, color: string) => {
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+      ctx.strokeStyle = silhouette ? 'white' : color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke();
+    };
+    // Rounded shoulders, sleeves and hands sit below the head in the top-down view.
+    const leftX = s * .04 * (1 - this.armLift) + hand.x * .67 * this.armLift;
+    const leftY = -s * .46 * (1 - this.armLift) + (hand.y - s * .13) * this.armLift;
+    capsule(0, -s * .31, leftX, leftY, s * .22, '#183c4a');
+    capsule(0, s * .31, hand.x, hand.y, s * .22, '#183c4a');
+    capsule(s * .02, -s * .31, leftX, leftY, s * .15, '#4d8999');
+    capsule(s * .02, s * .31, hand.x, hand.y, s * .15, '#4d8999');
+    disc(leftX, leftY, s * .085, '#e5ccb0');
+    disc(hand.x, hand.y, s * .085, '#eed7b9');
+    disc(-s * .055, 0, s * .45, '#102c39');
+    const body = silhouette ? 'white' : ctx.createLinearGradient(-s * .4, s * .3, s * .35, -s * .3);
+    if (typeof body !== 'string') { body.addColorStop(0, '#245362'); body.addColorStop(1, '#73b4bf'); }
+    disc(0, 0, s * .405, body);
+    disc(s * .055, 0, s * .29, '#23404a');
+    const head = silhouette ? 'white' : ctx.createRadialGradient(s * .16, -s * .12, s * .015, s * .09, 0, s * .28);
+    if (typeof head !== 'string') { head.addColorStop(0, '#fff1d6'); head.addColorStop(.65, '#ead3b2'); head.addColorStop(1, '#b49a7a'); }
+    disc(s * .09, 0, s * .265, head);
+    // A small crown highlight indicates facing without drawing a face.
+    capsule(s * .22, -s * .08, s * .27, s * .025, s * .035, '#fff4dd');
 
     ctx.restore();
   }

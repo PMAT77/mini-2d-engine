@@ -42,7 +42,7 @@ export interface PlayerConfig {
   ui?: { fadeSpeed?: number };
 }
 
-export const DEFAULT_MOVEMENT = { startSpeedRatio: 0.7, startupDuration: 0.08, turnDamping: 0.012, stopDuration: 0.2 };
+export const DEFAULT_MOVEMENT = { startSpeedRatio: 0, startupDuration: 0.08, turnDamping: 0.012, stopDuration: 0.2 };
 export const DEFAULT_SPRINT = {
   speedMultiplier: 1.6, rampDuration: 0.16, maxStamina: 100, drainPerSecond: 25,
   regenPerSecond: 35, regenDelay: 0.6, restartThreshold: 0.15,

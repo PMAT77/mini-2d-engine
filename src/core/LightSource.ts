@@ -10,6 +10,7 @@ export class LightSource {
   private intensity: number;
   private isActive: boolean;
   private sourceRadius = 0;
+  private rangeScale = 1;
   /** 火炬等低位光源也会被前方障碍遮住其他地形顶面；默认保留玩家光的顶面照明。 */
   shadowTerrain = false;
 
@@ -71,6 +72,14 @@ export class LightSource {
   getRadius(): number {
     return this.radius;
   }
+
+  /** Temporary focus multiplier; the editor and snapshots continue to own the base radius. */
+  setRangeScale(scale: number): void {
+    if (!Number.isFinite(scale) || scale <= 0) throw new Error('光照范围倍率必须是正有限数值');
+    this.rangeScale = scale;
+  }
+
+  getEffectiveRadius(): number { return this.radius * this.rangeScale; }
 
   /**
    * 设置光照半径
