@@ -8,7 +8,7 @@
     "preview": "vite preview",
     "test": "node scripts/test.mjs",
     "typecheck": "tsc --noEmit",
-    "test:browser": "node tests/lighting.browser.mjs && node tests/torch.browser.mjs && node tests/terrain-light.browser.mjs && node tests/collision.browser.mjs && node tests/movement.browser.mjs && node tests/shooting.browser.mjs && node tests/mining.browser.mjs && node tests/water.browser.mjs && node tests/debug.browser.mjs && node tests/rounded-terrain.browser.mjs",
+    "test:browser": "node tests/lighting.browser.mjs && node tests/torch.browser.mjs && node tests/terrain-light.browser.mjs && node tests/collision.browser.mjs && node tests/movement.browser.mjs && node tests/camera.browser.mjs && node tests/shooting.browser.mjs && node tests/mining.browser.mjs && node tests/water.browser.mjs && node tests/debug.browser.mjs && node tests/rounded-terrain.browser.mjs",
     "test:rounded-terrain-browser": "node tests/rounded-terrain.browser.mjs",
     "test:shooting-browser": "node tests/shooting.browser.mjs",
     "test:debug-browser": "node tests/debug.browser.mjs",

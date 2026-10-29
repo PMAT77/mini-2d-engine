@@ -10,12 +10,13 @@ const { TileMap } = load('map/TileMap');
 const { ParticleSystem } = load('objects/ParticleSystem');
 const { parsePlayerConfig, DEFAULT_MOVEMENT, DEFAULT_SPRINT } = load('objects/PlayerConfig');
 const { readFileSync } = await import('node:fs');
-const input = (...keys) => ({ isKeyDown: key => keys.includes(key) });
+const input = (...keys) => ({ isKeyDown: key => keys.includes(key), fire: keys.includes('MouseLeft') });
+const mouseAim = p => ({ target: { x: p.x + 24.5, y: p.y - 975.5 }, fire: true, face: false });
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b} (±${tolerance})`);
 const advance = (p, seconds, keys = input(), map, fps = 60) => {
   for (let left = seconds; left > 1e-9;) {
     const delta = Math.min(left, 1 / fps);
-    p.update(delta, keys, map); left -= delta;
+    p.update(delta, keys, map, keys.fire ? mouseAim(p) : undefined); left -= delta;
   }
 };
 const mapOf = () => {
@@ -144,10 +145,10 @@ test('diagonals have equal speed and 30/60/144 FPS keep matching travel and stam
 test('Shift smoothly reaches sprint speed in 160ms without changing base speed or shooting', () => {
   const p = new Player(0, 0);
   advance(p, 0.1, input('d'));
-  p.update(0.04, input('d', 'Shift', 'ArrowUp')); near(p.getVelocity().length(), 437.5);
-  p.update(0.04, input('d', 'Shift', 'ArrowUp')); near(p.getVelocity().length(), 520);
-  p.update(0.08, input('d', 'Shift', 'ArrowUp')); near(p.getVelocity().length(), 640);
-  advance(p, 0.34, input('d', 'Shift', 'ArrowUp'));
+  p.update(0.04, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 437.5);
+  p.update(0.04, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 520);
+  p.update(0.08, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 640);
+  advance(p, 0.34, input('d', 'Shift', 'MouseLeft'));
   near(p.getMaxSpeed(), 400); near(p.getVelocity().length(), 640);
   near(p.getStamina(), 87.5); assert.equal(p.getIsSprinting(), true);
   assert.ok(p.getBullets().length >= 2); assert.ok(p.getHeatPercentage() > 0);
@@ -169,8 +170,8 @@ test('sprint ramp survives turns and reversals, and can be configured to respond
 test('recovery delay crosses frame boundaries precisely and recovers while walking/shooting', () => {
   const p = new Player(0, 0);
   advance(p, 1, input('d', 'Shift')); near(p.getStamina(), 75);
-  advance(p, 0.59, input('d', 'ArrowUp')); near(p.getStamina(), 75);
-  p.update(0.11, input('d', 'ArrowUp')); near(p.getStamina(), 78.5);
+  advance(p, 0.59, input('d', 'MouseLeft')); near(p.getStamina(), 75);
+  p.update(0.11, input('d', 'MouseLeft'), undefined, mouseAim(p)); near(p.getStamina(), 78.5);
   advance(p, 3, input('Shift')); near(p.getStamina(), 100); assert.equal(p.getIsSprinting(), false);
 });
 

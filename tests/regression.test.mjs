@@ -196,7 +196,7 @@ test('game load is idempotent, completes real resources and preserves one resize
   scene.assetLoader = { async load(report) { assets++; report(1, 1); }, getImage() { return {}; } };
   scene.configLoader = { async load() { configs++; }, getConfig() { return {}; } };
   scene.initLightingSystem = () => {};
-  scene._setGame({ renderer: { width: 1200, height: 800, ctx: { canvas: {} } } });
+  scene._setGame({ renderer: { width: 1200, height: 800, ctx: { canvas: {} } }, input: { setPointerEnabled() {}, clear() {} } });
   const progress = [];
   await Promise.all([scene.load((a, b) => progress.push([a, b])), scene.load()]);
   assert.deepEqual(progress, [[0, 2], [1, 2], [2, 2]]); assert.equal(assets, 1); assert.equal(configs, 1);

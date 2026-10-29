@@ -60,7 +60,16 @@ export class PlayerDebugPanel {
     this.configField(attack, 'shooting', 'damage', '基础攻击力', '', 0.01, 1, undefined, s => s.effectiveDamage);
     this.configField(attack, 'shooting', 'fireRate', '射速', '发/秒', 0.01, 0.1, undefined, s => s.effectiveFireRate);
     this.configField(attack, 'shooting', 'bulletSpeed', '子弹速度', 'px/s', 0.01, 10, undefined, s => s.effectiveBulletSpeed);
-    this.configField(attack, 'shooting', 'aimTurnDuration', '指针滑动时长', '秒', 0, 0.01);
+    this.configField(attack, 'shooting', 'maxRange', '最大射程', 'px', 1, 50);
+
+    const recoil = this.section(content, '弹道散布');
+    this.configField(recoil, 'shooting', 'spreadHorizontal', '基础水平半角', '度', 0, 0.1);
+    this.configField(recoil, 'shooting', 'spreadVertical', '基础垂直半角', '度', 0, 0.1);
+    this.configField(recoil, 'shooting', 'maxSpreadHorizontal', '最大水平半角', '度', 0, 0.1);
+    this.configField(recoil, 'shooting', 'maxSpreadVertical', '最大垂直半角', '度', 0, 0.1);
+    this.configField(recoil, 'shooting', 'recoilPerShot', '每发累积强度', '', 0, 0.01, 1);
+    this.configField(recoil, 'shooting', 'recoilRecoveryDelay', '恢复延迟', '秒', 0, 0.05);
+    this.configField(recoil, 'shooting', 'recoilRecoveryDuration', '满强度恢复时长', '秒', 0.01, 0.1);
 
     const waterDrag = this.section(content, '子弹水体阻力');
     for (const [key, label] of Object.entries({ shallow: '浅水减速', water: '普通水减速', deep: '深水减速', ultraDeep: '极深水减速' })) {

@@ -148,9 +148,15 @@ async function checkWaterBullets(page,dpr){
     },wet);
     // Warm up map/light rendering before input so asset setup time is not the firing frame's delta.
     await page.waitForFunction(()=>waterBulletRun.frames>=3);
-    await page.keyboard.down('ArrowRight');
+    const waterTarget = await page.evaluate(() => {
+      const s = waterBulletGame.sceneManager.getCurrentScene(), p = s.player;
+      p.applyConfig({ shooting: { maxRange: 2000, spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 } });
+      s.draw(waterBulletGame.renderer.ctx); const v = s.displayedView, r = s.getCanvasViewport();
+      return { x: r.left + (900 - v.x) * r.width / v.width, y: r.top + (500 - v.y) * r.height / v.height };
+    });
+    await page.mouse.move(waterTarget.x, waterTarget.y); await page.mouse.down();
     await page.waitForFunction(()=>waterBulletRun.samples.length>=8);
-    await page.keyboard.up('ArrowRight');
+    await page.mouse.up();
     if(wet)await page.screenshot({path:`${output}/water-bullets-dpr${dpr}.png`});
     await page.waitForFunction(()=>waterBulletRun.depths.size>=3||waterBulletRun.bullet.getIsDestroyed());
     const result=await page.evaluate(()=>{
@@ -216,7 +222,7 @@ try{
       await page.screenshot({path:`${output}/water-dpr${dpr}.png`});
       console.log(`Water browser DPR ${dpr}: 30/60/144 FPS, long frames, sliding, ${pixels.length} color/seam samples and ${wadingChecks} wading-overlay checks passed.`);
       await checkWaterBullets(page,dpr);
-      console.log(`Water bullets DPR ${dpr}: ${bulletVisualChecks} mask/particle pixel checks, real ArrowRight input, cross-depth drag, white annihilation and dry-origin full speed passed.`);
+      console.log(`Water bullets DPR ${dpr}: ${bulletVisualChecks} mask/particle pixel checks, real mouse input, cross-depth drag, white annihilation and dry-origin full speed passed.`);
     }else{
       await page.goto(base);
       await page.evaluate(async()=>{const entry=document.querySelector('script[type="module"][src*="/src/main.ts"]');window.waterGame=(await import(entry.src)).game;});

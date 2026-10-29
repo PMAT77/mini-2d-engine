@@ -1,100 +1,110 @@
-export interface AimChange { x: number; y: number; time: number }
+export interface PointerState {
+  clientX: number;
+  clientY: number;
+  active: boolean;
+  leftDown: boolean;
+  rightDown: boolean;
+  leftPressed: boolean;
+}
 
-/**
- * 输入系统类
- * 负责处理和管理用户的键盘输入
- */
+/** Keyboard ownership and canvas-only mouse input. World conversion belongs to the scene. */
 export class Input {
-  /**
-   * 存储当前按下的键的集合
-   * @private
-   */
-  private keys: Set<string> = new Set<string>();
-  private aimChanges: AimChange[] = [];
-  private aimX = 0;
-  private aimY = 0;
-  private aimReset = false;
+  private keys = new Set<string>();
   private blocked = false;
+  private pointerEnabled = false;
+  private previousCursor = '';
+  private pointer: PointerState = { clientX: 0, clientY: 0, active: false, leftDown: false, rightDown: false, leftPressed: false };
 
-  /** UI focus owns the keyboard until the game surface is selected again. */
-  public setBlocked(blocked: boolean): void {
+  constructor(private canvas?: HTMLCanvasElement) {
+    this.previousCursor = canvas?.style.cursor ?? '';
+    window.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (this.blocked || event.defaultPrevented) return;
+      this.keys.add(event.code || this.keyCode(event.key));
+      if (event.code === 'Space') event.preventDefault();
+    });
+    window.addEventListener('keyup', (event: KeyboardEvent) => this.keys.delete(event.code || this.keyCode(event.key)));
+    window.addEventListener('blur', () => this.clear());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.clear(); });
+    canvas?.addEventListener('pointermove', event => {
+      if (!this.pointerEnabled || this.blocked || event.pointerType !== 'mouse') return;
+      this.pointer.clientX = event.clientX; this.pointer.clientY = event.clientY;
+      this.pointer.active = true;
+      // Never acquire a held button on re-entry after leaving the canvas.
+      this.pointer.leftDown &&= !!(event.buttons & 1);
+      this.pointer.rightDown &&= !!(event.buttons & 2);
+      this.updateCursor();
+    });
+    canvas?.addEventListener('pointerdown', event => {
+      if (!this.pointerEnabled || this.blocked || event.pointerType !== 'mouse' || event.defaultPrevented) return;
+      this.pointer.clientX = event.clientX; this.pointer.clientY = event.clientY;
+      this.pointer.active = true;
+      this.updateCursor();
+    });
+    // Mouse down/up fire for every button in a chord; pointer down/up only fire for its first/last button.
+    canvas?.addEventListener('mousedown', event => {
+      if (!this.pointerEnabled || this.blocked || event.defaultPrevented) return;
+      // Pointer events retain subpixel coordinates; MouseEvent coordinates can be rounded by the browser.
+      if (!this.pointer.active) { this.pointer.clientX = event.clientX; this.pointer.clientY = event.clientY; }
+      this.pointer.active = true;
+      if (event.button === 0) { this.pointer.leftDown = true; this.pointer.leftPressed = true; }
+      if (event.button === 2) this.pointer.rightDown = true;
+      this.updateCursor();
+    });
+    window.addEventListener('mouseup', (event: MouseEvent) => {
+      if (event.button === 0) this.pointer.leftDown = false;
+      if (event.button === 2) this.pointer.rightDown = false;
+    });
+    window.addEventListener('pointercancel', () => this.clear());
+    canvas?.addEventListener('pointerleave', () => this.clearPointer());
+    canvas?.addEventListener('contextmenu', event => {
+      if (this.pointerEnabled && !this.blocked) event.preventDefault();
+    });
+  }
+
+  setPointerEnabled(enabled: boolean): void {
+    if (this.pointerEnabled === enabled) return;
+    if (enabled && this.canvas) this.previousCursor = this.canvas.style.cursor;
+    this.pointerEnabled = enabled;
+    this.clearPointer();
+  }
+
+  setBlocked(blocked: boolean): void {
     if (this.blocked === blocked) return;
     this.blocked = blocked;
-    this.clearKeys();
+    this.clear();
   }
 
-  private recordAim(): void {
-    const x = Number(this.keys.has("ArrowRight")) - Number(this.keys.has("ArrowLeft"));
-    const y = Number(this.keys.has("ArrowDown")) - Number(this.keys.has("ArrowUp"));
-    if (x === this.aimX && y === this.aimY) return;
-    this.aimX = x; this.aimY = y;
-    if (this.aimChanges.length === 32) this.aimReset = true;
-    // After overflow only the latest direction matters; never replay a backlog.
-    if (this.aimReset) this.aimChanges = [];
-    this.aimChanges.push({ x, y, time: performance.now() / 1000 });
+  clear(): void { this.keys.clear(); this.clearPointer(); }
+
+  private clearPointer(): void {
+    this.pointer.active = false; this.pointer.leftDown = false;
+    this.pointer.rightDown = false; this.pointer.leftPressed = false;
+    this.updateCursor();
   }
 
-  private clearKeys(): void {
-    this.keys.clear();
-    this.recordAim();
-    this.aimReset = true;
+  private updateCursor(): void {
+    if (this.canvas) this.canvas.style.cursor = this.pointerEnabled && !this.blocked && this.pointer.active ? 'none' : this.previousCursor;
   }
 
-  /** Consume once per player frame, outside movement substeps. Times are monotonic seconds. */
-  public consumeAimChanges(): { changes: AimChange[]; now: number; reset: boolean } {
-    const result = { changes: this.aimChanges, now: performance.now() / 1000, reset: this.aimReset };
-    this.aimChanges = [];
-    this.aimReset = false;
-    return result;
+  getPointerState(): Readonly<PointerState> { return { ...this.pointer }; }
+
+  consumePointerState(): PointerState {
+    const sample = { ...this.pointer };
+    this.pointer.leftPressed = false;
+    return sample;
   }
 
   private keyCode(key: string): string {
-    if (/^[a-z]$/i.test(key)) return `Key${key.toUpperCase()}`;
-    if (/^[0-9]$/.test(key)) return `Digit${key}`;
-    return key === " " ? "Space" : key;
+    if (/^[a-z]$/i.test(key)) return 'Key' + key.toUpperCase();
+    if (/^[0-9]$/.test(key)) return 'Digit' + key;
+    return key === ' ' ? 'Space' : key;
   }
 
-  /**
-   * 构造函数
-   * 初始化事件监听器以跟踪键盘输入
-   */
-  constructor() {
-    // 添加键盘按下事件监听器
-    window.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (this.blocked || e.defaultPrevented) return;
-      this.keys.add(e.code || this.keyCode(e.key));
-      this.recordAim();
-      if (e.code?.startsWith("Arrow") || e.code === "Space") e.preventDefault();
-    });
-
-    // 添加键盘释放事件监听器
-    window.addEventListener("keyup", (e: KeyboardEvent) => {
-      this.keys.delete(e.code || this.keyCode(e.key));
-      this.recordAim();
-    });
-    window.addEventListener("blur", () => this.clearKeys());
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) this.clearKeys();
-    });
-  }
-
-  /**
-   * 检查指定的键是否当前处于按下状态
-   * @param key 键盘按键标识符（如"ArrowUp"、"w"等）
-   * @returns boolean 键是否按下
-   */
-  public isKeyDown(key: string): boolean {
-    if (key === "Shift") return this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.keys.has("Shift");
-    if (key === "Enter") return this.keys.has("Enter") || this.keys.has("NumpadEnter");
+  isKeyDown(key: string): boolean {
+    if (key === 'Shift') return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.keys.has('Shift');
+    if (key === 'Enter') return this.keys.has('Enter') || this.keys.has('NumpadEnter');
     return this.keys.has(this.keyCode(key));
   }
 
-  /**
-   * 检查指定的键是否当前处于释放状态
-   * @param key 键盘按键标识符
-   * @returns boolean 键是否释放
-   */
-  public isKeyUp(key: string): boolean {
-    return !this.isKeyDown(key);
-  }
+  isKeyUp(key: string): boolean { return !this.isKeyDown(key); }
 }

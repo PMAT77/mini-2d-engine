@@ -109,7 +109,7 @@ test('keyboard ownership clears held movement and aim and ignores game keys unti
   const down = code => events.keydown({ code, preventDefault() {} });
   down('KeyD'); down('ArrowRight'); assert.equal(input.isKeyDown('d'), true);
   input.setBlocked(true); assert.equal(input.isKeyDown('d'), false);
-  assert.equal(input.isKeyDown('ArrowRight'), false); assert.equal(input.consumeAimChanges().reset, true);
+  assert.equal(input.isKeyDown('ArrowRight'), false); assert.equal(input.getPointerState().active, false);
   down('KeyW'); down('ArrowUp'); assert.equal(input.isKeyDown('w'), false);
   input.setBlocked(false); assert.equal(input.isKeyDown('w'), false);
   down('KeyW'); assert.equal(input.isKeyDown('w'), true);

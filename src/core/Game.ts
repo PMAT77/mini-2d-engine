@@ -35,7 +35,7 @@ export class Game {
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);
     this.sceneManager = new SceneManager(this);
-    this.input = new Input();
+    this.input = new Input(canvas);
   }
 
   /**

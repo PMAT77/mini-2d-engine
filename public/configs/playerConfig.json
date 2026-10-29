@@ -1,5 +1,8 @@
 {
-  "collider": { "type": "circle", "radius": 0.5 },
+  "collider": {
+    "type": "circle",
+    "radius": 0.5
+  },
   "base": {
     "maxHealth": 100,
     "size": 49,
@@ -31,11 +34,18 @@
   },
   "shooting": {
     "damage": 10,
-    "aimTurnDuration": 0.15,
     "fireRate": 0.2,
     "bulletSpeed": 800,
     "maxShootingTime": 3.5,
-    "maxOverheatCooldownTime": 1.0
+    "maxOverheatCooldownTime": 1,
+    "maxRange": 1000,
+    "spreadHorizontal": 0.6,
+    "spreadVertical": 0.4,
+    "maxSpreadHorizontal": 3,
+    "maxSpreadVertical": 2,
+    "recoilPerShot": 0.18,
+    "recoilRecoveryDelay": 0.25,
+    "recoilRecoveryDuration": 0.8
   },
   "bulletWaterDrag": {
     "shallow": 0.4,

@@ -152,13 +152,13 @@ try {
     await page.setViewportSize({ width: 1000, height: 650 });
     const resized = await page.evaluate(async () => {
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const game = terrainGame, lighting = game.sceneManager.getCurrentScene().lightingSystem;
-      return { renderer: [game.renderer.width, game.renderer.height], mask: [lighting.shadowCanvas.width, lighting.shadowCanvas.height],
+      const game = terrainGame, scene = game.sceneManager.getCurrentScene(), lighting = scene.lightingSystem;
+      return { renderer: [game.renderer.width, game.renderer.height], world: [scene.worldCanvas.width, scene.worldCanvas.height], mask: [lighting.shadowCanvas.width, lighting.shadowCanvas.height],
         buffer: [lighting.terrainShadowCanvas.width, lighting.terrainShadowCanvas.height], position: lighting.terrainLight.position };
     });
-    assert.deepEqual(resized.mask, resized.renderer.map(Math.floor), 'game resize uses the same integer canvas pixels as the renderer');
+    assert.deepEqual(resized.mask, resized.world, 'game resize keeps lighting aligned with the zoomed world buffer');
     assert.deepEqual(resized.position, config.position, 'camera/resize never moves the world light');
-    assert.ok(resized.buffer[0] <= resized.renderer[0] + 17 && resized.buffer[1] <= resized.renderer[1] + 17);
+    assert.ok(resized.buffer[0] <= resized.world[0] + 17 && resized.buffer[1] <= resized.world[1] + 17);
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ dpr, cases: 4, boundary, gamePixels, resized }));
     await page.close();

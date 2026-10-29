@@ -1,4 +1,4 @@
-import { AimChange, Input } from "../core/Input";
+import { Input } from "../core/Input";
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { IdleState } from "../status/IdleState";
@@ -8,11 +8,16 @@ import { StateMachine } from "../status/StateMachine";
 import { Bullet } from "./Bullet";
 import { Entities } from "./Entities";
 import { ParticleSystem } from "./ParticleSystem";
-import { DEFAULT_AIM, DEFAULT_MOVEMENT, DEFAULT_SPRINT, DEFAULT_BULLET_WATER_DRAG, parsePlayerCollider, parsePlayerConfig, PlayerConfig } from "./PlayerConfig";
+import { DEFAULT_BALLISTICS, DEFAULT_MOVEMENT, DEFAULT_SPRINT, DEFAULT_BULLET_WATER_DRAG, parsePlayerCollider, parsePlayerConfig, PlayerConfig } from "./PlayerConfig";
 import { ColliderShape } from "../physics/Collider";
 
-const angleDelta = (from: number, to: number) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
 const WADING_COLORS = [[98, 186, 255], [177, 143, 178], [255, 100, 100], [255, 64, 64]];
+
+export interface PlayerAimInput {
+  target: { x: number; y: number };
+  fire: boolean;
+  face: boolean;
+}
 
 export interface PlayerDebugValues {
   health: number;
@@ -78,16 +83,10 @@ export class Player extends Entities {
 
   // 射击相关属性
   private isShooting: boolean = false; // 玩家是否正在开火
-  private aim = { ...DEFAULT_AIM };
-  private aimAngle = 0;
-  private aimTarget = 0;
-  private aimFrom = 0;
-  private aimArc = 0;
-  private aimStarted = 0;
-  private aimTime = 0;
-  private aimPrevious: number | null = null;
-  private aimVisible = false;
-  private aimUsesEvents = false;
+  private ballistics = { ...DEFAULT_BALLISTICS };
+  private pointerAim?: PlayerAimInput;
+  private recoil = 0;
+  private timeSinceShot = Infinity;
   private bullets: Bullet[] = []; // 存储玩家发射的子弹
 
   private fireRate: number = 0.2; // 射速（秒/发）
@@ -272,91 +271,39 @@ export class Player extends Entities {
     }
   }
 
-  /**
-   * 获取朝向方向（基于方向键）
-   * @param input 输入系统引用
-   * @returns 归一化的朝向向量
-   */
-  private readShootingDirection(input: Input): Vector2 {
-    const dir = new Vector2();
-    if (input.isKeyDown("ArrowUp")) dir.y -= 1;
-    if (input.isKeyDown("ArrowDown")) dir.y += 1;
-    if (input.isKeyDown("ArrowLeft")) dir.x -= 1;
-    if (input.isKeyDown("ArrowRight")) dir.x += 1;
-
-    // 归一化方向向量
-    if (dir.length() > 0) dir.normalize();
-    return dir;
-  }
-
-  protected getLookDirection(_input: Input): Vector2 {
-    return this.aimVisible ? new Vector2(Math.cos(this.aimAngle), Math.sin(this.aimAngle)) : new Vector2();
+  protected getLookDirection(_input?: Input): Vector2 {
+    if (!this.pointerAim?.face) return new Vector2();
+    return new Vector2(this.pointerAim.target.x - this.x - this.size / 2,
+      this.pointerAim.target.y - this.y - this.size / 2);
   }
 
   protected getRotationDelta(delta: number, _inputDir?: Vector2): number {
-    // Body facing follows movement velocity; aiming stays in world space.
+    // Recompute from the moving body on every movement substep.
+    if (this.pointerAim?.face) {
+      const direction = this.getLookDirection();
+      return direction.length() <= 1e-6 ? 0 : super.getRotationDelta(delta, direction);
+    }
     return super.getRotationDelta(delta);
   }
 
-  getAimState(): { angle: number; targetAngle: number; visible: boolean; x: number; y: number; radius: number } {
-    const radius = this.size / Math.SQRT2 + 8;
-    return { angle: this.aimAngle, targetAngle: this.aimTarget, visible: this.aimVisible, radius,
-      x: this.x + this.size / 2 + Math.cos(this.aimAngle) * radius,
-      y: this.y + this.size / 2 + Math.sin(this.aimAngle) * radius };
+  getRecoilState(): { intensity: number; horizontal: number; vertical: number } {
+    return { intensity: this.recoil,
+      horizontal: this.ballistics.spreadHorizontal + (this.ballistics.maxSpreadHorizontal - this.ballistics.spreadHorizontal) * this.recoil,
+      vertical: this.ballistics.spreadVertical + (this.ballistics.maxSpreadVertical - this.ballistics.spreadVertical) * this.recoil };
   }
 
-  private resetAim(): void {
-    this.aimVisible = false;
-    this.aimPrevious = null;
-    this.aimFrom = this.aimAngle;
-    this.aimTarget = this.aimAngle;
-    this.aimArc = 0;
-  }
-
-  private advanceAim(time: number): void {
-    const t = this.aim.aimTurnDuration === 0 ? 1 : Math.min(1, Math.max(0, (time - this.aimStarted) / this.aim.aimTurnDuration));
-    this.aimAngle = angleDelta(0, this.aimFrom + this.aimArc * t);
-    this.aimTime = time;
-  }
-
-  private changeAim({ x, y, time }: AimChange): void {
-    this.advanceAim(time);
-    if (x === 0 && y === 0) { this.resetAim(); return; }
-    const target = Math.atan2(y, x);
-    if (this.aimPrevious !== null && Math.abs(angleDelta(this.aimPrevious, target)) < 1e-9) return;
-    const adjacent = this.aimPrevious !== null && Math.abs(Math.abs(angleDelta(this.aimPrevious, target)) - Math.PI / 4) < 1e-9;
-    // A held direction is still active aim; only release/reset breaks the sweep.
-    this.aimFrom = adjacent ? this.aimAngle : target;
-    this.aimArc = adjacent ? angleDelta(this.aimAngle, target) : 0;
-    this.aimTarget = target;
-    this.aimStarted = time;
-    this.aimPrevious = target;
-    this.aimVisible = true;
-  }
-
-  private updateAim(delta: number, input: Input): void {
-    const direction = this.readShootingDirection(input);
-    // Polling remains supported by deterministic simulation/test inputs.
-    const sample = input.consumeAimChanges?.();
-    if (this.aimUsesEvents !== !!sample) {
-      this.resetAim();
-      this.aimTime = sample ? sample.now - delta : 0;
-      this.aimUsesEvents = !!sample;
-    }
-    const start = this.aimTime, now = sample?.now ?? start + delta;
-    if (sample?.reset) this.resetAim();
-    for (const change of sample?.changes ?? []) this.changeAim(change);
-    const rawAngle = direction.length() > 0 ? Math.atan2(direction.y, direction.x) : null;
-    if (rawAngle === null ? this.aimVisible : this.aimPrevious === null || Math.abs(angleDelta(this.aimPrevious, rawAngle)) > 1e-9) {
-      this.changeAim({ x: direction.x, y: direction.y, time: sample ? now : start });
-    }
-    this.advanceAim(now);
-    this.isShooting = this.aimVisible;
+  private updateRecoil(delta: number): void {
+    if (!Number.isFinite(this.timeSinceShot)) return;
+    const before = this.timeSinceShot;
+    this.timeSinceShot += delta;
+    const recovery = Math.max(0, this.timeSinceShot - this.ballistics.recoilRecoveryDelay)
+      - Math.max(0, before - this.ballistics.recoilRecoveryDelay);
+    this.recoil = Math.max(0, this.recoil - recovery / this.ballistics.recoilRecoveryDuration);
   }
 
   private getOverlayLayout(offsetX = 0, offsetY = 0): { healthX: number; healthY: number; heatX: number; heatY: number; debuffX: number; debuffY: number } {
     const centerX = this.x - offsetX + this.size / 2, centerY = this.y - offsetY + this.size / 2;
-    const radius = this.getAimState().radius, heatOffset = (radius + 28) / Math.SQRT2;
+    const radius = this.size / Math.SQRT2 + 8, heatOffset = (radius + 28) / Math.SQRT2;
     return { healthX: centerX - this.size / 2, healthY: centerY + radius + 15,
       heatX: centerX + heatOffset, heatY: centerY - heatOffset,
       debuffX: centerX - radius - 18, debuffY: centerY };
@@ -377,23 +324,6 @@ export class Player extends Entities {
       ctx.strokeStyle = '#0b1721';ctx.lineWidth = 4.4;ctx.stroke();
       ctx.strokeStyle = this.wadingColor;ctx.lineWidth = 2.4;ctx.stroke();
     }
-    ctx.restore();
-  }
-
-  private drawAimPointer(ctx: CanvasRenderingContext2D, offsetX: number, offsetY: number): void {
-    const aim = this.getAimState();
-    if (!aim.visible) return;
-    ctx.save();
-    ctx.translate(aim.x - offsetX, aim.y - offsetY);
-    ctx.rotate(aim.angle);
-    ctx.scale(1.1, 1.1);
-    ctx.beginPath();
-    ctx.moveTo(5, 0); ctx.lineTo(-5, -4); ctx.lineTo(-5, 4); ctx.closePath();
-    ctx.fillStyle = "#c9f8ff";
-    ctx.strokeStyle = "#14212b";
-    ctx.lineWidth = 1.5;
-    ctx.lineJoin = "round";
-    ctx.fill(); ctx.stroke();
     ctx.restore();
   }
 
@@ -444,6 +374,13 @@ export class Player extends Entities {
    */
   applyConfig(config: PlayerConfig): void {
     config = parsePlayerConfig(config);
+    const ballistics = { ...this.ballistics };
+    for (const key of Object.keys(ballistics) as (keyof typeof ballistics)[]) {
+      const value = config.shooting?.[key];
+      if (value !== undefined) ballistics[key] = value;
+    }
+    parsePlayerConfig({ shooting: ballistics });
+    this.ballistics = ballistics;
     if (config.bulletWaterDrag) this.bulletWaterDrag = { ...this.bulletWaterDrag, ...config.bulletWaterDrag };
     if (config.movement) this.movement = { ...this.movement, ...config.movement };
     if (config.sprint) {
@@ -491,7 +428,6 @@ export class Player extends Entities {
     // 应用射击属性
     if (config.shooting) {
       if (config.shooting.damage !== undefined) this.damage = config.shooting.damage;
-      if (config.shooting.aimTurnDuration !== undefined) this.aim.aimTurnDuration = config.shooting.aimTurnDuration;
       if (config.shooting.fireRate !== undefined) {
         this.fireRate = config.shooting.fireRate;
       }
@@ -537,7 +473,7 @@ export class Player extends Entities {
       movement: { ...this.movement }, sprint: { ...this.sprint },
       bulletWaterDrag: { ...this.bulletWaterDrag },
       animation: { breathingAmplitude: this.breathingAmplitude, breathingSpeed: this.breathingSpeed },
-      shooting: { ...this.aim, damage: this.damage, fireRate: this.fireRate, bulletSpeed: this.bulletSpeed,
+      shooting: { ...this.ballistics, damage: this.damage, fireRate: this.fireRate, bulletSpeed: this.bulletSpeed,
         maxShootingTime: this.maxShootingTime, maxOverheatCooldownTime: this.maxOverheatCooldownTime },
       ui: { fadeSpeed: this.fadeSpeed },
     };
@@ -719,8 +655,17 @@ export class Player extends Entities {
    * @param damage 子弹伤害值
    */
   shoot(inputDir: Vector2, damage: number = this.damage): void {
+    if (!inputDir || !Number.isFinite(inputDir.x) || !Number.isFinite(inputDir.y) || inputDir.length() === 0) return;
+    const target = inputDir.clone().normalize().scale(this.ballistics.maxRange);
+    this.shootAt(new Vector2(this.x + this.size / 2 + target.x, this.y + this.size / 2 + target.y), damage);
+  }
+
+  /** 发射时冻结世界落点；方向辅助方法和鼠标输入共用热量、散布与碰撞。 */
+  shootAt(target: { x: number; y: number }, damage: number = this.damage): void {
+    if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) return;
+    const inputDir = new Vector2(target.x - this.x - this.size / 2, target.y - this.y - this.size / 2);
     // 验证射击方向
-    if (!inputDir || inputDir.length() === 0) return;
+    if (inputDir.length() <= 1e-6) return;
 
     // 检查是否过热
     if (this.isOverheated) return;
@@ -732,8 +677,9 @@ export class Player extends Entities {
     }
 
     // 检查射击冷却
-    if (this.fireCooldown > 0) return;
-    this.fireCooldown = this.getFireRate(); // 使用修改后的射速
+    if (this.fireCooldown > 1e-9) return;
+    // Preserve a sub-frame remainder without replaying missed shots after a long frame.
+    this.fireCooldown = this.getFireRate() + Math.min(0, this.fireCooldown);
 
     // 减少剩余射击时间
     this.shootingTimeRemaining -= this.getFireRate();
@@ -741,13 +687,21 @@ export class Player extends Entities {
     // 生成子弹
     const bulletPos = new Vector2(this.x + this.size / 2, this.y + this.size / 2);
     // 使用修改后的子弹速度
-    const bulletVel = inputDir.clone().scale(this.getBulletSpeed());
+    const distance = inputDir.length(), spread = this.getRecoilState();
+    const radians = Math.PI / 180;
+    inputDir.x += (Math.random() * 2 - 1) * distance * Math.tan(spread.horizontal * radians);
+    inputDir.y += (Math.random() * 2 - 1) * distance * Math.tan(spread.vertical * radians);
+    const travelDistance = Math.min(inputDir.length(), this.ballistics.maxRange);
+    const direction = inputDir.clone().normalize();
+    const bulletVel = direction.clone().scale(this.getBulletSpeed());
     const bullet = new Bullet(bulletPos, bulletVel, this.getModifiedValue(damage, "damage"),
-      this.particleSystem, this.terrainWaterCoverage.fraction > 1e-6, this.bulletWaterDrag);
+      this.particleSystem, this.terrainWaterCoverage.fraction > 1e-6, this.bulletWaterDrag, travelDistance);
     this.bullets.push(bullet);
+    this.recoil = Math.min(1, this.recoil + this.ballistics.recoilPerShot);
+    this.timeSinceShot = 0;
 
     // 触发射击回调（用于摄像机震动等效果）
-    this.onShootCallback?.(inputDir);
+    this.onShootCallback?.(direction);
 
     // 更新状态
     this.stateMachine.changeState("shooting");
@@ -772,9 +726,11 @@ export class Player extends Entities {
    * @param input 输入系统引用
    * @param map 可选的地图引用，用于碰撞检测
    */
-  update(delta: number, input: Input, map?: TileMap): void {
+  update(delta: number, input: Input, map?: TileMap, aim?: PlayerAimInput): void {
     if (!Number.isFinite(delta) || delta < 0) return;
-    this.updateAim(delta, input);
+    this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y) ? aim : undefined;
+    this.isShooting = !!this.pointerAim?.fire;
+    this.updateRecoil(delta);
     this.updateMovement(delta, input, map);
     this.wadingMap = this.terrainSpeedFactor < 1 - 1e-6 && this.terrainWaterCoverage.fraction > 1e-6 ? map : undefined;
     if (this.wadingMap) {
@@ -799,6 +755,7 @@ export class Player extends Entities {
       // 常规射击冷却
       if (this.fireCooldown > 0) {
         this.fireCooldown -= delta;
+        if (!this.isShooting || delta >= this.getFireRate()) this.fireCooldown = Math.max(0, this.fireCooldown);
       }
 
       // 当玩家停止射击时，缓慢恢复射击时间
@@ -827,9 +784,7 @@ export class Player extends Entities {
     }
 
     // 处理射击逻辑
-    if (this.aimVisible) {
-      this.shoot(this.getLookDirection(input));
-    }
+    if (this.pointerAim?.fire) this.shootAt(this.pointerAim.target);
 
     // 根据当前状态切换状态机状态
     if (this.isShooting) {
@@ -931,7 +886,6 @@ export class Player extends Entities {
   /** Screen-space overlays are drawn after lighting. */
   drawUI(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
     this.drawWadingIndicator(ctx, offsetX, offsetY);
-    this.drawAimPointer(ctx, offsetX, offsetY);
     this.drawCooldownRing(ctx, offsetX, offsetY);
     ctx.save();
     const { healthX: x, healthY: y } = this.getOverlayLayout(offsetX, offsetY);

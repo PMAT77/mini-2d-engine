@@ -11,13 +11,15 @@ const { Vector2 } = load('math/Vector2');
 const { ParticleSystem } = load('objects/ParticleSystem');
 const near = (a, b, tolerance = 1e-7) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b}`);
 const idle = { isKeyDown: () => false };
+const playerAt = (...args) => { const p = new Player(...args); p.applyConfig({ shooting: { spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 } }); return p; };
+const aimRight = p => ({ target: { x: p.x + 1024.5, y: p.y + 24.5 }, fire: true, face: false });
 const empty = () => {
   const map = new TileMap(64, 32, { generateWater: false });
   map.tiles.forEach(row => row.fill('default'));
   return map;
 };
 const shot = (x = 225, y = 225, speed = 800, particles) =>
-  new Bullet(new Vector2(x, y), new Vector2(speed, 0), 100, particles, true);
+  new Bullet(new Vector2(x, y), new Vector2(speed, 0), 100, particles, true, undefined, 10000);
 const center = bullet => bullet.getPosition().x + bullet.getSize() / 2;
 
 test('each water depth applies linear drag and emits one white annihilation burst at its exact stopping point', () => {
@@ -64,8 +66,8 @@ test('bullet footprint weights land and different water depths by their actual c
 test('firing snapshots partial body contact, independently of the bullet footprint and later shooter movement', () => {
   const map = empty();
   map.tiles.forEach(row => row.forEach((_, col) => row[col] = col >= 8 ? 'shallow_water' : 'default'));
-  const wet = new Player(390 - 24.5, 225 - 24.5);
-  wet.update(0, { isKeyDown: key => key === 'ArrowRight' }, map);
+  const wet = playerAt(390 - 24.5, 225 - 24.5);
+  wet.update(0, idle, map, aimRight(wet));
   const wetBullet = wet.getBullets()[0];
   near(center(wetBullet), 390); // Bullet is wholly dry, but the character overlaps water.
   assert.ok(wet.terrainWaterCoverage.fraction > 1e-6 && wet.terrainWaterCoverage.fraction < 1);
@@ -73,14 +75,14 @@ test('firing snapshots partial body contact, independently of the bullet footpri
   wetBullet.update(.1, map);
   assert.ok(wetBullet.velocity.length() < 800);
 
-  const dry = new Player(350 - 24.5, 225 - 24.5);
-  dry.update(0, { isKeyDown: key => key === 'ArrowRight' }, map);
+  const dry = playerAt(350 - 24.5, 225 - 24.5);
+  dry.update(0, idle, map, aimRight(dry));
   const dryBullet = dry.getBullets()[0];
   dry.x = 425; dry.update(0, idle, map);
   dryBullet.update(.3, map);
   near(dryBullet.velocity.length(), 800); near(center(dryBullet), 350 + 240);
 
-  const edge = new Player(375.5 - 24.5, 225 - 24.5); // Only tangent to water.
+  const edge = playerAt(375.5 - 24.5, 225 - 24.5); // Only tangent to water.
   edge.update(0, idle, map); edge.shoot(new Vector2(1, 0));
   const tangentBullet = edge.getBullets()[0]; tangentBullet.update(.2, map);
   near(tangentBullet.velocity.length(), 800);
@@ -109,7 +111,7 @@ test('drag accumulates on re-entry, while dry flight preserves remaining velocit
   const afterSecond = crossing.velocity.length(), secondDryStart = center(crossing);
   crossing.update(.02, map);
   near(crossing.velocity.length(), afterSecond); near(center(crossing) - secondDryStart, afterSecond * .02);
-  const player = new Player(200, 200); player.addModifier('bulletSpeed', .5, 0, true);
+  const player = playerAt(200, 200); player.addModifier('bulletSpeed', .5, 0, true);
   map.tiles.forEach(row => row.fill('water')); player.update(0, idle, map); player.shoot(new Vector2(1, 0));
   const buffed = player.getBullets()[0]; buffed.update(.625, map);
   near(buffed.velocity.length(), player.getBulletSpeed() / 2);
@@ -155,7 +157,7 @@ test('annihilation particles are white, small, fade out and expire through the e
 });
 
 test('per-depth drag edits affect newly fired bullets only, support zero and restore from a detached snapshot', () => {
-  const map = empty(), player = new Player(200, 200), dir = new Vector2(1, 0);
+  const map = empty(), player = playerAt(200, 200), dir = new Vector2(1, 0);
   const initial = player.getConfigSnapshot();
   assert.deepEqual(initial.bulletWaterDrag, { shallow: .4, water: .8, deep: 1.6, ultraDeep: 3.2 });
   // Validate each field through the real player configuration and firing path.

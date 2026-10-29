@@ -67,26 +67,16 @@ try {
     await field('shooting.damage').fill('35'); await field('shooting.bulletSpeed').focus(); // blur commits too
     await edit('shooting.fireRate', 10); await edit('shooting.bulletSpeed', 1000);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getFireRate()), 0.1);
-    assert.equal(await field('shooting.aimTurnDuration').inputValue(), '0.15');
-    await edit('shooting.aimTurnDuration', 0.2);
-    const halfTurn = await page.evaluate(() => {
-      const player = debugTest.scene.player;
-      const right = { isKeyDown: key => key === 'ArrowRight' };
-      const diagonal = { isKeyDown: key => ['ArrowRight', 'ArrowDown'].includes(key) };
-      player.update(0, right); player.update(0, diagonal); player.update(0.1, diagonal);
-      return player.getAimState().angle;
-    });
-    assert.ok(Math.abs(halfTurn - Math.PI / 8) < 1e-8, 'UI duration drives the actual pointer interpolation');
-    await edit('shooting.aimTurnDuration', 0);
-    const instantTurn = await page.evaluate(() => {
-      debugTest.scene.player.update(0, { isKeyDown: key => ['ArrowRight', 'ArrowDown'].includes(key) });
-      return debugTest.scene.player.getAimState().angle;
-    });
-    assert.ok(Math.abs(instantTurn - Math.PI / 4) < 1e-8, 'zero duration snaps to the target');
-    await edit('shooting.aimTurnDuration', -0.1);
-    assert.equal(await field('shooting.aimTurnDuration').getAttribute('aria-invalid'), 'true');
-    assert.equal(await page.evaluate(() => debugTest.scene.player.getConfigSnapshot().shooting.aimTurnDuration), 0);
-    await edit('shooting.aimTurnDuration', 0.2);
+    assert.equal(await field('shooting.aimTurnDuration').count(), 0);
+    await edit('shooting.maxRange', 600);
+    await edit('shooting.spreadHorizontal', 1.2); await edit('shooting.spreadVertical', .8);
+    await edit('shooting.maxSpreadHorizontal', 4); await edit('shooting.maxSpreadVertical', 3);
+    await edit('shooting.recoilPerShot', .3); await edit('shooting.recoilRecoveryDelay', .4); await edit('shooting.recoilRecoveryDuration', 1.2);
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getConfigSnapshot().shooting.maxRange), 600);
+    await edit('shooting.maxSpreadHorizontal', .5);
+    assert.equal(await field('shooting.maxSpreadHorizontal').getAttribute('aria-invalid'), 'true');
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getConfigSnapshot().shooting.maxSpreadHorizontal), 4);
+    await edit('shooting.maxSpreadHorizontal', 4);
     await field('shooting.damage').fill('42');
     await page.evaluate(() => debugTest.advance(0.2));
     assert.equal(await field('shooting.damage').inputValue(), '42', 'refresh must not overwrite a draft');
@@ -111,10 +101,10 @@ try {
     assert.ok(coasting > 0 && coasting < 1000);
     await page.evaluate(() => debugTest.advance(0.4));
 
-    await page.keyboard.down('d'); await page.keyboard.down('ArrowRight');
+    await page.keyboard.down('d'); await page.mouse.down();
     await field('shooting.damage').focus();
-    assert.equal(await page.evaluate(() => debugGame.input.isKeyDown('d') || debugGame.input.isKeyDown('ArrowRight')), false);
-    await page.keyboard.up('d'); await page.keyboard.up('ArrowRight');
+    assert.equal(await page.evaluate(() => debugGame.input.isKeyDown('d') || debugGame.input.getPointerState().leftDown), false);
+    await page.keyboard.up('d'); await page.mouse.up();
     await page.evaluate(() => { debugTest.advance(0.5); debugTest.scene.player.bullets = []; });
     const beforeEditX = await page.evaluate(() => debugTest.scene.player.x);
     await field('shooting.damage').press('ArrowUp'); await page.keyboard.press('w');
@@ -123,10 +113,10 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.getBullets().length), 0);
     await edit('shooting.damage', 42);
     await page.locator('canvas').click({ position: { x: 120, y: 120 } });
-    await page.keyboard.down('ArrowRight'); await page.evaluate(() => debugTest.tick(0.01));
+    await page.mouse.down(); await page.evaluate(() => debugTest.tick(0.01));
     assert.equal(await page.evaluate(() => debugTest.scene.player.getBullets()[0].getDamage()), 42);
-    assert.equal(await page.evaluate(() => debugTest.scene.player.getBullets()[0].velocity.length()), 1000);
-    await page.keyboard.up('ArrowRight');
+    assert.ok(Math.abs(await page.evaluate(() => debugTest.scene.player.getBullets()[0].velocity.length()) - 1000) < 1e-8);
+    await page.mouse.up();
 
     await edit('sprint.maxStamina', 200); await edit('stamina', 0);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getDebugState().exhausted), true);
@@ -191,7 +181,7 @@ try {
       const ratio=bullet.velocity.length()/p.getBulletSpeed();
       scene.map.tiles.forEach(row=>row.fill('default'));p.bullets=[];p.update(0,{isKeyDown:()=>false},scene.map);return ratio;
     });
-    assert.equal(zeroSpeed,1);
+    assert.ok(Math.abs(zeroSpeed - 1) < 1e-8, 'zero water drag preserves speed for arbitrary mouse shot angles');
     await panel.locator('section').filter({has:page.getByRole('heading',{name:'子弹水体阻力',exact:true})}).scrollIntoViewIfNeeded();
     await page.screenshot({path:join(output,`debug-water-drag-dpr-${dpr}.png`)});
 
@@ -199,7 +189,8 @@ try {
     await page.getByRole('button', { name: '恢复初始参数', exact: true }).click();
     assert.equal(await field('base.maxSpeed').inputValue(), '400');
     assert.equal(await field('shooting.damage').inputValue(), '10');
-    assert.equal(await field('shooting.aimTurnDuration').inputValue(), '0.15');
+    assert.equal(await field('shooting.maxRange').inputValue(), '1000');
+    assert.equal(await field('shooting.spreadHorizontal').inputValue(), '0.6');
     for(const [key,value] of [['shallow',40],['water',80],['deep',160],['ultraDeep',320]]) assert.equal(await field(`bulletWaterDrag.${key}`).inputValue(),String(value));
     assert.equal(await page.evaluate(() => debugTest.scene.player.getMaxSpeed()), 600);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getHealth()), 100);

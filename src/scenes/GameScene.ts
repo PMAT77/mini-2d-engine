@@ -7,7 +7,7 @@ import { solidPath } from '../map/SolidTerrain';
 import { TileTypeId, getTileType } from "../map/TileType";
 import { Vector2 } from "../math/Vector2";
 import { ParticleSystem } from "../objects/ParticleSystem";
-import { Player } from "../objects/Player";
+import { Player, PlayerAimInput } from "../objects/Player";
 import { PlayerConfig } from "../objects/PlayerConfig";
 import { PlayerDebugPanel } from "../ui/PlayerDebugPanel";
 
@@ -33,6 +33,7 @@ export class GameScene extends Scene {
   private camera!: Camera;
   private worldCanvas!: HTMLCanvasElement;
   private worldContext!: CanvasRenderingContext2D;
+  private displayedView?: { x: number; y: number; width: number; height: number };
   private assetLoader!: AssetLoader;
   private configLoader!: ConfigLoader;
   private loaded: boolean = false;
@@ -193,6 +194,7 @@ export class GameScene extends Scene {
    * 处理窗口大小变化的回调函数
    */
   private handleResize(): void {
+    this.displayedView = undefined;
     this.resizeCamera();
     this.initLightingSystem();
   }
@@ -463,6 +465,7 @@ export class GameScene extends Scene {
       if (!this.active) return;
       this.resizeCamera();
       this.initLightingSystem();
+      this.game.input.setPointerEnabled(true);
       this.debugPanel ??= new PlayerDebugPanel(this.player, this.game.input, this.game.renderer.ctx.canvas,
         this.playerLight, this.initialPlayerConfig, this.initialPlayerLight);
       window.addEventListener('resize', this.resizeListener);
@@ -473,6 +476,9 @@ export class GameScene extends Scene {
 
   onExit(): void {
     this.active = false;
+    this.game?.input?.setPointerEnabled(false);
+    this.game?.input?.clear();
+    this.displayedView = undefined;
     this.debugPanel?.dispose();
     this.debugPanel = undefined;
     window.removeEventListener('resize', this.resizeListener);
@@ -490,7 +496,7 @@ export class GameScene extends Scene {
     if (!this.loaded) return;
 
     // 更新玩家状态
-    this.player.update(delta, input, this.map);
+    this.player.update(delta, input, this.map, this.getPointerAim(input));
 
     // 更新粒子系统
     this.particleSystem.update(delta);
@@ -546,6 +552,7 @@ export class GameScene extends Scene {
 
     // 获取包含震动偏移的相机位置
     const cameraOffset = this.camera.getOffset();
+    this.displayedView = { ...cameraOffset, width: ctx.canvas.width, height: ctx.canvas.height };
 
     // 绘制地图，使用带震动偏移的相机位置
     this.map.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height, this.deltaSinceLastFrame);
@@ -605,6 +612,52 @@ export class GameScene extends Scene {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillText(`黄金 ${this.player.getGold()}`, 46, 32);
+    ctx.restore();
+    this.drawCrosshair(ctx);
+  }
+
+  /** Invert the last displayed world transform, including zoom, DPR and camera shake. */
+  screenToWorld(clientX: number, clientY: number): { x: number; y: number } | undefined {
+    if (!this.displayedView) return undefined;
+    const rect = this.getCanvasViewport();
+    if (rect.width <= 0 || rect.height <= 0) return undefined;
+    return { x: this.displayedView.x + (clientX - rect.left) * this.displayedView.width / rect.width,
+      y: this.displayedView.y + (clientY - rect.top) * this.displayedView.height / rect.height };
+  }
+
+  /** Canvas borders are outside the displayed bitmap and must not scale the mouse coordinates. */
+  private getCanvasViewport() {
+    const canvas = this.game.renderer.ctx.canvas, rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.offsetWidth ? rect.width / canvas.offsetWidth : 1;
+    const scaleY = canvas.offsetHeight ? rect.height / canvas.offsetHeight : 1;
+    return { left: rect.left + canvas.clientLeft * scaleX, top: rect.top + canvas.clientTop * scaleY,
+      width: canvas.clientWidth * scaleX, height: canvas.clientHeight * scaleY };
+  }
+
+  getPointerAim(input: Input): PlayerAimInput | undefined {
+    const pointer = input.consumePointerState?.();
+    if (!pointer?.active) return undefined;
+    const target = this.screenToWorld(pointer.clientX, pointer.clientY);
+    return target ? { target, fire: pointer.leftDown || pointer.leftPressed, face: pointer.rightDown } : undefined;
+  }
+
+  private drawCrosshair(ctx: CanvasRenderingContext2D): void {
+    const pointer = this.game.input.getPointerState?.();
+    if (!pointer?.active) return;
+    const rect = this.getCanvasViewport();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const x = pointer.clientX - rect.left, y = pointer.clientY - rect.top;
+    const gap = 4 + this.player.getRecoilState().intensity * 8;
+    ctx.save();
+    ctx.setTransform(ctx.canvas.width / rect.width, 0, 0, ctx.canvas.height / rect.height, 0, 0);
+    ctx.beginPath();
+    ctx.moveTo(x - gap - 7, y); ctx.lineTo(x - gap, y);
+    ctx.moveTo(x + gap, y); ctx.lineTo(x + gap + 7, y);
+    ctx.moveTo(x, y - gap - 7); ctx.lineTo(x, y - gap);
+    ctx.moveTo(x, y + gap); ctx.lineTo(x, y + gap + 7);
+    ctx.strokeStyle = '#101820'; ctx.lineWidth = 3.5; ctx.stroke();
+    ctx.strokeStyle = '#d8faff'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#d8faff'; ctx.fillRect(x - 1, y - 1, 2, 2);
     ctx.restore();
   }
 

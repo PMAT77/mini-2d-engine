@@ -11,6 +11,13 @@ export function parsePlayerCollider(value: unknown): CircleShape {
 export interface BulletWaterDrag { shallow: number; water: number; deep: number; ultraDeep: number; }
 export const DEFAULT_BULLET_WATER_DRAG: BulletWaterDrag = { shallow: 0.4, water: 0.8, deep: 1.6, ultraDeep: 3.2 };
 
+export const DEFAULT_BALLISTICS = {
+  maxRange: 1000,
+  spreadHorizontal: 0.6, spreadVertical: 0.4,
+  maxSpreadHorizontal: 3, maxSpreadVertical: 2,
+  recoilPerShot: 0.18, recoilRecoveryDelay: 0.25, recoilRecoveryDuration: 0.8,
+};
+
 export interface PlayerConfig {
   bulletWaterDrag?: Partial<BulletWaterDrag>;
   collider?: CircleShape;
@@ -25,17 +32,17 @@ export interface PlayerConfig {
     regenPerSecond?: number; regenDelay?: number; restartThreshold?: number;
   };
   animation?: { breathingAmplitude?: number; breathingSpeed?: number };
-  shooting?: {
+  shooting?: Partial<typeof DEFAULT_BALLISTICS> & {
     damage?: number; fireRate?: number; bulletSpeed?: number; maxShootingTime?: number; maxOverheatCooldownTime?: number;
+    /** @deprecated Accepted for old files; mouse aiming is immediate. */
     aimTurnDuration?: number;
-    /** @deprecated Accepted for old files; a held aiming direction no longer times out. */
+    /** @deprecated Accepted for old files; mouse aiming never times out. */
     aimContinuityWindow?: number;
   };
   ui?: { fadeSpeed?: number };
 }
 
 export const DEFAULT_MOVEMENT = { startSpeedRatio: 0.7, startupDuration: 0.08, turnDamping: 0.012, stopDuration: 0.2 };
-export const DEFAULT_AIM = { aimTurnDuration: 0.15 };
 export const DEFAULT_SPRINT = {
   speedMultiplier: 1.6, rampDuration: 0.16, maxStamina: 100, drainPerSecond: 25,
   regenPerSecond: 35, regenDelay: 0.6, restartThreshold: 0.15,
@@ -48,7 +55,7 @@ export function parsePlayerConfig(value: unknown): PlayerConfig {
     movement: Object.keys(DEFAULT_MOVEMENT),
     sprint: Object.keys(DEFAULT_SPRINT),
     animation: ["breathingAmplitude", "breathingSpeed"],
-    shooting: ["damage", "fireRate", "bulletSpeed", "maxShootingTime", "maxOverheatCooldownTime", "aimContinuityWindow", ...Object.keys(DEFAULT_AIM)],
+    shooting: ["damage", "fireRate", "bulletSpeed", "maxShootingTime", "maxOverheatCooldownTime", "aimContinuityWindow", "aimTurnDuration", ...Object.keys(DEFAULT_BALLISTICS)],
     ui: ["fadeSpeed"],
     bulletWaterDrag: Object.keys(DEFAULT_BULLET_WATER_DRAG),
   };
@@ -62,12 +69,22 @@ export function parsePlayerConfig(value: unknown): PlayerConfig {
       if (key === "rotationStrategy") {
         if (!["cw", "ccw", "auto"].includes(field as string)) throw new Error("rotationStrategy 必须是 cw、ccw 或 auto");
       } else {
-        const allowZero = group === "bulletWaterDrag" || ["maxSpeed", "breathingAmplitude", "breathingSpeed", "nonlinearFactor", "startSpeedRatio", "startupDuration", "turnDamping", "stopDuration", "rampDuration", "regenDelay", "aimTurnDuration"].includes(key);
+        const allowZero = group === "bulletWaterDrag" || ["maxSpeed", "breathingAmplitude", "breathingSpeed", "nonlinearFactor", "startSpeedRatio", "startupDuration", "turnDamping", "stopDuration", "rampDuration", "regenDelay", "aimTurnDuration", "spreadHorizontal", "spreadVertical", "maxSpreadHorizontal", "maxSpreadVertical", "recoilPerShot", "recoilRecoveryDelay"].includes(key);
         if (typeof field !== "number" || !Number.isFinite(field) || (allowZero ? field < 0 : field <= 0)) {
           throw new Error(`无效配置值: ${group}.${key} 必须是${allowZero ? "非负" : "正"}有限数值`);
         }
         if ((key === "startSpeedRatio" || key === "restartThreshold") && field > 1) throw new Error(`${group}.${key} 不能大于 1`);
         if (key === "speedMultiplier" && field <= 1) throw new Error("sprint.speedMultiplier 必须大于 1");
+        if ((key.includes('Spread') || key.startsWith('spread')) && field >= 45) throw new Error(`${group}.${key} 必须小于 45 度`);
+        if (key === 'recoilPerShot' && field > 1) throw new Error('recoilPerShot 不能大于 1');
+      }
+    }
+  }
+  const shooting = value.shooting as PlayerConfig['shooting'];
+  if (shooting) {
+    for (const [base, max] of [['spreadHorizontal', 'maxSpreadHorizontal'], ['spreadVertical', 'maxSpreadVertical']] as const) {
+      if (shooting[base] !== undefined && shooting[max] !== undefined && shooting[max]! < shooting[base]!) {
+        throw new Error(`${max} 不能小于 ${base}`);
       }
     }
   }

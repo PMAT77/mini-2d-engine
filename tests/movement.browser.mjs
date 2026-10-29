@@ -54,7 +54,8 @@ try {
         advance(seconds, keys = []) {
           for (let left = seconds; left > 1e-9;) {
             const delta = Math.min(left, 1 / 60);
-            scene.player.update(delta, { isKeyDown: k => keys.includes(k) }, scene.map); left -= delta;
+            scene.player.update(delta, { isKeyDown: k => keys.includes(k) }, scene.map,
+              keys.includes('MouseLeft') ? { target: { x: scene.player.x + 24.5, y: scene.player.y - 975.5 }, fire: true, face: false } : undefined); left -= delta;
           }
           this.render(); return this.stats();
         },
@@ -62,11 +63,13 @@ try {
           const p = scene.player;
           return { x: p.x, y: p.y, speed: p.getVelocity().length(), stamina: p.getStamina(), sprinting: p.getIsSprinting(), heat: p.getHeatPercentage(), overheated: p.getIsOverheated() };
         },
-        pixel(x, y) { return [...game.renderer.ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data]; },
+        pixel(x, y) { return [...game.renderer.ctx.getImageData(Math.floor((x + .5) * game.renderer.width / scene.worldCanvas.width), Math.floor((y + .5) * game.renderer.height / scene.worldCanvas.height), 1, 1).data]; },
         ring(angle) {
           const p = scene.player;
           const { heatX, heatY } = p.getOverlayLayout(scene.camera.x, scene.camera.y);
-          return this.pixel(heatX + 11 * Math.cos(angle), heatY + 11 * Math.sin(angle));
+          // A thin circle is filtered by the existing 0.85 world zoom; sample its local footprint.
+          const samples = [-1, 0, 1].flatMap(dx => [-1, 0, 1].map(dy => this.pixel(heatX + 11 * Math.cos(angle) + dx, heatY + 11 * Math.sin(angle) + dy)));
+          return samples.sort((a, b) => Math.max(...b.slice(0, 3)) - Math.max(...a.slice(0, 3)))[0];
         },
       };
       t.reset();
@@ -120,7 +123,7 @@ try {
 
     for (const [ox, oy] of [[0, 0], [37.25, 19.75]]) {
       const heat = await page.evaluate(([ox, oy]) => {
-        const t = movementTest; t.reset(); t.advance(1.4, ['ArrowUp']);
+        const t = movementTest; t.reset(); t.advance(1.4, ['MouseLeft']);
         t.scene.camera.x = ox; t.scene.camera.y = oy; t.render();
         const p = t.scene.player;
         return { stats: t.stats(), right: t.ring(0), bottom: t.ring(Math.PI / 2),
@@ -135,7 +138,7 @@ try {
     if (dpr === 1) await page.screenshot({ path: join(output, 'movement-heat.png'), clip: { x: 100, y: 150, width: 340, height: 260 } });
     const overheat = await page.evaluate(() => {
       const t = movementTest; t.reset();
-      for (let i = 0; i < 300 && !t.scene.player.getIsOverheated(); i++) t.advance(1 / 60, ['ArrowUp']);
+      for (let i = 0; i < 300 && !t.scene.player.getIsOverheated(); i++) t.advance(1 / 60, ['MouseLeft']);
       t.render(); return { stats: t.stats(), right: t.ring(0) };
     });
     assert.equal(overheat.stats.overheated, true); assert.ok(overheat.right[0] > 220 && overheat.right[1] < 150);
@@ -150,10 +153,10 @@ try {
       const t = movementTest; t.reset(); t.advance(4, ['d', 'Shift']);
       t.scene.player.x = 200; t.scene.player.y = 250; t.render();
       const stats = t.stats(), p = t.scene.player;
-      return { stats, border: t.pixel(p.x + 20, p.getOverlayLayout().healthY + 9) };
+      return { stats, border: [-1, 0, 1].map(dy => t.pixel(p.x + 20, p.getOverlayLayout().healthY + 9 + dy)) };
     });
     assert.equal(exhausted.stats.stamina, 0); assert.equal(exhausted.stats.sprinting, false);
-    assert.ok(exhausted.border[0] > 100, 'exhausted stamina retains a visible warning border');
+    assert.ok(exhausted.border.some(([r, g, b]) => r > 100 && r > g && g > b), 'exhausted stamina retains a visible orange warning border after zoom filtering');
     if (dpr === 1) await page.screenshot({ path: join(output, 'movement-exhausted.png'), clip: { x: 100, y: 150, width: 340, height: 260 } });
     assert.equal(errors.length, 0, errors.join('\n'));
     await context.close();

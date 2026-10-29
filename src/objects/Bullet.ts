@@ -3,7 +3,7 @@ import { Vector2 } from "../math/Vector2";
 import { ParticleSystem } from "./ParticleSystem";
 import { circleCollider } from "../physics/Collider";
 import { TileTypeId } from "../map/TileType";
-import { BulletWaterDrag, DEFAULT_BULLET_WATER_DRAG } from "./PlayerConfig";
+import { BulletWaterDrag, DEFAULT_BULLET_WATER_DRAG, DEFAULT_BALLISTICS } from "./PlayerConfig";
 
 const WATER_DRAG_KEYS: Partial<Record<TileTypeId, keyof BulletWaterDrag>> = {
   [TileTypeId.SHALLOW_WATER]: 'shallow',
@@ -49,6 +49,7 @@ export class Bullet {
    * @param particleSystem 可选的粒子系统引用
    * @param waterDragEnabled 发射时角色涉水，固定该颗子弹的水体阻力资格
    * @param waterDrag 各水深每秒扣除的发射速度比例，发射时复制
+   * @param remainingDistance 本次发射允许飞行的距离，按实际位移扣除
    */
   constructor(
     pos: Vector2,
@@ -56,8 +57,10 @@ export class Bullet {
     damage = 10,
     particleSystem?: ParticleSystem,
     private readonly waterDragEnabled = false,
-    waterDrag: Partial<BulletWaterDrag> = DEFAULT_BULLET_WATER_DRAG
+    waterDrag: Partial<BulletWaterDrag> = DEFAULT_BULLET_WATER_DRAG,
+    private remainingDistance = DEFAULT_BALLISTICS.maxRange
   ) {
+    if (!Number.isFinite(remainingDistance) || remainingDistance < 0) throw new Error('子弹飞行距离必须是非负有限数值');
     // 克隆位置向量以避免引用同一对象
     this.pos = pos.clone();
 
@@ -128,10 +131,12 @@ export class Bullet {
 
   /** 按当前速度推进给定等效时间，共用首次命中和出界处理。 */
   private move(delta: number, map?: TileMap): void {
-
-    // 计算新的位置
-    const newX = this.pos.x + this.velocity.x * delta;
-    const newY = this.pos.y + this.velocity.y * delta;
+    const requestedDistance = this.velocity.length() * delta;
+    const distance = Math.min(requestedDistance, this.remainingDistance);
+    const fraction = requestedDistance > 0 ? distance / requestedDistance : 0;
+    // Clip the swept segment before collision, so nothing beyond the endpoint can be hit.
+    const newX = this.pos.x + this.velocity.x * delta * fraction;
+    const newY = this.pos.y + this.velocity.y * delta * fraction;
 
     // 检查是否与地图发生碰撞
     if (map) {
@@ -181,6 +186,8 @@ export class Bullet {
     // 更新子弹位置
     this.pos.x = newX;
     this.pos.y = newY;
+    this.remainingDistance = Math.max(0, this.remainingDistance - distance);
+    if (this.remainingDistance <= 1e-8) this.annihilate();
   }
 
   /**

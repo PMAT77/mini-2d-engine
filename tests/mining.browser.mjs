@@ -45,14 +45,19 @@ try {
         render() { scene.camera.x = 37.25; scene.camera.y = 19.75; scene.draw(game.renderer.ctx); }
       };
     });
-    await page.keyboard.down('ArrowRight');
+    const mouseTarget = await page.evaluate(() => {
+      stagedMining.scene.player.applyConfig({ shooting: { spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 } });
+      stagedMining.render(); const s = stagedMining.scene, v = s.displayedView, r = s.getCanvasViewport();
+      return { x: r.left + (325 - v.x) * r.width / v.width, y: r.top + (225 - v.y) * r.height / v.height };
+    });
+    await page.mouse.move(mouseTarget.x, mouseTarget.y); await page.mouse.down();
     assert.deepEqual(await page.evaluate(() => stagedMining.untilHits(3)), [2, 2, 4]);
-    await page.keyboard.up('ArrowRight');
+    await page.mouse.up();
     await page.evaluate(() => stagedMining.advance(0.12));
     await page.screenshot({ path: `${output}/mining-partial-dpr${dpr}.png` });
-    await page.keyboard.down('ArrowRight');
+    await page.mouse.move(mouseTarget.x, mouseTarget.y); await page.mouse.down();
     assert.deepEqual(await page.evaluate(() => stagedMining.untilHits(10)), [2, 2, 4, 4, 6, 6, 8, 8, 10, 20]);
-    await page.keyboard.up('ArrowRight');
+    await page.mouse.up();
     await page.evaluate(() => stagedMining.advance(0.7));
     assert.equal(await page.evaluate(() => stagedMining.safe), true);
     await page.screenshot({ path: `${output}/mining-destroyed-dpr${dpr}.png` });
@@ -86,7 +91,7 @@ try {
       scene.player.x = scene.player.y = 200;
       scene.playerLight.setPosition(new (scene.player.getVelocity().constructor)(224.5, 224.5));
       scene.camera.x = 37.25; scene.camera.y = 19.75;
-      const ctx = game.renderer.ctx;
+      const ctx = scene.worldContext;
       const read = (col = 6, row = 4) => ctx.getImageData(Math.round(col * 50 - scene.camera.x), Math.round(row * 50 - scene.camera.y), 50, 50).data;
       const mask=document.createElement('canvas');mask.width=mask.height=50;
       const maskCtx=mask.getContext('2d',{willReadFrequently:true});maskCtx.beginPath();
@@ -107,7 +112,7 @@ try {
         for (let i = 0; i < a.length; i += 4) if (interior[i/4] && (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2])) pixels.push(i / 4);
         return pixels;
       };
-      const render = () => scene.draw(ctx);
+      const render = () => scene.draw(miningGame.renderer.ctx);
       // Settle Chromium's readback fallback before comparing antialiased contour pixels.
       for(let i=0;i<6;i++){render();read();}
       render();
@@ -177,7 +182,7 @@ try {
         const Vector2 = scene.player.getVelocity().constructor;
         scene.playerLight.setPosition(new Vector2(scene.player.x + scene.player.getSize() / 2, 304));
         scene.camera.x = 37.25; scene.camera.y = 19.75;
-        const ctx = game.renderer.ctx;
+        const ctx = scene.worldContext;
         const sample = (x, y) => {
           const rgb = ctx.getImageData(Math.round(x - scene.camera.x) - 2, Math.round(y - scene.camera.y) - 2, 5, 5).data;
           const luminance = [];
@@ -185,12 +190,12 @@ try {
           // A floating sparkle can cross one pixel of the shadow; compare the ground patch.
           return luminance.sort((a, b) => a - b)[12];
         };
-        scene.goldPickups = []; scene.draw(ctx);
+        scene.goldPickups = []; scene.draw(miningGame.renderer.ctx);
         const shadowX = side === 'left' ? 412 : 396;
         const baseline = sample(shadowX, 304);
         const piece = new GoldPickup(400, 300, 400, 300);
         piece.glowPhase = 0.4; piece.update(1);
-        scene.goldPickups = [piece]; scene.draw(ctx);
+        scene.goldPickups = [piece]; scene.draw(miningGame.renderer.ctx);
         const shadow = sample(shadowX, 304);
         const litSide = sample(side === 'left' ? 396 : 412, 304);
         // Test the final scene, including multiply lighting and the additive loot aura.
@@ -200,7 +205,7 @@ try {
         const neighborX = side === 'left' ? 414 : 386;
         const neighbor = new GoldPickup(neighborX, 300, neighborX, 300);
         neighbor.glowPhase = 0.4; neighbor.update(1);
-        scene.goldPickups.push(neighbor); scene.draw(ctx);
+        scene.goldPickups.push(neighbor); scene.draw(miningGame.renderer.ctx);
         const crowdedShadow = sample(shadowX, 304);
         return { baseline, shadow, litSide, nearEnd, beyond, crowdedShadow };
       }, side);
@@ -212,7 +217,7 @@ try {
       assert.ok(result.beyond > result.nearEnd, 'shadow must end close to the gold');
       const topChanges = await page.evaluate(async side => {
         const { GoldPickup } = await import('/src/objects/GoldPickup.ts');
-        const scene = miningGame.sceneManager.getCurrentScene(), ctx = miningGame.renderer.ctx;
+        const scene = miningGame.sceneManager.getCurrentScene(), ctx = scene.worldContext;
         const col = side === 'left' ? 9 : 7;
         const x = side === 'left' ? 440 : 402;
         const piece = new GoldPickup(x, 320, x, 320);
@@ -224,9 +229,9 @@ try {
         for (const type of ['wall', 'mineral']) {
           scene.map.tiles[6][col] = type;
           const shadow = piece.drawShadow;
-          piece.drawShadow = () => {}; scene.draw(ctx);
+          piece.drawShadow = () => {}; scene.draw(miningGame.renderer.ctx);
           const before = ctx.getImageData(Math.round(col * 50 - scene.camera.x), Math.round(300 - scene.camera.y), 50, 50).data;
-          piece.drawShadow = shadow; scene.draw(ctx);
+          piece.drawShadow = shadow; scene.draw(miningGame.renderer.ctx);
           const after = ctx.getImageData(Math.round(col * 50 - scene.camera.x), Math.round(300 - scene.camera.y), 50, 50).data;
           const mx=scene.camera.x+Math.round(col*50-scene.camera.x),my=scene.camera.y+Math.round(300-scene.camera.y);
           changed[type] = after.reduce((count, value, i) => {
