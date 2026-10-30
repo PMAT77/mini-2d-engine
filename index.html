@@ -19,6 +19,25 @@
         background: #fff;
         border: 2px solid #333;
       }
+      /* 对局内隐藏系统指针，画面只留准星；调试面板是操作界面，自己用回可见指针。 */
+      body.crosshair-active,
+      body.crosshair-active canvas {
+        cursor: none;
+      }
+      /* 游戏内按 Escape 唤出系统鼠标，便于脱离准星操作。 */
+      body.cursor-visible,
+      body.cursor-visible canvas {
+        cursor: default !important;
+      }
+      body.crosshair-active .player-debug button {
+        cursor: pointer;
+      }
+      body.crosshair-active .player-debug .debug-modal,
+      body.crosshair-active .player-debug .debug-overlay,
+      body.crosshair-active .player-debug input,
+      body.crosshair-active .player-debug select {
+        cursor: auto;
+      }
     </style>
   </head>
   <body>

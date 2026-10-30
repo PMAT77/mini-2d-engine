@@ -89,6 +89,20 @@ test('随机起播从采样内部的随机位置开始，默认仍从头播', ()
   assert.equal(first.currentTime, 0, '不开随机时回到开头');
 }));
 
+test('指定起播点时从对应秒数开始，超出时长夹在采样内部', () => withAudio(() => {
+  const sfx = new SoundPlayer();
+  sfx.play('/gun.wav', 0.5, 1, { count: 1, startAt: 0.55 });
+  const [clip] = FakeAudio.instances;
+  assert.equal(clip.currentTime, 0, '时长还没读到时从头播，不冒险跳播');
+  clip.duration = 3;
+  sfx.play('/gun.wav', 0.5, 1, { count: 1, startAt: 0.55 });
+  assert.ok(Math.abs(clip.currentTime - 0.55) < 1e-9, `应从 0.55 秒起播，实际 ${clip.currentTime}`);
+  sfx.play('/gun.wav', 0.5, 1, { count: 1, startAt: 99 });
+  assert.ok(clip.currentTime > 2.9 && clip.currentTime < 3, '超界时夹到采样末尾前 0.01 秒');
+  sfx.play('/gun.wav', 0.5, 1, { count: 1, startAt: -2 });
+  assert.equal(clip.currentTime, 0, '负数按从头播处理');
+}));
+
 test('一次性音效的句柄能持续改音量，声部被复用后旧句柄失效', () => withAudio(() => {
   const sfx = new SoundPlayer();
   const handle = sfx.play('/cluck.wav', 0.4, 1, { count: 1 });

@@ -7,6 +7,8 @@ const load = path => require(join(process.env.TEST_BUILD_DIR, path + '.js'));
 const { Player } = load('objects/Player');
 const { Vector2 } = load('math/Vector2');
 const { parsePlayerConfig } = load('objects/PlayerConfig');
+const { DEFAULT_GRAPHICS_CONFIG, cloneGraphicsConfig, parseGraphicsConfig } = load('core/GraphicsConfig');
+const { DEFAULT_AUDIO_CONFIG, cloneAudioConfig, parseAudioConfig } = load('core/AudioConfig');
 const { Input } = load('core/Input');
 const idle = { isKeyDown: () => false };
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-8, `${a} != ${b}`);
@@ -122,4 +124,36 @@ test('keyboard ownership clears held movement and aim and ignores game keys unti
   down('KeyW'); down('ArrowUp'); assert.equal(input.isKeyDown('w'), false);
   input.setBlocked(false); assert.equal(input.isKeyDown('w'), false);
   down('KeyW'); assert.equal(input.isKeyDown('w'), true);
+});
+
+test('graphics and audio configs merge defaults and reject invalid fields', () => {
+  assert.deepEqual(parseGraphicsConfig({}), DEFAULT_GRAPHICS_CONFIG);
+  assert.deepEqual(parseGraphicsConfig({}).camera, { zoom: 0.85 });
+  const partial = parseGraphicsConfig({ camera: { zoom: 1.2 }, ambient: { color: '#aabbcc' } });
+  assert.equal(partial.camera.zoom, 1.2);
+  assert.equal(partial.ambient.color, '#AABBCC', 'colors are normalized');
+  assert.equal(partial.playerLight.radius, 100, 'untouched fields keep their defaults');
+  for (const bad of [
+    { camera: { zoom: 0.2 } }, { camera: { zoom: 3 } }, { unknown: {} },
+    { ambient: { color: '#fff' } }, { flashlight: { angle: 0 } }, { flashlight: { angle: 181 } },
+    { flashlight: { softness: 0.9 } }, { fog: { range: 0 } },
+  ]) assert.throws(() => parseGraphicsConfig(bad), JSON.stringify(bad));
+  assert.throws(() => parseGraphicsConfig({ camera: { foo: 1 } }));
+  assert.throws(() => parseGraphicsConfig(null));
+
+  assert.deepEqual(parseAudioConfig({}), DEFAULT_AUDIO_CONFIG);
+  const quiet = parseAudioConfig({ master: 0, chicken: { range: 800 } });
+  assert.equal(quiet.master, 0);
+  assert.equal(quiet.chicken.range, 800);
+  assert.equal(quiet.weapon.primaryVolume, 0.55, 'untouched volumes keep their defaults');
+  for (const bad of [{ master: -0.1 }, { master: 1.1 }, { unknown: 1 }, { chicken: { range: -1 } }, { chicken: { minAttenuation: 2 } }]) {
+    assert.throws(() => parseAudioConfig(bad), JSON.stringify(bad));
+  }
+
+  const graphics = cloneGraphicsConfig();
+  graphics.camera.zoom = 1.5;
+  assert.equal(DEFAULT_GRAPHICS_CONFIG.camera.zoom, 0.85, 'clone does not alias defaults');
+  const audio = cloneAudioConfig();
+  audio.master = 0.3;
+  assert.equal(DEFAULT_AUDIO_CONFIG.master, 1);
 });

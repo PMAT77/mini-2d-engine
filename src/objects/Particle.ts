@@ -167,6 +167,28 @@ export class Particle {
     // 设置尺寸衰减
     this.sizeDecay = this.size / life;
   }
+
+  /**
+   * 就地重置（对象池热路径）：不分配 Vector2，随机调用顺序与 {@link reset} 一致，
+   * 因此不会改变依赖 Math.random 序列的既有行为。
+   */
+  setState(x: number, y: number, vx: number, vy: number, size: number, life: number, color: string): void {
+    this.pos.x = x;
+    this.pos.y = y;
+    this.velocity.x = vx;
+    this.velocity.y = vy;
+    this.size = size;
+    this.initialSize = size;
+    this.life = life;
+    this.maxLife = life;
+    this.color = color;
+    this.isActive = true;
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotationSpeed = (Math.random() - 0.5) * 10;
+    this.alpha = 1;
+    this.alphaDecay = 1 / life;
+    this.sizeDecay = this.size / life;
+  }
   // 添加getter方法
   getColor(): string { return this.color; }
   getPosition(): Vector2 { return this.pos; }

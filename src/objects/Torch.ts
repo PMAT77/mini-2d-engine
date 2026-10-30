@@ -4,15 +4,60 @@ import { TileTypeId } from '../map/TileType';
 import { Vector2 } from '../math/Vector2';
 import { rectangleCollider } from '../physics/Collider';
 
-/** 永久的可穿行装饰：只绘制和发光，不注册碰撞体或生命值。 */
+/** 可穿行的装饰：只绘制和发光，不注册碰撞体或生命值；被瞄准的子弹打中火苗后会永久熄灭。 */
 export class Torch {
+  /** 火苗核心的命中半径：子弹必须真的穿过火苗，擦过火把占地不算。 */
+  static readonly HIT_RADIUS = 7;
+
+  /** 准星覆盖火把的半径：开火时准星在这个圆内，这一枪才算瞄准了火把。 */
+  static readonly AIM_RADIUS = 10;
+
   readonly light: LightSource;
   private time: number;
+  private lit = true;
 
   constructor(readonly x: number, readonly y: number, phase = 0) {
     this.time = phase;
     this.light = new LightSource(new Vector2(x, y), 180, '#FFAD55', 1, 4);
     this.light.groundOnly = true;
+  }
+
+  isLit(): boolean {
+    return this.lit;
+  }
+
+  /** 准星点是否落在火把轮廓内；熄灭的火把不再是可瞄准的目标。 */
+  isAimedAt(x: number, y: number): boolean {
+    return this.lit && Math.hypot(x - this.x, y - this.y) <= Torch.AIM_RADIUS;
+  }
+
+  /**
+   * 返回子弹位移线段与火苗核心的最早交点比例（0–1），未命中返回 null。
+   * 判定沿用子弹对小鸡的圆-线段检测，碰撞圆以火苗中心为圆心。
+   */
+  hitTestSegment(x0: number, y0: number, x1: number, y1: number, radius = 0): number | null {
+    if (!this.lit) return null;
+    const cx = this.x, cy = this.y - 2;
+    const dx = x1 - x0, dy = y1 - y0;
+    const fx = x0 - cx, fy = y0 - cy;
+    const combined = Torch.HIT_RADIUS + Math.max(0, radius);
+    const a = dx * dx + dy * dy;
+    if (a <= 1e-12) return fx * fx + fy * fy <= combined * combined ? 0 : null;
+    if (fx * fx + fy * fy <= combined * combined) return 0;
+    const b = 2 * (fx * dx + fy * dy);
+    const c = fx * fx + fy * fy - combined * combined;
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant < 0) return null;
+    const fraction = (-b - Math.sqrt(discriminant)) / (2 * a);
+    return fraction >= 0 && fraction <= 1 ? fraction : null;
+  }
+
+  /** 打灭火把：已经熄灭时返回 false，避免重复移除光源。 */
+  extinguish(): boolean {
+    if (!this.lit) return false;
+    this.lit = false;
+    this.light.setActive(false);
+    return true;
   }
 
   /** 只贴着墙放：以瓦片计，2 格内必须有墙体，火把才不会孤零零立在旷野。 */
@@ -48,6 +93,8 @@ export class Torch {
   }
 
   update(delta: number): void {
+    // 熄灭后不再晃动灯焰，也不调整已经关闭的光源。
+    if (!this.lit) return;
     this.time += delta;
     // 两个慢周期叠出偶发阵风，平方包络让光源平滑起伏、归位。
     const gust = Math.max(0, (Math.sin(this.time * 0.9) + Math.sin(this.time * 1.7) * 0.35 - 0.6) / 0.75);
@@ -68,10 +115,20 @@ export class Torch {
     ctx.beginPath(); ctx.ellipse(x + 1, y + 8, 8, 3, 0, 0, Math.PI * 2); ctx.fill();
 
     // 从上往下只能看到火焰下方一小截木柄和顶部铁箍，看不到长木杆。
-    ctx.fillStyle = '#654029'; ctx.fillRect(x - 3, y + 1, 6, 8);
-    ctx.fillStyle = '#A57743'; ctx.fillRect(x - 3, y + 1, 2, 8);
+    ctx.fillStyle = this.lit ? '#654029' : '#3E2C20'; ctx.fillRect(x - 3, y + 1, 6, 8);
+    ctx.fillStyle = this.lit ? '#A57743' : '#5A4433'; ctx.fillRect(x - 3, y + 1, 2, 8);
     ctx.fillStyle = '#36383D';
     ctx.beginPath(); ctx.ellipse(x, y + 1, 4.5, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+
+    if (!this.lit) {
+      // 熄灭后只剩焦黑的灯芯：不画火焰，也不再有暖色光晕。
+      ctx.fillStyle = '#241F1B';
+      ctx.beginPath(); ctx.ellipse(x, y - 0.5, 4.6, 2.6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4A423A';
+      ctx.beginPath(); ctx.ellipse(x - 1, y - 1, 2.2, 1.2, -0.35, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      return;
+    }
 
     // 火焰俯视是一团短圆火苗：轮廓没有向上的尖，避免再出现侧视的高火舌。
     const sway = Math.sin(this.time * 7) * 1.2;

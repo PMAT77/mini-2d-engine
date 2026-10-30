@@ -8,10 +8,56 @@ import { StateMachine } from "../status/StateMachine";
 import { Bullet, BulletEntityHitTest } from "./Bullet";
 import { Entities } from "./Entities";
 import { ParticleSystem } from "./ParticleSystem";
-import { DEFAULT_BALLISTICS, DEFAULT_MOVEMENT, DEFAULT_SPRINT, DEFAULT_BULLET_WATER_DRAG, parsePlayerCollider, parsePlayerConfig, PlayerConfig } from "./PlayerConfig";
+import { DEFAULT_BALLISTICS, DEFAULT_MOVEMENT, DEFAULT_SPRINT, DEFAULT_ROLL, DEFAULT_BULLET_WATER_DRAG, parsePlayerCollider, parsePlayerConfig, PlayerConfig } from "./PlayerConfig";
+import type { RollConfig, WeaponShootingConfig } from "./PlayerConfig";
 import { ColliderShape } from "../physics/Collider";
 import type { VisionState } from "../core/VisibilitySystem";
 import type { FootstepEvent } from "./FootprintSystem";
+import type { ReloadMode, WeaponKind, WeaponSlot, WeaponView } from "./Weapon";
+import { drawHeldWeapon, drawMuzzleFlame, drawStowedWeapons } from "./WeaponVisuals";
+
+interface WeaponState {
+  slot: WeaponSlot;
+  name: string;
+  kind: WeaponKind;
+  damage: number;
+  fireRate: number;
+  bulletSpeed: number;
+  magazineSize: number;
+  magazineAmmo: number;
+  chambered: boolean;
+  reserveAmmo: number | null;
+  reloadDuration: number;
+  reloadRemaining: number;
+  isReloading: boolean;
+  /** 正在进行的补弹方式；空闲为 null。 */
+  reloadMode: ReloadMode | null;
+  /** 本次补弹动作的总时长（秒）；换弹 = reloadDuration，装填按缺弹数缩放。 */
+  reloadTotal: number;
+  /** 装填开始时的弹匣余弹；装填过程中按进度逐发补入。 */
+  reloadBase: number;
+  sound: string;
+  /**
+   * 枪声采样的有效起点（秒）。两段 Fire 采样开头都留了一段静音预卷，
+   * 从 0 秒起播会让枪声慢半拍；跳到枪响前一刻，声音才贴得住枪口火焰。
+   */
+  shotStartAt: number;
+  /** 换弹与装填共用的音效；空手为空串。 */
+  reloadSound: string;
+  /**
+   * 换弹音效的播放速率。库里的 Full 采样是 4 秒的真实换弹，游戏里只有 1.4／2 秒，
+   * 按 2 倍速播，退弹匣、插弹匣、拉套筒才都能落在换弹结束之前。
+   */
+  reloadRate: number;
+}
+
+const WEAPON_SWAP_DURATION = 0.28;
+/** 装填比整匣更换更慢：每发耗时按缺弹比例换算。 */
+const LOAD_TIME_FACTOR = 1.5;
+/** 只补一两发时的最短装填时间（秒）。 */
+const LOAD_MIN_SECONDS = 0.35;
+/** 枪口火焰的持续时间（秒）；比冲锋枪 0.075 秒的射速略短。 */
+const MUZZLE_FLASH_TIME = 0.07;
 
 const WADING_COLORS = [[98, 186, 255], [177, 143, 178], [255, 100, 100], [255, 64, 64]];
 /** 脚印步距（世界像素），按实际位移累计而不是按时间。 */
@@ -73,6 +119,17 @@ export class Player extends Entities {
   private exhausted = false;
   private releasedAfterExhaustion = false;
   private staminaRegenDelay = 0;
+  private roll: RollConfig = { ...DEFAULT_ROLL };
+  /** 翻滚动作剩余时间（秒）；> 0 表示翻滚中。 */
+  private rollTimeLeft = 0;
+  /** 从起滚开始计的锁定时间 = duration + cooldown；归零后才允许下一次翻滚。 */
+  private rollCooldownLeft = 0;
+  private rollDirection = new Vector2();
+  /** 本帧翻滚的平均速度（世界像素/秒），由位移曲线反推，保证不同帧率位移一致。 */
+  private rollSpeed = 0;
+  /** 仅在调用 super.update 期间为真，让 updateVelocityNonlinear 走翻滚分支。 */
+  private rollActive = false;
+  private rollDustSpawned = false;
   private trailDistance = 0;
   private footstepDistance = 0;
   private footstepWetTimer = 0;
@@ -86,6 +143,16 @@ export class Player extends Entities {
   getStamina(): number { return this.stamina; }
   getMaxStamina(): number { return this.sprint.maxStamina; }
   getIsSprinting(): boolean { return this.sprinting; }
+  /** 翻滚动作是否进行中。 */
+  isRolling(): boolean { return this.rollTimeLeft > 1e-9; }
+  /** 翻滚进度 0–1；不在翻滚时为 0。 */
+  getRollProgress(): number {
+    if (!this.isRolling()) return 0;
+    if (this.roll.duration <= 0) return 1;
+    return Math.min(1, Math.max(0, 1 - this.rollTimeLeft / this.roll.duration));
+  }
+  /** 翻滚锁定剩余时间（含动作与冷却）；0 表示可以起滚。 */
+  getRollCooldownRemaining(): number { return this.rollCooldownLeft; }
   /** 身体是否接触水体（任何水深，含岸边的一点重叠）；脚印湿度与涉水音效共用。 */
   isInWater(): boolean { return this.terrainWaterCoverage.fraction > 1e-6; }
   /** 刚出水的湿身计时中：脚步仍是湿身的踩踏声，干地的循环脚步该让位。 */
@@ -123,30 +190,83 @@ export class Player extends Entities {
   private armDistance = Infinity;
   private shotPoseTime = 0;
   private recoil = 0;
+  /** 枪口火焰剩余时间（秒）与这一发的随机种子；连发时每发换形状。 */
+  private muzzleFlashTime = 0;
+  private muzzleFlashSeed = 0;
   /** 战争迷雾半径（世界像素）；手电筒的张角和距离固定，不受这里影响。 */
   private visionRange = 400;
   private timeSinceShot = Infinity;
   private bullets: Bullet[] = []; // 存储玩家发射的子弹
 
-  private fireRate: number = 0.2; // 射速（秒/发）
   private fireCooldown: number = 0; // 开火冷却计时器（控制射速）
 
-  private bulletSpeed: number = 2600; // 子弹速度
   private bulletWaterDrag = { ...DEFAULT_BULLET_WATER_DRAG };
-  private damage = 10;
 
-  // 弹药：初始武器是格罗特手枪，弹匣 6 发 + 膛内 1 发，备弹无限。
-  private readonly weaponName = '格罗特手枪';
-  private magazineSize: number = 6; // 弹匣容量（不含膛内那一发）
-  private magazineAmmo: number = 6; // 弹匣内余弹
-  private chambered: boolean = true; // 膛内是否还有一发
+  // 武器：主武器（冲锋枪）背在背上，副武器（格洛克手枪）挂在腰间，
+  // 近战槽当前没有武器，C 键会收枪切换为空手。
+  // 弹药与换弹状态按槽各自保存，切枪时通过 accessor 读写当前槽，进度不会丢失。
+  private readonly weapons: Record<WeaponSlot, WeaponState> = {
+    primary: {
+      slot: "primary", name: "冲锋枪", kind: "firearm",
+      damage: 16, fireRate: 0.075, bulletSpeed: 2800,
+      magazineSize: 30, magazineAmmo: 30, chambered: true, reserveAmmo: null,
+      reloadDuration: 2, reloadRemaining: 0, isReloading: false, reloadMode: null, reloadTotal: 0, reloadBase: 0,
+      sound: "/audio/weapons/Fire/05_Pistol_Type5_Fire.wav", shotStartAt: 0.02,
+      reloadSound: "/audio/weapons/Reload/Type_5/Pistol_Reload_Type_5_Full.wav", reloadRate: 2,
+    },
+    secondary: {
+      slot: "secondary", name: "格洛克手枪", kind: "firearm",
+      damage: 10, fireRate: 0.2, bulletSpeed: 2600,
+      magazineSize: 6, magazineAmmo: 6, chambered: true, reserveAmmo: null,
+      reloadDuration: 1.4, reloadRemaining: 0, isReloading: false, reloadMode: null, reloadTotal: 0, reloadBase: 0,
+      sound: "/audio/weapons/Fire/01_Pistol_Type1_Fire.wav", shotStartAt: 0.009,
+      reloadSound: "/audio/weapons/Reload/Type_1/Pistol_Reload_Type_1_Full.wav", reloadRate: 2,
+    },
+    melee: {
+      slot: "melee", name: "空手", kind: "empty",
+      damage: 0, fireRate: 0.2, bulletSpeed: 0,
+      magazineSize: 0, magazineAmmo: 0, chambered: false, reserveAmmo: null,
+      reloadDuration: 0, reloadRemaining: 0, isReloading: false, reloadMode: null, reloadTotal: 0, reloadBase: 0,
+      sound: "", shotStartAt: 0, reloadSound: "", reloadRate: 1,
+    },
+  };
+  private activeSlot: WeaponSlot = "secondary";
+  private lastFirearmSlot: "primary" | "secondary" = "secondary";
+  /** 换枪动作剩余时间（秒）；只影响绘制，不改变手部与弹道判定。 */
+  private weaponSwapTime = 0;
   /** 调试选项：打空最后一发时是否自动换弹。默认关闭，正常流程只能按 R 换弹。 */
   private autoReload: boolean = false;
+  /** R 键默认触发的补弹方式；调试面板可切换。 */
+  private defaultReloadMode: ReloadMode = "reload";
 
-  // 换弹：没有热量和过热，只有"打空 → 按 R 换弹"。
-  private reloadDuration: number = 1.4; // 换弹时长（秒）
-  private reloadRemaining: number = 0; // 换弹剩余时间（秒）
-  private isReloading: boolean = false; // 是否正在换弹
+  private get weapon(): WeaponState { return this.weapons[this.activeSlot]; }
+  private get weaponName(): string { return this.weapon.name; }
+  private get weaponKind(): WeaponKind { return this.weapon.kind; }
+  private get magazineSize(): number { return this.weapon.magazineSize; }
+  private set magazineSize(value: number) { this.weapon.magazineSize = value; }
+  private get magazineAmmo(): number { return this.weapon.magazineAmmo; }
+  private set magazineAmmo(value: number) { this.weapon.magazineAmmo = value; }
+  private get chambered(): boolean { return this.weapon.chambered; }
+  private set chambered(value: boolean) { this.weapon.chambered = value; }
+  private get reserveAmmo(): number | null { return this.weapon.reserveAmmo; }
+  private get reloadDuration(): number { return this.weapon.reloadDuration; }
+  private set reloadDuration(value: number) { this.weapon.reloadDuration = value; }
+  private get reloadRemaining(): number { return this.weapon.reloadRemaining; }
+  private set reloadRemaining(value: number) { this.weapon.reloadRemaining = value; }
+  private get isReloading(): boolean { return this.weapon.isReloading; }
+  private set isReloading(value: boolean) { this.weapon.isReloading = value; }
+  private get reloadMode(): ReloadMode | null { return this.weapon.reloadMode; }
+  private set reloadMode(value: ReloadMode | null) { this.weapon.reloadMode = value; }
+  private get reloadTotal(): number { return this.weapon.reloadTotal; }
+  private set reloadTotal(value: number) { this.weapon.reloadTotal = value; }
+  private get reloadBase(): number { return this.weapon.reloadBase; }
+  private set reloadBase(value: number) { this.weapon.reloadBase = value; }
+  private get fireRate(): number { return this.weapon.fireRate; }
+  private set fireRate(value: number) { this.weapon.fireRate = value; }
+  private get bulletSpeed(): number { return this.weapon.bulletSpeed; }
+  private set bulletSpeed(value: number) { this.weapon.bulletSpeed = value; }
+  private get damage(): number { return this.weapon.damage; }
+  private set damage(value: number) { this.weapon.damage = value; }
 
   // 进度环可见性相关属性：只在换弹时显示
   private reloadBarAlpha: number = 0; // 进度环透明度（0-1）
@@ -156,7 +276,7 @@ export class Player extends Entities {
   private onShootCallback?: (shootDir: Vector2) => void; // 射击回调，用于触发摄像机震动等效果
   private onBulletLandedCallback?: (x: number, y: number) => void; // 子弹自然停止回调，用于生成地面弹坑
   private onStatsChangeCallback?: () => void; // 属性变化回调
-  private onReloadCallback?: () => void; // 换弹回调（开始换弹时触发，用于播放换弹音效）
+  private onReloadCallback?: (mode: ReloadMode) => void; // 补弹回调（开始补弹时触发，参数区分换弹/装填）
   /** 场景提供的子弹可命中单位查询，发射时转发给每颗新子弹。 */
   private bulletEntityHitTest?: BulletEntityHitTest;
 
@@ -214,11 +334,19 @@ export class Player extends Entities {
   }
 
   protected getMovementSpeed(): number {
+    // 翻滚时上限提高到峰值速度，Entities 的子步钳制与地形系数会自动沿用这个上限。
+    if (this.isRolling()) return this.getMaxSpeed() * this.roll.speedMultiplier;
     return this.getMaxSpeed() * (this.sprinting ? this.sprint.speedMultiplier : 1);
   }
 
   /** Smooth startup acceleration; angular damping does not slow turns or delay reversals. */
   protected updateVelocityNonlinear(targetVel: Vector2, dir: Vector2, delta: number): void {
+    if (this.rollActive) {
+      // 翻滚期间方向锁定：位移由解析曲线算好，这里只交出本帧平均速度，
+      // 让 Entities 的子步、碰撞与地形减速照常生效。
+      this.velocity = this.rollDirection.clone().scale(this.rollSpeed);
+      return;
+    }
     this.sprintTime = this.sprinting ? Math.min(this.sprint.rampDuration, this.sprintTime + delta) : 0;
     if (dir.length() === 0) {
       if (this.stopTime === 0) {
@@ -254,6 +382,24 @@ export class Player extends Entities {
   }
 
   private updateMovement(delta: number, input: Input, map?: TileMap): void {
+    this.rollCooldownLeft = Math.max(0, this.rollCooldownLeft - delta);
+    if (this.rollTimeLeft > 0) {
+      // 翻滚期间跳过疾跑与体力恢复：体力只在起滚时扣一次。
+      this.sprinting = false;
+      this.trailDistance = 0;
+      this.sprintTime = 0;
+      const step = Math.min(delta, this.rollTimeLeft);
+      const elapsed = this.roll.duration - this.rollTimeLeft;
+      const distance = this.getRollDistance(elapsed + step) - this.getRollDistance(elapsed);
+      this.rollSpeed = step > 0 ? distance / step : 0;
+      this.rollActive = true;
+      super.update(step, input, map);
+      this.rollActive = false;
+      this.rollTimeLeft = Math.max(0, this.rollTimeLeft - step);
+      if (this.rollTimeLeft < 1e-9) this.rollTimeLeft = 0;
+      this.emitRollDust();
+      return;
+    }
     const shift = input.isKeyDown("Shift");
     const moving = this.getMoveDirection(input).length() > 0;
     if (!shift && this.exhausted) this.releasedAfterExhaustion = true;
@@ -297,6 +443,73 @@ export class Player extends Entities {
     this.staminaRegenDelay = Math.max(0, this.staminaRegenDelay - restDelta);
     this.stamina = Math.min(this.sprint.maxStamina, this.stamina + regenDelta * this.sprint.regenPerSecond);
     this.unlockSprint();
+  }
+
+  /**
+   * 请求一次翻滚：方向取当前移动输入，没有输入时用身体朝向；扣体力并进入动作+冷却锁定。
+   * 返回 false 表示这次按下没有生效（正在翻滚、冷却中或体力不足）。
+   */
+  requestRoll(input: Input): boolean {
+    if (this.rollTimeLeft > 0 || this.rollCooldownLeft > 1e-9) return false;
+    if (this.roll.staminaCost > 0 && this.stamina < this.roll.staminaCost) return false;
+    const move = this.getMoveDirection(input);
+    if (move.length() > 0) {
+      this.rollDirection = move.clone().normalize();
+    } else {
+      const facing = this.currentRotation - Math.PI;
+      this.rollDirection.set(Math.cos(facing), Math.sin(facing));
+    }
+    this.rollTimeLeft = this.roll.duration;
+    this.rollCooldownLeft = this.roll.duration + this.roll.cooldown;
+    this.rollDustSpawned = false;
+    this.rollSpeed = 0;
+    this.sprinting = false;
+    this.sprintTime = 0;
+    this.trailDistance = 0;
+    // 翻滚结束时不保留起步/刹车惯性，避免把动作位移再拖长一截。
+    this.movementTime = 0;
+    this.stopTime = 0;
+    this.muzzleFlashTime = 0;
+    this.armLift = 0;
+    this.shotPoseTime = 0;
+    if (this.roll.staminaCost > 0) {
+      this.stamina = Math.max(0, this.stamina - this.roll.staminaCost);
+      this.staminaRegenDelay = this.sprint.regenDelay;
+      if (this.stamina < 1e-8) {
+        this.stamina = 0;
+        this.exhausted = true;
+        this.releasedAfterExhaustion = false;
+      }
+    }
+    this.spawnRollDust();
+    this.onStatsChangeCallback?.();
+    return true;
+  }
+
+  /** 解析位移曲线：v(t) = v0·(1 − u²) 的积分，u = t / duration。 */
+  private getRollDistance(elapsed: number): number {
+    const total = this.roll.duration;
+    const u = total > 0 ? Math.min(1, Math.max(0, elapsed / total)) : 1;
+    return this.getMaxSpeed() * this.roll.speedMultiplier * total * (u - u * u * u / 3);
+  }
+
+  private emitRollDust(): void {
+    if (this.rollDustSpawned || this.getRollProgress() < 0.5) return;
+    this.rollDustSpawned = true;
+    this.spawnRollDust();
+  }
+
+  /** 脚边一小团尘土：水中偏青，干地偏灰。 */
+  private spawnRollDust(): void {
+    this.particleSystem?.addParticle({
+      x: this.x + this.size / 2 + this.rollDirection.x * this.size * 0.25,
+      y: this.y + this.size / 2 + this.rollDirection.y * this.size * 0.25,
+      size: 4,
+      color: this.isInWater() ? "#9fd8e8" : "#c8d2d6",
+      speed: 25,
+      angle: Math.atan2(-this.rollDirection.y, -this.rollDirection.x),
+      lifetime: 0.32,
+    });
   }
 
   private unlockSprint(): void {
@@ -496,6 +709,28 @@ export class Player extends Entities {
     ctx.restore();
   }
 
+  /** 把一组火力参数写到指定武器槽；容量缩小后余弹不能超出上限。 */
+  private applyWeaponConfig(weapon: WeaponState, config: WeaponShootingConfig): void {
+    if (config.damage !== undefined) weapon.damage = config.damage;
+    if (config.fireRate !== undefined) weapon.fireRate = config.fireRate;
+    if (config.bulletSpeed !== undefined) weapon.bulletSpeed = config.bulletSpeed;
+    if (config.magazineSize !== undefined) {
+      weapon.magazineSize = config.magazineSize;
+      weapon.magazineAmmo = Math.min(weapon.magazineAmmo, weapon.magazineSize);
+    }
+    if (config.reloadDuration !== undefined) {
+      const fraction = weapon.reloadTotal > 0 ? weapon.reloadRemaining / weapon.reloadTotal : 0;
+      weapon.reloadDuration = config.reloadDuration;
+      // 补弹途中改时长时保留已完成的进度比例
+      if (weapon.isReloading) {
+        weapon.reloadTotal = weapon.reloadMode === "load"
+          ? this.getLoadDuration(weapon)
+          : weapon.reloadDuration;
+        weapon.reloadRemaining = Math.max(0, fraction * weapon.reloadTotal);
+      }
+    }
+  }
+
   /**
    * 应用配置到玩家实例
    * @param config 配置对象，包含基础属性、动画属性、射击属性和UI属性
@@ -516,6 +751,10 @@ export class Player extends Entities {
       this.sprint = { ...this.sprint, ...config.sprint };
       this.stamina = fraction * this.sprint.maxStamina;
       this.unlockSprint();
+    }
+    if (config.roll) {
+      this.roll = { ...this.roll, ...config.roll };
+      if (this.rollTimeLeft > 0) this.rollTimeLeft = Math.min(this.rollTimeLeft, this.roll.duration);
     }
     if (config.collider) this.setCollider(config.collider);
     // 应用基础属性
@@ -559,27 +798,9 @@ export class Player extends Entities {
       }
     }
 
-    // 应用射击属性
-    if (config.shooting) {
-      if (config.shooting.damage !== undefined) this.damage = config.shooting.damage;
-      if (config.shooting.fireRate !== undefined) {
-        this.fireRate = config.shooting.fireRate;
-      }
-      if (config.shooting.bulletSpeed !== undefined) {
-        this.bulletSpeed = config.shooting.bulletSpeed;
-      }
-      if (config.shooting.magazineSize !== undefined) {
-        this.magazineSize = config.shooting.magazineSize;
-        // 容量缩小后余弹不能超出上限
-        this.magazineAmmo = Math.min(this.magazineAmmo, this.magazineSize);
-      }
-      if (config.shooting.reloadDuration !== undefined) {
-        const fraction = this.reloadDuration > 0 ? this.reloadRemaining / this.reloadDuration : 0;
-        this.reloadDuration = config.shooting.reloadDuration;
-        // 换弹途中改时长时保留已完成的进度比例
-        if (this.isReloading) this.reloadRemaining = Math.max(0, fraction * this.reloadDuration);
-      }
-    }
+    // 应用射击属性：shooting 是副武器 + 共享弹道，primaryShooting 只覆盖主武器火力。
+    if (config.shooting) this.applyWeaponConfig(this.weapons.secondary, config.shooting);
+    if (config.primaryShooting) this.applyWeaponConfig(this.weapons.primary, config.primaryShooting);
 
     // 应用UI属性
     if (config.ui) {
@@ -598,14 +819,18 @@ export class Player extends Entities {
       collider: parsePlayerCollider(this.getCollider().compiled.shape),
       base: { size: this.size, maxHealth: this.maxHealth, maxSpeed: this.maxSpeed, accel: this.accel,
         decel: this.decel, nonlinearFactor: this.nonlinearFactor, rotationSpeed: this.rotationSpeed, rotationStrategy: this.rotationStrategy },
-      movement: { ...this.movement }, sprint: { ...this.sprint },
+      movement: { ...this.movement }, sprint: { ...this.sprint }, roll: { ...this.roll },
       bulletWaterDrag: { ...this.bulletWaterDrag },
       animation: {
         breathingAmplitude: this.breathingAmplitude, breathingSpeed: this.breathingSpeed,
         runSwayAmplitude: this.runSwayAmplitude, runSwaySpeed: this.runSwaySpeed,
       },
-      shooting: { ...this.ballistics, damage: this.damage, fireRate: this.fireRate, bulletSpeed: this.bulletSpeed,
-        magazineSize: this.magazineSize, reloadDuration: this.reloadDuration },
+      shooting: { ...this.ballistics, damage: this.weapons.secondary.damage, fireRate: this.weapons.secondary.fireRate,
+        bulletSpeed: this.weapons.secondary.bulletSpeed, magazineSize: this.weapons.secondary.magazineSize,
+        reloadDuration: this.weapons.secondary.reloadDuration },
+      primaryShooting: { damage: this.weapons.primary.damage, fireRate: this.weapons.primary.fireRate,
+        bulletSpeed: this.weapons.primary.bulletSpeed, magazineSize: this.weapons.primary.magazineSize,
+        reloadDuration: this.weapons.primary.reloadDuration },
       ui: { fadeSpeed: this.fadeSpeed },
     };
   }
@@ -615,7 +840,7 @@ export class Player extends Entities {
       health: this.health, stamina: this.stamina,
       magazineAmmo: this.magazineAmmo, magazineSize: this.magazineSize,
       chambered: this.chambered, roundsReady: this.magazineAmmo + (this.chambered ? 1 : 0),
-      isReloading: this.isReloading, reloadProgress: this.getReloadProgress() * 100,
+      isReloading: this.isReloading, reloadMode: this.reloadMode, reloadProgress: this.getReloadProgress() * 100,
       exhausted: this.exhausted,
       effectiveSpeed: this.getMaxSpeed(), effectiveSprintSpeed: this.getMaxSpeed() * this.sprint.speedMultiplier,
       effectiveDamage: this.getModifiedValue(this.damage, 'damage'),
@@ -659,8 +884,15 @@ export class Player extends Entities {
       if (progress >= 100) this.finishReload();
       else if (progress <= 0) this.cancelReload();
       else {
+        if (!this.isReloading) {
+          // 直接设定进度时按当前 R 键默认行为补一个动作，保证总时长与模式一致。
+          this.reloadMode = this.defaultReloadMode;
+          this.reloadTotal = this.reloadMode === "load" ? this.getLoadDuration() : this.reloadDuration;
+          this.reloadBase = this.magazineAmmo;
+        }
+        const total = this.reloadTotal || this.reloadDuration;
         this.isReloading = true;
-        this.reloadRemaining = (1 - progress / 100) * this.reloadDuration;
+        this.reloadRemaining = (1 - progress / 100) * total;
       }
     }
     this.onStatsChangeCallback?.();
@@ -811,10 +1043,10 @@ export class Player extends Entities {
   }
 
   /**
-   * 设置换弹回调：按 R 换弹（或调试开启自动换弹后打空）开始的那一刻触发。
-   * 备弹无限，换弹只消耗时间，不消耗资源。
+   * 设置补弹回调：按 R 补弹（或调试开启自动换弹后打空）开始的那一刻触发。
+   * 参数区分换弹/装填，便于分别配音。
    */
-  setOnReloadCallback(callback: () => void): void {
+  setOnReloadCallback(callback: (mode: ReloadMode) => void): void {
     this.onReloadCallback = callback;
   }
 
@@ -838,6 +1070,8 @@ export class Player extends Entities {
 
     // 检查射击冷却
     if (this.fireCooldown > 1e-9) return;
+    // 空手 / 近战槽没有枪，不能开火。
+    if (!this.isArmed()) return;
     // 没有子弹时只能等换弹；射击打断换弹会清零进度，必须重新按 R。
     if (!this.hasAmmo()) return;
     if (this.isReloading) this.cancelReload();
@@ -867,10 +1101,15 @@ export class Player extends Entities {
       this.particleSystem, this.terrainWaterCoverage.fraction > 1e-6, this.bulletWaterDrag, travelDistance,
       this.onBulletLandedCallback);
     if (this.bulletEntityHitTest) bullet.setEntityHitTest(this.bulletEntityHitTest);
+    // 冻结原始准星落点：后坐力散布只改弹道，不应改变“这一枪有没有瞄准火把”的判定。
+    bullet.setAimTarget(target);
     if (map) bullet.checkLaunchPath(new Vector2(this.x + this.size / 2, this.y + this.size / 2), map);
     if (!bullet.getIsDestroyed()) this.bullets.push(bullet);
     this.recoil = Math.min(1, this.recoil + this.ballistics.recoilPerShot);
     this.timeSinceShot = 0;
+    // 枪口火焰：纯视觉，只在真正打出一发时点亮，每发重新随机一个形状。
+    this.muzzleFlashTime = MUZZLE_FLASH_TIME;
+    this.muzzleFlashSeed = Math.random() * 1000;
 
     // 触发射击回调（用于摄像机震动等效果）
     this.onShootCallback?.(direction);
@@ -880,7 +1119,7 @@ export class Player extends Entities {
     this.isShooting = true;
 
     // 打空（6+1 全打完）时，只有调试面板开启自动换弹才立刻换弹；否则等玩家按 R。
-    if (this.autoReload && !this.hasAmmo()) this.startReload();
+    if (this.autoReload && !this.hasAmmo()) this.startReload("reload");
   }
 
   /** 还有没有能立刻发射的子弹：膛内 1 发 + 弹匣内余弹。 */
@@ -897,27 +1136,59 @@ export class Player extends Entities {
     }
   }
 
-  /** 开始换弹；备弹无限，结束时总是补满。 */
-  private startReload(): void {
-    if (this.isReloading) return;
-    this.isReloading = true;
-    this.reloadRemaining = this.reloadDuration;
-    // 交给场景播换弹音效
-    this.onReloadCallback?.();
+  /** 当前补弹方式；空手或空闲时为 null。 */
+  getReloadMode(): ReloadMode | null {
+    return this.reloadMode;
   }
 
-  /** 中止换弹并清零进度；开火会打断换弹。 */
+  /** R 键默认补弹方式。 */
+  getDefaultReloadMode(): ReloadMode {
+    return this.defaultReloadMode;
+  }
+
+  /** 切换 R 键默认补弹方式；不影响正在进行的动作。 */
+  setDefaultReloadMode(mode: ReloadMode): void {
+    if (mode !== "reload" && mode !== "load") throw new Error(`无效补弹方式: ${mode}`);
+    this.defaultReloadMode = mode;
+  }
+
+  /** 装填耗时：按缺弹比例缩放换弹时长，至少 LOAD_MIN_SECONDS 秒。 */
+  private getLoadDuration(weapon: WeaponState = this.weapon,
+    missing: number = weapon.magazineSize - weapon.magazineAmmo): number {
+    if (weapon.magazineSize <= 0) return LOAD_MIN_SECONDS;
+    return Math.max(LOAD_MIN_SECONDS, weapon.reloadDuration * LOAD_TIME_FACTOR * missing / weapon.magazineSize);
+  }
+
+  /** 开始补弹；mode 决定整匣更换还是逐发装填。 */
+  private startReload(mode: ReloadMode): void {
+    if (this.isReloading) return;
+    this.reloadMode = mode;
+    this.reloadTotal = mode === "load" ? this.getLoadDuration() : this.reloadDuration;
+    this.reloadBase = this.magazineAmmo;
+    this.isReloading = true;
+    this.reloadRemaining = this.reloadTotal;
+    // 交给场景播补弹音效
+    this.onReloadCallback?.(mode);
+  }
+
+  /** 中止补弹并清零进度；开火会打断补弹。 */
   private cancelReload(): void {
     this.isReloading = false;
     this.reloadRemaining = 0;
+    this.reloadTotal = 0;
+    this.reloadBase = 0;
+    this.reloadMode = null;
   }
 
-  /** 换弹完成：膛内上膛一发、弹匣补满（幂等）。 */
+  /** 补弹完成：换弹整匣补满并上膛，装填只补弹匣、膛内状态保持不变。 */
   private finishReload(): void {
+    const mode = this.reloadMode ?? "reload";
     this.isReloading = false;
     this.reloadRemaining = 0;
-    this.chambered = true;
+    this.reloadTotal = 0;
+    this.reloadMode = null;
     this.magazineAmmo = this.magazineSize;
+    if (mode === "reload") this.chambered = true;
   }
 
   /** 打空最后一发后是否自动换弹（调试选项，默认关闭）。 */
@@ -926,10 +1197,20 @@ export class Player extends Entities {
   /** 开关自动换弹；关闭时正在进行的换弹不受影响。 */
   setAutoReload(enabled: boolean): void { this.autoReload = !!enabled; }
 
-  /** 玩家按 R 手动换弹；弹匣已满时什么都不做。 */
-  requestReload(): void {
-    if (this.isReloading || (this.magazineAmmo >= this.magazineSize && this.chambered)) return;
-    this.startReload();
+  /**
+   * 玩家按 R 补弹；mode 缺省时使用 R 键默认行为。
+   * 弹匣已满、手里没有枪或正在补弹时什么都不做。
+   */
+  requestReload(mode: ReloadMode = this.defaultReloadMode): void {
+    if (!this.isArmed()) return;
+    if (this.isReloading) return;
+    if (mode === "load") {
+      // 装填只补弹匣；弹匣满时没有可装填的空间。
+      if (this.magazineAmmo >= this.magazineSize) return;
+    } else if (this.magazineAmmo >= this.magazineSize && this.chambered) {
+      return;
+    }
+    this.startReload(mode);
   }
 
   /**
@@ -941,12 +1222,15 @@ export class Player extends Entities {
   update(delta: number, input: Input, map?: TileMap, aim?: PlayerAimInput): void {
     if (!Number.isFinite(delta) || delta < 0) return;
     this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y) ? aim : undefined;
-    this.isShooting = !!this.pointerAim?.fire;
+    this.isShooting = !!this.pointerAim?.fire && !this.isRolling();
     this.updateRecoil(delta);
+    if (this.weaponSwapTime > 0) this.weaponSwapTime = Math.max(0, this.weaponSwapTime - delta);
+    if (this.muzzleFlashTime > 0) this.muzzleFlashTime = Math.max(0, this.muzzleFlashTime - delta);
     const startX = this.x, startY = this.y;
     const movingInput = this.getMoveDirection(input).length() > 0;
     this.updateMovement(delta, input, map);
-    this.updateAimPose(delta);
+    // 翻滚时收着武器、不抬枪：渲染旋转与瞄准方向会对不上。
+    if (!this.isRolling()) this.updateAimPose(delta);
     this.updateRunSway(delta, startX, startY);
     this.wadingMap = this.terrainSpeedFactor < 1 - 1e-6 && this.terrainWaterCoverage.fraction > 1e-6 ? map : undefined;
     if (this.wadingMap) {
@@ -956,15 +1240,20 @@ export class Player extends Entities {
     }
     this.wadingAlpha = this.wadingMap ? Math.min(1, this.wadingAlpha + delta / 0.08) : Math.max(0, this.wadingAlpha - delta / 0.12);
     this.updateFootstepWetness(delta);
-    if (movingInput) this.emitFootsteps(startX, startY);
+    if (movingInput && !this.isRolling()) this.emitFootsteps(startX, startY);
 
-    // 推进换弹：按帧累积，长帧不会跨过终点后倒扣
-    if (this.isReloading) {
+    // 推进换弹：只有当前枪械槽会推进；切走时进度留在原枪上。
+    if (this.isArmed() && this.isReloading) {
       this.reloadRemaining -= delta;
       if (this.reloadRemaining <= 1e-9) this.finishReload();
+      else if (this.reloadMode === "load" && this.reloadTotal > 0) {
+        // 装填逐发入匣：已经补进去的子弹即使中途打断也保留。
+        const seated = Math.floor((1 - this.reloadRemaining / this.reloadTotal) * (this.magazineSize - this.reloadBase));
+        this.magazineAmmo = Math.min(this.magazineSize, this.reloadBase + Math.max(0, seated));
+      }
     }
     // 开启自动换弹后，打空弹匣即开始换弹；也兼作调试面板直接清空弹匣时的兜底。
-    if (this.autoReload && !this.isReloading && !this.hasAmmo()) this.startReload();
+    if (this.isArmed() && this.autoReload && !this.isReloading && !this.hasAmmo()) this.startReload("reload");
 
     // 射击间隔计时
     if (this.fireCooldown > 0) {
@@ -972,15 +1261,15 @@ export class Player extends Entities {
       if (!this.isShooting || delta >= this.getFireRate()) this.fireCooldown = Math.max(0, this.fireCooldown);
     }
 
-    // 进度环只在换弹时淡入淡出
-    if (this.isReloading) {
+    // 进度环只在当前枪械换弹时淡入淡出
+    if (this.isArmed() && this.isReloading) {
       this.reloadBarAlpha = Math.min(1, this.reloadBarAlpha + delta * this.fadeSpeed);
     } else {
       this.reloadBarAlpha = Math.max(0, this.reloadBarAlpha - delta * this.fadeSpeed);
     }
 
     // 处理射击逻辑
-    if (this.pointerAim?.fire) this.shootAt(this.pointerAim.target, this.damage, map);
+    if (this.pointerAim?.fire && !this.isRolling()) this.shootAt(this.pointerAim.target, this.damage, map);
 
     // 根据当前状态切换状态机状态
     if (this.isShooting) {
@@ -1003,8 +1292,85 @@ export class Player extends Entities {
     this.bullets = this.bullets.filter(bullet => !bullet.getIsDestroyed());
   }
 
+  /** 切到指定槽位；换弹进度留在原枪上，切回来会继续。 */
+  switchWeapon(slot: WeaponSlot): void {
+    if (slot === this.activeSlot) return;
+    this.activeSlot = slot;
+    if (slot !== "melee") this.lastFirearmSlot = slot;
+    this.reloadBarAlpha = 0;
+    this.weaponSwapTime = WEAPON_SWAP_DURATION;
+  }
+
+  /** Q/E：在两把枪之间循环；空手时直接拔出最近用过的枪。 */
+  cycleFirearm(_direction: 1 | -1): void {
+    if (this.activeSlot === "melee") {
+      this.switchWeapon(this.lastFirearmSlot);
+      return;
+    }
+    this.switchWeapon(this.activeSlot === "secondary" ? "primary" : "secondary");
+  }
+
+  /** C：有近战武器时进近战槽，否则收枪变空手；再按一次回到最近用过的枪。 */
+  toggleMelee(): void {
+    if (this.activeSlot === "melee") this.switchWeapon(this.lastFirearmSlot);
+    else this.switchWeapon("melee");
+  }
+
+  getActiveWeaponSlot(): WeaponSlot {
+    return this.activeSlot;
+  }
+
+  getLastFirearmSlot(): "primary" | "secondary" {
+    return this.lastFirearmSlot;
+  }
+
+  /** 当前武器开火音效；空手返回空串，调用方据此跳过播放。 */
+  getActiveWeaponSound(): string {
+    return this.weapon.sound;
+  }
+
+  /** 当前武器枪声的起播秒数，用来跳过采样开头的静音预卷。 */
+  getActiveWeaponSoundStartAt(): number {
+    return this.weapon.shotStartAt;
+  }
+
+  /** 当前武器的换弹音效；空手返回空串。 */
+  getActiveWeaponReloadSound(): string {
+    return this.weapon.reloadSound;
+  }
+
+  /** 当前武器换弹音效的播放速率，用来把 4 秒的整段换弹压进动作时长。 */
+  getActiveWeaponReloadRate(): number {
+    return this.weapon.reloadRate;
+  }
+
+  /** 手里是否有能开火的枪。 */
+  isArmed(): boolean {
+    return this.weapon.kind === "firearm";
+  }
+
   getWeaponName(): string {
     return this.weaponName;
+  }
+
+  getWeaponKind(): WeaponKind {
+    return this.weaponKind;
+  }
+
+  /** HUD 用的当前武器快照；每帧读取一次，避免 UI 直接摸内部字段。 */
+  getWeaponView(): WeaponView {
+    return {
+      slot: this.activeSlot,
+      name: this.weaponName,
+      kind: this.weaponKind,
+      magazineAmmo: this.magazineAmmo,
+      magazineSize: this.magazineSize,
+      chambered: this.chambered,
+      reserveAmmo: this.reserveAmmo,
+      isReloading: this.isReloading,
+      reloadMode: this.reloadMode,
+      reloadProgress: this.getReloadProgress(),
+    };
   }
 
   /** 弹匣内余弹（不含膛内那一发）。 */
@@ -1032,8 +1398,14 @@ export class Player extends Entities {
 
   /** 换弹进度（0-1）；未换弹时为 0。 */
   getReloadProgress(): number {
-    if (!this.isReloading || this.reloadDuration <= 0) return 0;
-    return Math.max(0, Math.min(1, 1 - this.reloadRemaining / this.reloadDuration));
+    const total = this.reloadTotal || this.reloadDuration;
+    if (!this.isReloading || total <= 0) return 0;
+    return Math.max(0, Math.min(1, 1 - this.reloadRemaining / total));
+  }
+
+  /** 枪口火焰剩余时间（秒）；仅供测试和调试。 */
+  getMuzzleFlashTime(): number {
+    return this.muzzleFlashTime;
   }
 
   /**
@@ -1062,6 +1434,27 @@ export class Player extends Entities {
     ctx.drawImage(canvas, centerX - extent / 2 - offsetX, centerY - extent / 2 - offsetY);
   }
 
+  /**
+   * 枪口火焰。必须画在光照合成之后：它是一团光，画在前面会被环境光乘暗。
+   * 位置和朝向与 drawModel 里那把枪一致（枪口在握把原点前方 0.36 个身位）。
+   */
+  drawMuzzleFlash(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
+    if (this.muzzleFlashTime <= 0 || !this.isArmed()) return;
+    const s = this.size, facing = this.currentRotation - Math.PI;
+    const muzzle = this.getMuzzlePosition();
+    const swapProgress = this.weaponSwapTime > 0 ? 1 - this.weaponSwapTime / WEAPON_SWAP_DURATION : 1;
+    const swap = Math.sin(Math.PI * swapProgress);
+    // 前 40% 时间全亮，之后线性熄灭：开火瞬间不会只闪一帧。
+    const intensity = Math.min(1, this.muzzleFlashTime / (MUZZLE_FLASH_TIME * 0.4));
+    ctx.save();
+    ctx.translate(muzzle.x - offsetX, muzzle.y - offsetY);
+    ctx.rotate(facing);
+    // 与 drawHeldWeapon 的挂点对齐：换枪下沉 + 握把原点 (-0.02s, +0.015s) + 枪管尖端 0.36s。
+    ctx.translate(-s * .10 * swap - s * .02 + s * .36, s * .18 * swap + s * .015);
+    drawMuzzleFlame(ctx, s, intensity, this.muzzleFlashSeed);
+    ctx.restore();
+  }
+
   private drawModel(ctx: CanvasRenderingContext2D, centerX: number, centerY: number): void {
     ctx.save();
 
@@ -1075,6 +1468,17 @@ export class Player extends Entities {
     ctx.translate(centerX, centerY);
     const facing = this.currentRotation - Math.PI;
     ctx.rotate(facing);
+    const rollProgress = this.getRollProgress();
+    if (rollProgress > 0) {
+      // 翻滚是绕身体左右轴的向前翻，不是屏幕平面里的整圈自转：
+      // 俯视正交投影下，绕左右轴转动会把身体沿朝向轴（local x）压扁，
+      // 翻过 90° 后镜像（头脚互换），看起来才是前后滚过去。
+      // 用 ctx.rotate 转的是屏幕垂直轴，在俯视图里只会像原地左右转身。
+      const tumble = Math.cos(rollProgress * Math.PI * 2);
+      const width = (tumble < 0 ? -1 : 1) * (0.18 + 0.82 * Math.abs(tumble));
+      const tuck = 1 - 0.22 * Math.sin(Math.PI * rollProgress);
+      ctx.scale(width * tuck, tuck);
+    }
     ctx.scale(scale, scale);
     const s = this.size, c = Math.cos(facing), sn = Math.sin(facing);
     const muzzle = this.getMuzzlePosition();
@@ -1095,19 +1499,26 @@ export class Player extends Entities {
       ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke();
     };
     // Rounded shoulders, sleeves and hands sit below the head in the top-down view.
+    const swapProgress = this.weaponSwapTime > 0 ? 1 - this.weaponSwapTime / WEAPON_SWAP_DURATION : 1;
+    const swap = Math.sin(Math.PI * swapProgress);
+    const handX = hand.x - s * .10 * swap, handY = hand.y + s * .18 * swap;
     const leftX = s * .04 * (1 - this.armLift) + hand.x * .67 * this.armLift;
     const leftY = -s * .46 * (1 - this.armLift) + (hand.y - s * .13) * this.armLift;
     capsule(0, -s * .31, leftX + handSway, leftY, s * .22, '#183c4a');
-    capsule(0, s * .31, hand.x - handSway, hand.y, s * .22, '#183c4a');
+    capsule(0, s * .31, handX - handSway, handY, s * .22, '#183c4a');
     capsule(s * .02, -s * .31, leftX + handSway, leftY, s * .15, '#4d8999');
-    capsule(s * .02, s * .31, hand.x - handSway, hand.y, s * .15, '#4d8999');
+    capsule(s * .02, s * .31, handX - handSway, handY, s * .15, '#4d8999');
     disc(leftX + handSway, leftY, s * .085, '#e5ccb0');
-    disc(hand.x - handSway, hand.y, s * .085, '#eed7b9');
+    disc(handX - handSway, handY, s * .085, '#eed7b9');
     disc(-s * .055, 0, s * .45, '#102c39');
     const body = ctx.createLinearGradient(-s * .4, s * .3, s * .35, -s * .3);
     body.addColorStop(0, '#245362'); body.addColorStop(1, '#73b4bf');
     disc(0, 0, s * .405, body);
     disc(s * .055, 0, s * .29, '#23404a');
+    // 未拿在手上的枪斜挎在背上、挂在腰间，压在身体上面、头下面，两端从头两侧露出。
+    drawStowedWeapons(ctx, s, this.activeSlot);
+    // 手中的武器压在身体之上、头之下，换枪时随手下沉。
+    drawHeldWeapon(ctx, s, this.weaponKind, this.activeSlot, { x: handX, y: handY });
     const head = ctx.createRadialGradient(
       s * .16, -s * .12 + headSway, s * .015, s * .09, headSway, s * .28);
     head.addColorStop(0, '#fff1d6'); head.addColorStop(.65, '#ead3b2'); head.addColorStop(1, '#b49a7a');

@@ -23,6 +23,11 @@ export interface PlayOptions {
   count?: number;
   /** 从采样内部的随机位置起播：录音本身包含多次脚步时，每次取不同的一截。 */
   randomStart?: boolean;
+  /**
+   * 从采样内的固定秒数起播：用来跳过录音开头的静音，或让长采样跟着游戏状态推进；
+   * 超过时长会被夹到采样末尾之前。
+   */
+  startAt?: number;
 }
 
 interface LoopVoice {
@@ -86,7 +91,7 @@ export class SoundPlayer {
     this.stops.delete(clip);
     clip.volume = clamp01(volume);
     clip.playbackRate = clampRate(rate);
-    clip.currentTime = options.randomStart ? randomStartOffset(clip) : 0;
+    clip.currentTime = options.randomStart ? randomStartOffset(clip) : startOffset(clip, options.startAt);
     void clip.play().catch(() => { /* 上一次播放被打断或尚未加载完 */ });
     return {
       setVolume: (value: number) => {
@@ -198,3 +203,10 @@ const clampRate = (value: number): number => (Number.isFinite(value) ? Math.max(
 /** 起播点：读完采样时长才随机；元数据没到或流式音频（Infinity）时从头播。 */
 const randomStartOffset = (clip: HTMLAudioElement): number =>
   Number.isFinite(clip.duration) && clip.duration > 0 ? Math.random() * clip.duration : 0;
+
+/** 指定起播秒数；时长未知时不冒险跳播，夹在采样内部避免落到末尾静音。 */
+const startOffset = (clip: HTMLAudioElement, seconds: number | undefined): number => {
+  if (!Number.isFinite(seconds) || (seconds as number) <= 0) return 0;
+  if (!Number.isFinite(clip.duration) || clip.duration <= 0) return 0;
+  return Math.min(seconds as number, Math.max(0, clip.duration - 0.01));
+};

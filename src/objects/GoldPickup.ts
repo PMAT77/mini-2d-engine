@@ -57,13 +57,42 @@ export class GoldPickup extends GameObject {
     const pulse = 0.7 + Math.sin(this.age * 3 + this.glowPhase) * 0.3;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
-    const glow = ctx.createRadialGradient(x, y, 0, x, y, 15);
-    glow.addColorStop(0, `rgba(255, 205, 70, ${0.24 * pulse})`);
-    glow.addColorStop(0.4, `rgba(255, 175, 35, ${0.1 * pulse})`);
+    const sprite = GoldPickup.glowSprite();
+    if (sprite) {
+      // The baked halo carries the exact falloff; the pulse only scales its alpha, so the
+      // per-gold radial gradient object (and its allocations) disappear from the frame.
+      ctx.globalAlpha = pulse;
+      ctx.drawImage(sprite, x - 15, y - 15, 30, 30);
+    } else {
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, 15);
+      glow.addColorStop(0, `rgba(255, 205, 70, ${0.24 * pulse})`);
+      glow.addColorStop(0.4, `rgba(255, 175, 35, ${0.1 * pulse})`);
+      glow.addColorStop(1, "rgba(255, 150, 20, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(x - 15, y - 15, 30, 30);
+    }
+    ctx.restore();
+  }
+
+  private static glow: HTMLCanvasElement | null | undefined;
+
+  private static glowSprite(): HTMLCanvasElement | null {
+    if (GoldPickup.glow !== undefined) return GoldPickup.glow;
+    if (typeof document === "undefined") return (GoldPickup.glow = null);
+    const size = 60;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return (GoldPickup.glow = null);
+    const center = size / 2, radius = size / 2;
+    const glow = ctx.createRadialGradient(center, center, 0, center, center, radius);
+    glow.addColorStop(0, "rgba(255, 205, 70, 0.24)");
+    glow.addColorStop(0.4, "rgba(255, 175, 35, 0.1)");
     glow.addColorStop(1, "rgba(255, 150, 20, 0)");
     ctx.fillStyle = glow;
-    ctx.fillRect(x - 15, y - 15, 30, 30);
-    ctx.restore();
+    ctx.fillRect(0, 0, size, size);
+    return (GoldPickup.glow = canvas);
   }
 
   drawShadow(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0, light?: Point): void {

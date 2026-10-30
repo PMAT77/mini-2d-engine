@@ -28,6 +28,12 @@
     "regenDelay": 0.6,
     "restartThreshold": 0.15
   },
+  "roll": {
+    "duration": 0.3,
+    "speedMultiplier": 3,
+    "cooldown": 0.4,
+    "staminaCost": 20
+  },
   "animation": {
     "breathingAmplitude": 3,
     "breathingSpeed": 2,
@@ -48,6 +54,13 @@
     "recoilPerShot": 0.18,
     "recoilRecoveryDelay": 0.25,
     "recoilRecoveryDuration": 0.8
+  },
+  "primaryShooting": {
+    "damage": 16,
+    "fireRate": 0.075,
+    "bulletSpeed": 2800,
+    "magazineSize": 30,
+    "reloadDuration": 2.0
   },
   "bulletWaterDrag": {
     "shallow": 0.4,

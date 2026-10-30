@@ -18,6 +18,23 @@ interface TerrainCoverage { type: TileTypeId; col: number; row: number; area: nu
 /** Reusable output: water fraction of the footprint, and average water-only depth (0=shallow). */
 export interface WaterCoverage { fraction: number; depth: number; }
 const MINERAL_DAMAGE_COLORS = ["#e5b536", "#b58022", "#80541b", "#4b351b"];
+/** Terrain bakes in fixed-size world chunks so a static map costs one blit per chunk per frame. */
+const CHUNK_TILES = 16;
+const CHUNK_PADDING_TILES = 1;
+
+/** TileTypeId is a string enum, so fold its characters to keep the fingerprint numeric. */
+function hashTileType(hash: number, type: TileTypeId): number {
+  for (let i = 0; i < type.length; i++) hash = Math.imul(hash ^ type.charCodeAt(i), 16777619);
+  return hash;
+}
+
+interface TerrainChunk {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  fingerprint: number;
+  tileSize: number;
+  lastFrame: number;
+}
 
 /**
  * 地形配置接口
@@ -58,6 +75,12 @@ export class TileMap {
   onTileDamaged?: (col: number, row: number, type: TileTypeId, hp: number, maxHp: number) => void;
   private mineralDamage = new Map<number, { x: number; y: number; color: string }[]>();
   private solids = new SolidTerrain((col, row) => this.isBlockingTile(col, row, 'light'));
+  private terrainChunks = new Map<number, TerrainChunk>();
+  private obstacleColliderSize = 0;
+  private readonly obstacleColliders = new Map<number, Collider>();
+  private boundaryColliders: Collider[] | null = null;
+  private boundaryColliderSize = 0;
+  private terrainChunkFrame = 0;
 
   /** 地形配置数组 */
   terrainConfigs: TerrainConfig[] = [
@@ -188,6 +211,35 @@ export class TileMap {
     return !this.terrainMap.get(type)?.walkable;
   }
 
+  private groundContour: { x: number; y: number; width: number; height: number; hash: number; path: Path2D } | null = null;
+
+  /**
+   * 世界坐标系里的实心地形轮廓。查询范围向四周扩两格瓦片并对齐到瓦片网格，因此相机移动后
+   * 可以复用同一份路径，不必每帧重新查询多边形；调用方在相机空间使用时先 translate(-cameraX, -cameraY)。
+   * 瓦片数组可能被直接改写（挖矿/测试），所以路径只在区域内瓦片类型完全不变时复用。
+   */
+  getGroundContour(cameraX: number, cameraY: number, width: number, height: number): Path2D {
+    const size = this.tileSize, margin = size * 2;
+    const x = Math.floor((cameraX - margin) / size) * size;
+    const y = Math.floor((cameraY - margin) / size) * size;
+    const right = Math.ceil((cameraX + width + margin) / size) * size;
+    const bottom = Math.ceil((cameraY + height + margin) / size) * size;
+    const endCol = Math.min(this.width, Math.ceil(right / size)), endRow = Math.min(this.height, Math.ceil(bottom / size));
+    let hash = 2166136261;
+    for (let row = Math.max(0, Math.floor(y / size)); row < endRow; row++) {
+      const tiles = this.tiles[row];
+      for (let col = Math.max(0, Math.floor(x / size)); col < endCol; col++) hash = hashTileType(hash, tiles[col]);
+    }
+    const cached = this.groundContour;
+    if (cached && cached.x === x && cached.y === y && cached.width === right - x && cached.height === bottom - y
+      && cached.hash === hash) return cached.path;
+    const path = new Path2D();
+    path.rect(x, y, right - x, bottom - y);
+    solidPath(path, this.getBlockingPolygons(x, y, right - x, bottom - y), 0, 0);
+    this.groundContour = { x, y, width: right - x, height: bottom - y, hash, path };
+    return path;
+  }
+
   /** Coarse grid rectangles for compatibility; use getBlockingPolygons for exact tops. */
   getBlockingRects(x: number, y: number, width: number, height: number): TileRect[] {
     if (width <= 0 || height <= 0) return [];
@@ -235,19 +287,46 @@ export class TileMap {
       if (this.isBlockingTile(col, row, 'light')) continue;
       if (this.isBlockingTile(col, row, purpose)) {
         const edges = [!this.isBlockingTile(col, row - 1, purpose), !this.isBlockingTile(col + 1, row, purpose), !this.isBlockingTile(col, row + 1, purpose), !this.isBlockingTile(col - 1, row, purpose)];
-        obstacles.push({ col, row, collider: rectangleCollider(col * s, row * s, s, s, edges) });
+        // 瓦片几何只随瓦片类型或尺寸变化，复用 collider 可以省掉每次物理迭代里的多边形构造。
+        if (this.obstacleColliderSize !== s) { this.obstacleColliders.clear(); this.obstacleColliderSize = s; }
+        let mask = 0;
+        for (const value of edges) mask = (mask << 1) | (value ? 1 : 0);
+        const key = (row * this.width + col) * 16 + mask;
+        let collider = this.obstacleColliders.get(key);
+        if (!collider) {
+          collider = rectangleCollider(col * s, row * s, s, s, edges);
+          this.obstacleColliders.set(key, collider);
+        }
+        obstacles.push({ col, row, collider });
       } else if (purpose === 'movement') {
         for (const collider of this.water?.getCell(col, row, s)?.obstacles ?? []) obstacles.push({ col: -1, row: -1, collider });
       }
     }
     const w = this.width * s, h = this.height * s;
-    const padding = Math.max(w, h, Math.abs(bounds.x) + bounds.width, Math.abs(bounds.y) + bounds.height) + s;
-    const boundary = (x: number, y: number, width: number, height: number, edges: boolean[]) => obstacles.push({ col: -1, row: -1, collider: rectangleCollider(x, y, width, height, edges) });
-    if (bounds.x <= 0) boundary(-padding, -padding, padding, h + 2 * padding, [false, true, false, false]);
-    if (bounds.x + bounds.width >= w) boundary(w, -padding, padding, h + 2 * padding, [false, false, false, true]);
-    if (bounds.y <= 0) boundary(-padding, -padding, w + 2 * padding, padding, [false, false, true, false]);
-    if (bounds.y + bounds.height >= h) boundary(-padding, h, w + 2 * padding, padding, [true, false, false, false]);
+    if (bounds.x <= 0) obstacles.push({ col: -1, row: -1, collider: this.getBoundaryCollider(0) });
+    if (bounds.x + bounds.width >= w) obstacles.push({ col: -1, row: -1, collider: this.getBoundaryCollider(1) });
+    if (bounds.y <= 0) obstacles.push({ col: -1, row: -1, collider: this.getBoundaryCollider(2) });
+    if (bounds.y + bounds.height >= h) obstacles.push({ col: -1, row: -1, collider: this.getBoundaryCollider(3) });
     return obstacles.sort((a, b) => a.row - b.row || a.col - b.col);
+  }
+
+  /** 地图四边的巨型挡板。固定尺寸的 slab，碰撞结果与随查询范围扩大的旧实现一致。 */
+  private getBoundaryCollider(index: 0 | 1 | 2 | 3): Collider {
+    const s = this.tileSize;
+    const w = this.width * s, h = this.height * s;
+    let list = this.boundaryColliders;
+    if (list === null || this.boundaryColliderSize !== s) {
+      const pad = Math.max(w, h) + 2 * s;
+      list = [
+        rectangleCollider(-pad, -pad, pad, h + 2 * pad, [false, true, false, false]),
+        rectangleCollider(w, -pad, pad, h + 2 * pad, [false, false, false, true]),
+        rectangleCollider(-pad, -pad, w + 2 * pad, pad, [false, false, true, false]),
+        rectangleCollider(-pad, h, w + 2 * pad, pad, [true, false, false, false]),
+      ];
+      this.boundaryColliders = list;
+      this.boundaryColliderSize = s;
+    }
+    return list[index];
   }
 
   queryShape(collider: Collider) { return queryContacts(this, collider); }
@@ -395,7 +474,226 @@ export class TileMap {
   }
 
   /**
-   * 渲染地图
+   * 渲染地图：静态地形按世界分块烘焙后整块合成，动态细节（受击高亮/矿破损/矿种图标）逐帧叠加。
+   * 烘焙保持 1 世界像素 = 1 画布像素，只在合成时做亚像素平滑，避免相机小数偏移下的瓦片硬跳。
+   */
+  draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, canvasWidth: number, canvasHeight: number, delta: number) {
+    const startCol = Math.max(0, Math.floor(cameraX / this.tileSize));
+    const endCol = Math.min(this.width - 1, Math.ceil((cameraX + canvasWidth) / this.tileSize));
+    const startRow = Math.max(0, Math.floor(cameraY / this.tileSize));
+    const endRow = Math.min(this.height - 1, Math.ceil((cameraY + canvasHeight) / this.tileSize));
+    if (!this.drawTerrainChunks(ctx, cameraX, cameraY, canvasWidth, canvasHeight)) {
+      this.drawDirect(ctx, cameraX, cameraY, canvasWidth, canvasHeight, delta, startCol, endCol, startRow, endRow);
+      return;
+    }
+    this.drawTerrainDetails(ctx, cameraX, cameraY, startCol, endCol, startRow, endRow, delta);
+  }
+
+  /** Drop baked terrain chunks (resize/debug/tests); they rebuild on the next draw. */
+  clearTerrainCache(): void {
+    this.terrainChunks.clear();
+  }
+
+  /**
+   * Terrain chunks are baked once and blitted 1:1 at integer screen positions, matching the
+   * existing per-tile pixel snapping while removing every per-tile fillStyle/fillRect.
+   * The cache limit tracks the visible chunk count so a camera pan never thrashes it.
+   */
+  private drawTerrainChunks(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, canvasWidth: number, canvasHeight: number): boolean {
+    if (typeof document === "undefined" || typeof document.createElement !== "function") return false;
+    const s = this.tileSize;
+    if (!(s > 0) || !Number.isFinite(s)) return false;
+    const span = CHUNK_TILES + CHUNK_PADDING_TILES * 2;
+    const chunkWorld = CHUNK_TILES * s;
+    const coreStart = Math.round(CHUNK_PADDING_TILES * s);
+    const coreEnd = Math.round((CHUNK_PADDING_TILES + CHUNK_TILES) * s);
+    const coreSize = coreEnd - coreStart;
+    if (!(coreSize > 0)) return false;
+    const lastChunkCol = Math.max(0, Math.ceil(this.width / CHUNK_TILES) - 1);
+    const lastChunkRow = Math.max(0, Math.ceil(this.height / CHUNK_TILES) - 1);
+    const firstChunkCol = Math.max(0, Math.floor(cameraX / chunkWorld));
+    const finalChunkCol = Math.min(lastChunkCol, Math.floor((cameraX + canvasWidth) / chunkWorld));
+    const firstChunkRow = Math.max(0, Math.floor(cameraY / chunkWorld));
+    const finalChunkRow = Math.min(lastChunkRow, Math.floor((cameraY + canvasHeight) / chunkWorld));
+    this.terrainChunkFrame++;
+    let visibleChunks = 0;
+    for (let chunkRow = firstChunkRow; chunkRow <= finalChunkRow; chunkRow++) {
+      for (let chunkCol = firstChunkCol; chunkCol <= finalChunkCol; chunkCol++) {
+        const startCol = chunkCol * CHUNK_TILES - CHUNK_PADDING_TILES;
+        const startRow = chunkRow * CHUNK_TILES - CHUNK_PADDING_TILES;
+        const worldX = startCol * s;
+        const worldY = startRow * s;
+        const key = chunkCol * 0x10000 + chunkRow;
+        let chunk = this.terrainChunks.get(key);
+        if (!chunk) {
+          const canvas = document.createElement("canvas");
+          const chunkCtx = canvas.getContext("2d");
+          if (!chunkCtx) return false;
+          chunk = { canvas, ctx: chunkCtx, fingerprint: 0, tileSize: 0, lastFrame: 0 };
+          this.terrainChunks.set(key, chunk);
+        }
+        const fingerprint = this.chunkFingerprint(startCol, startRow, s);
+        if (chunk.fingerprint !== fingerprint || chunk.tileSize !== s || chunk.canvas.width !== Math.round(span * s)) {
+          this.bakeTerrainChunk(chunk, startCol, startRow, worldX, worldY, s, fingerprint);
+        } else {
+          chunk.lastFrame = this.terrainChunkFrame;
+        }
+        ctx.drawImage(chunk.canvas, coreStart, coreStart, coreSize, coreSize,
+          Math.round(chunkCol * chunkWorld - cameraX), Math.round(chunkRow * chunkWorld - cameraY), coreSize, coreSize);
+        visibleChunks++;
+      }
+    }
+    // Keep only a small ring of off-screen chunks: each baked chunk holds a full-resolution
+    // world image, so the cache size drives the largest memory spike at high DPR.
+    const limit = Math.max(6, visibleChunks + 2);
+    while (this.terrainChunks.size > limit) {
+      let oldestKey = -1;
+      let oldestFrame = Infinity;
+      for (const [key, chunk] of this.terrainChunks) {
+        if (chunk.lastFrame < oldestFrame) { oldestFrame = chunk.lastFrame; oldestKey = key; }
+      }
+      if (oldestKey < 0) break;
+      this.terrainChunks.delete(oldestKey);
+    }
+    return true;
+  }
+
+  /** Cheap per-frame fingerprint over the chunk's core+padding tiles so direct array edits rebuild it. */
+  private chunkFingerprint(startCol: number, startRow: number, tileSize: number): number {
+    let hash = Math.imul(tileSize * 73856093, 16777619) ^ 0x811c9dc5;
+    const span = CHUNK_TILES + CHUNK_PADDING_TILES * 2;
+    for (let r = 0; r < span; r++) {
+      const row = startRow + r;
+      if (row < 0 || row >= this.height) { hash = Math.imul(hash ^ 0x9e3779b9, 16777619); continue; }
+      const tiles = this.tiles[row];
+      for (let c = 0; c < span; c++) {
+        const col = startCol + c;
+        if (col < 0 || col >= this.width) { hash = Math.imul(hash ^ 0x85ebca6b, 16777619); continue; }
+        hash = hashTileType(hash, tiles[col]);
+      }
+    }
+    return hash | 0;
+  }
+
+  /** Bake ground, water, wall tops and non-wall material tops for one padded chunk. */
+  private bakeTerrainChunk(chunk: TerrainChunk, startCol: number, startRow: number, worldX: number, worldY: number, tileSize: number, fingerprint: number): void {
+    const span = CHUNK_TILES + CHUNK_PADDING_TILES * 2;
+    const pixels = Math.max(1, Math.round(span * tileSize));
+    if (chunk.canvas.width !== pixels || chunk.canvas.height !== pixels) {
+      chunk.canvas.width = pixels;
+      chunk.canvas.height = pixels;
+    }
+    const ctx = chunk.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, pixels, pixels);
+    for (let r = 0; r < span; r++) {
+      const row = startRow + r;
+      if (row < 0 || row >= this.height) continue;
+      const localY = Math.round(row * tileSize - worldY);
+      const localH = Math.round((row + 1) * tileSize - worldY) - localY;
+      for (let c = 0; c < span; c++) {
+        const col = startCol + c;
+        if (col < 0 || col >= this.width) continue;
+        const localX = Math.round(col * tileSize - worldX);
+        const localW = Math.round((col + 1) * tileSize - worldX) - localX;
+        ctx.fillStyle = TILE_TYPES[this.isBlockingTile(col, row, 'light') ? TileTypeId.DEFAULT : this.tiles[row][col]].color;
+        ctx.fillRect(localX, localY, localW, localH);
+      }
+    }
+    this.water?.draw(ctx, worldX, worldY, pixels, pixels, tileSize);
+    const patches = this.solids.query({ x: worldX, y: worldY, width: pixels, height: pixels }, tileSize, this.width, this.height);
+    if (!patches.length) {
+      chunk.fingerprint = fingerprint;
+      chunk.tileSize = tileSize;
+      chunk.lastFrame = this.terrainChunkFrame;
+      return;
+    }
+    ctx.beginPath(); solidPath(ctx, patches.map(p => p.polygon), worldX, worldY);
+    ctx.fillStyle = TILE_TYPES[TileTypeId.WALL].color; ctx.fill();
+    const owners = new Map<number, Polygon[]>();
+    for (const patch of patches) {
+      const key = patch.row * this.width + patch.col;
+      const list = owners.get(key);
+      if (list) list.push(patch.polygon); else owners.set(key, [patch.polygon]);
+    }
+    // Same-color tops share one fill, exactly like the direct path.
+    const materials = new Map<string, Polygon[]>();
+    for (const [key, polygons] of owners) {
+      const col = key % this.width, row = Math.floor(key / this.width);
+      const color = TILE_TYPES[this.tiles[row][col]].color;
+      const list = materials.get(color);
+      if (list) { for (const polygon of polygons) list.push(polygon); } else materials.set(color, polygons.slice());
+    }
+    for (const [color, polygons] of materials) {
+      if (color === TILE_TYPES[TileTypeId.WALL].color) continue;
+      ctx.beginPath(); solidPath(ctx, polygons, worldX, worldY); ctx.fillStyle = color; ctx.fill();
+    }
+    chunk.fingerprint = fingerprint;
+    chunk.tileSize = tileSize;
+    chunk.lastFrame = this.terrainChunkFrame;
+  }
+
+  /** Polygons of one specific tile, used by the small dynamic overlay pass. */
+  private tilePolygons(col: number, row: number): Polygon[] {
+    const s = this.tileSize;
+    const patches = this.solids.query({ x: col * s, y: row * s, width: s, height: s }, s, this.width, this.height);
+    const polygons: Polygon[] = [];
+    for (const patch of patches) if (patch.col === col && patch.row === row) polygons.push(patch.polygon);
+    return polygons;
+  }
+
+  /** Dynamic details that must not be baked: hit highlight, mineral damage chips, mineral icons. */
+  private drawTerrainDetails(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, startCol: number, endCol: number, startRow: number, endRow: number, delta: number): void {
+    const s = this.tileSize;
+    for (let row = startRow; row <= endRow; row++) {
+      for (let col = startCol; col <= endCol; col++) {
+        const type = this.tiles[row][col];
+        const tileType = TILE_TYPES[type];
+        const terrain = this.terrainMap.get(type);
+        const pickupType = tileType.pickupType;
+        const highlight = this.tileHighlight[row][col];
+        const damage = tileType.isDestructible ? this.mineralDamage.get(row * this.width + col) : undefined;
+        if (highlight <= 0 && !damage && pickupType === undefined) continue;
+        const polygons = this.tilePolygons(col, row);
+        if (highlight > 0) {
+          this.tileHighlight[row][col] = Math.max(0, highlight - delta);
+          if (polygons.length) {
+            ctx.beginPath(); solidPath(ctx, polygons, cameraX, cameraY);
+            ctx.fillStyle = blendColorWithWhite(TILE_TYPES[type].color, Math.min(highlight / this.highlightDuration, 1));
+            ctx.fill();
+          }
+        }
+        if (!polygons.length || (!damage && pickupType === undefined)) continue;
+        const rect = tileScreenRect({ x: col * s, y: row * s, width: s, height: s }, cameraX, cameraY);
+        ctx.beginPath(); solidPath(ctx, polygons, cameraX, cameraY);
+        ctx.save(); ctx.clip();
+        if (damage && terrain?.maxHp) {
+          const count = Math.min(damage.length, Math.ceil(Math.max(0, 1 - this.tileHp[row][col] / terrain.maxHp) * damage.length));
+          for (let i = 0; i < count; i++) {
+            const mark = damage[i];
+            const chip = tileScreenRect({ x: col * s + mark.x, y: row * s + mark.y, width: GOLD_FRAGMENT_SIZE, height: GOLD_FRAGMENT_SIZE }, cameraX, cameraY);
+            ctx.fillStyle = mark.color;
+            ctx.fillRect(chip.x, chip.y, chip.width, chip.height);
+          }
+        }
+        if (pickupType !== undefined) {
+          ctx.save();
+          ctx.fillStyle = '#fff';
+          ctx.font = '20px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(PICKUP_ICONS[pickupType], rect.x + rect.width / 2, rect.y + rect.height / 2);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
+  }
+
+  /**
+   * 直接逐格渲染路径（无 Canvas 环境或不支持分块时使用）
    * @param ctx Canvas渲染上下文
    * @param cameraX 相机X坐标
    * @param cameraY 相机Y坐标
@@ -403,12 +701,9 @@ export class TileMap {
    * @param canvasHeight 画布高度
    * @param delta 时间增量（秒）
    */
-  draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, canvasWidth: number, canvasHeight: number, delta: number) {
-    // 计算需要渲染的瓦片范围，避免不必要的绘制
-    const startCol = Math.max(0, Math.floor(cameraX / this.tileSize));
-    const endCol = Math.min(this.width - 1, Math.ceil((cameraX + canvasWidth) / this.tileSize));
-    const startRow = Math.max(0, Math.floor(cameraY / this.tileSize));
-    const endRow = Math.min(this.height - 1, Math.ceil((cameraY + canvasHeight) / this.tileSize));
+  private drawDirect(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, canvasWidth: number, canvasHeight: number, delta: number,
+    startCol: number, endCol: number, startRow: number, endRow: number) {
+    // 可见瓦片范围由 draw() 计算并传入
 
     // Ground and water are below the complete solid union, including concave fillets.
     for (let row = startRow; row <= endRow; row++) {

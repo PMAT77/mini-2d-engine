@@ -28,6 +28,15 @@ export class Game {
   /** 上次计算FPS的时间戳 */
   private lastFpsUpdate = 0;
 
+  /** 复用的 rAF 回调：此前每帧 `bind` 会分配一个新闭包。 */
+  private readonly boundLoop = (now: number): void => this.loop(now);
+
+  /**
+   * 单帧最大推进时间。掉帧时若把整段真实时间喂给物理，
+   * Entities 的 1/120 子步会成倍增长，形成“越卡越慢”的正反馈。
+   */
+  private static readonly MAX_DELTA = 1 / 30;
+
   /**
    * 构造函数
    * @param canvas 游戏画布元素
@@ -45,7 +54,7 @@ export class Game {
   start(): void {
     this.lastTime = performance.now();
     this.lastFpsUpdate = this.lastTime;
-    requestAnimationFrame(this.loop.bind(this));
+    requestAnimationFrame(this.boundLoop);
   }
 
   /**
@@ -55,8 +64,8 @@ export class Game {
    * @private
    */
   private loop(now: number): void {
-    // 计算时间增量（秒）
-    const delta = (now - this.lastTime) / 1000;
+    // 计算时间增量（秒），并夹住异常长的帧（切标签页、断点、GC 停顿）
+    const delta = Math.min(Game.MAX_DELTA, Math.max(0, (now - this.lastTime) / 1000));
     this.lastTime = now;
 
     // 计算FPS
@@ -70,8 +79,11 @@ export class Game {
     // 更新当前场景
     this.sceneManager.update(delta, this.input);
 
-    // 清空画布并绘制当前场景 
-    this.renderer.clear("#1a1a1a"); // 修改为更适合光照系统的深色背景
+    // 不透明场景自己会铺满画布，跳过全屏清屏；过渡期间需要清屏以免残留上一场景。
+    const scene = this.sceneManager.getCurrentScene();
+    if (!scene || !scene.opaque || this.sceneManager.isSceneTransitioning()) {
+      this.renderer.clear("#1a1a1a"); // 修改为更适合光照系统的深色背景
+    }
     this.sceneManager.draw(this.renderer.ctx);
 
     // 绘制FPS信息
@@ -82,7 +94,7 @@ export class Game {
 
 
     // 请求下一帧动画，继续游戏循环
-    requestAnimationFrame(this.loop.bind(this));
+    requestAnimationFrame(this.boundLoop);
   }
 
   /**

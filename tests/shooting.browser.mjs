@@ -58,13 +58,20 @@ try {
         if (shake) { c.shake(8, 1, .7, 20, 'linear'); c.shakeTime = .08; }
         t.render();
         const r = t.scene.getCanvasViewport(), o = c.getOffset(), target = t.scene.screenToWorld(500, 300);
-        const px = (x, y) => [...t.game.renderer.ctx.getImageData(Math.floor((x - r.left) * t.game.renderer.width / r.width), Math.floor((y - r.top) * t.game.renderer.height / r.height), 1, 1).data];
         const bounds = t.game.renderer.ctx.canvas.getBoundingClientRect();
-        return { target, border: { left: r.left - bounds.left, top: r.top - bounds.top, width: bounds.width - r.width, height: bounds.height - r.height }, expected: { x: o.x + (500 - r.left) * t.scene.worldCanvas.width / r.width, y: o.y + (300 - r.top) * t.scene.worldCanvas.height / r.height }, center: px(500, 300), arm: px(509, 300), cursor: t.game.renderer.ctx.canvas.style.cursor };
+        const root = document.querySelector('[data-crosshair="root"]'), box = root.getBoundingClientRect();
+        const color = selector => getComputedStyle(root.querySelector(selector)).backgroundColor;
+        return { target, border: { left: r.left - bounds.left, top: r.top - bounds.top, width: bounds.width - r.width, height: bounds.height - r.height }, expected: { x: o.x + (500 - r.left) * t.scene.worldCanvas.width / r.width, y: o.y + (300 - r.top) * t.scene.worldCanvas.height / r.height }, overlay: { display: getComputedStyle(root).display, x: box.x, y: box.y }, arm: color('[data-crosshair="arm"]'), center: color('[data-crosshair="dot"]'), cursor: t.game.renderer.ctx.canvas.style.cursor };
       }, shake);
       near(check.target.x, check.expected.x); near(check.target.y, check.expected.y);
       assert.deepEqual(check.border, { left: 2, top: 2, width: 4, height: 4 }, 'the bitmap excludes the existing canvas border');
-      assert.deepEqual(check.center, [216, 250, 255, 255]); assert.ok(check.arm[0] > 120 && check.arm[1] > 150 && check.arm[2] > 150, 'idle crosshair arms are white'); assert.equal(check.cursor, 'none');
+      // The reticle is a DOM layer at the pointer position, so zoom, shake and DPR cannot move it.
+      assert.equal(check.overlay.display, 'block', 'the reticle overlay is visible');
+      near(check.overlay.x, 500, .75); near(check.overlay.y, 300, .75);
+      assert.equal(check.center, 'rgb(216, 250, 255)'); assert.equal(check.arm, 'rgb(216, 250, 255)', 'idle crosshair arms are white'); assert.equal(check.cursor, 'none');
+      // 对局内系统指针隐藏（页面级），只留准星；调试面板自己保留可点击指针。
+      assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), true, 'system cursor is hidden while playing');
+      assert.equal(await page.evaluate(() => getComputedStyle(document.body).cursor), 'none', 'body cursor is suppressed in game');
     }
     await page.screenshot({ path: join(output, 'mouse-aim-dpr' + dpr + '.png') });
     const coords = await page.evaluate(() => { mouseTest.scene.camera.reset(); mouseTest.render(); return mouseTest.client(625, 225); });
@@ -133,29 +140,28 @@ try {
     await page.mouse.down({ button: 'right' });
     assert.ok(await page.evaluate(() => mouseTest.pump()) > 0.9, 'aiming at a live chicken tightens the crosshair');
     const aimed = await page.evaluate(() => {
-      const t = mouseTest, r = t.scene.getCanvasViewport(), c = t.game.renderer.ctx;
-      const px = (x, y) => [...c.getImageData(Math.floor((x - r.left) * t.game.renderer.width / r.width), Math.floor((y - r.top) * t.game.renderer.height / r.height), 1, 1).data];
-      return { center: px(400, 250), arm: px(405, 250) };
+      const root = document.querySelector('[data-crosshair="root"]');
+      return { center: getComputedStyle(root.querySelector('[data-crosshair="dot"]')).backgroundColor,
+        arm: getComputedStyle(root.querySelector('[data-crosshair="arm"]')).backgroundColor };
     });
-    assert.deepEqual(aimed.center, [216, 250, 255, 255], 'crosshair centre stays white on target');
-    assert.ok(aimed.arm[0] > 150 && aimed.arm[1] < 120 && aimed.arm[2] < 120, 'crosshair arms turn red on a live chicken');
+    assert.equal(aimed.center, 'rgb(216, 250, 255)', 'crosshair centre stays white on target');
+    assert.equal(aimed.arm, 'rgb(255, 59, 48)', 'crosshair arms turn red on a live chicken');
     await page.screenshot({ path: join(output, 'mouse-crosshair-target-dpr' + dpr + '.png') });
     await page.mouse.move(700, 250);
     assert.ok(await page.evaluate(() => mouseTest.pump()) < 0.1, 'leaving the target relaxes the crosshair');
-    const relaxed = await page.evaluate(() => {
-      const t = mouseTest, r = t.scene.getCanvasViewport(), c = t.game.renderer.ctx;
-      return [...c.getImageData(Math.floor((709 - r.left) * t.game.renderer.width / r.width), Math.floor((250 - r.top) * t.game.renderer.height / r.height), 1, 1).data];
-    });
-    assert.ok(relaxed[0] > 120 && relaxed[1] > 150 && relaxed[2] > 150, 'crosshair arms return to white off target');
+    const relaxed = await page.evaluate(() => getComputedStyle(document.querySelector('[data-crosshair="arm"]')).backgroundColor);
+    assert.equal(relaxed, 'rgb(216, 250, 255)', 'crosshair arms return to white off target');
     await page.mouse.move(400, 250);
     assert.ok(await page.evaluate(() => mouseTest.pump()) > 0.9, 'returning to the target tightens again');
     await page.mouse.up({ button: 'right' });
     assert.ok(await page.evaluate(() => mouseTest.pump()) < 0.1, 'releasing right relaxes the crosshair');
     await page.evaluate(() => mouseTest.scene.onExit());
     assert.equal(await page.locator('canvas').evaluate(c => c.style.cursor), '');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), false, 'leaving the scene restores the system cursor');
+    assert.equal(await page.evaluate(() => document.querySelector('[data-crosshair="root"]')), null, 'leaving the scene removes the reticle');
     assert.deepEqual(errors, []);
     results.push({ dpr, live, click, right, wall, resize }); await context.close();
   }
   writeFileSync(join(output, 'shooting-results.json'), JSON.stringify(results, null, 2));
-  console.log('Browser mouse shooting passed: real live fire, quick clicks, right-button turning, first-wall sweeps, DPR/zoom/shake crosshair pixels, focus/leave/exit and resize.');
+  console.log('Browser mouse shooting passed: real live fire, quick clicks, right-button turning, first-wall sweeps, DPR/zoom/shake reticle layer, focus/leave/exit and resize.');
 } finally { await browser.close(); }

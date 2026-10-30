@@ -46,7 +46,7 @@ function template(mask: number): LocalPatch[] {
 
 /** Local topology only: public tile-array edits are observed without a full-map dirty scan. */
 export class SolidTerrain {
-  private cells = new Map<string, { mask: number; size: number; patches: SolidPatch[] }>();
+  private cells = new Map<number, { mask: number; size: number; patches: SolidPatch[] }>();
   constructor(private occupied: (col: number, row: number) => boolean) {}
   private mask(col: number, row: number): number {
     let mask = 0;
@@ -59,7 +59,7 @@ export class SolidTerrain {
     return template(this.mask(col, row)).some(p => inside(p.vertices, x / size - col, y / size - row));
   }
   getCell(col: number, row: number, size: number): SolidPatch[] {
-    const mask = this.mask(col, row), key = `${col},${row}`, cached = this.cells.get(key);
+    const mask = this.mask(col, row), key = col * 0x10000 + row, cached = this.cells.get(key);
     if (cached?.mask === mask && cached.size === size) return cached.patches;
     const patches = template(mask).map(local => {
       const vertices = local.vertices.map(p => ({ x: (col + p.x) * size, y: (row + p.y) * size }));
@@ -94,7 +94,9 @@ export class SolidTerrain {
     const patches: SolidPatch[] = [];
     for (let row = Math.max(0, Math.floor(bounds.y / size) - 1); row <= Math.min(height - 1, Math.floor((bounds.y + bounds.height) / size) + 1); row++) {
       for (let col = Math.max(0, Math.floor(bounds.x / size) - 1); col <= Math.min(width - 1, Math.floor((bounds.x + bounds.width) / size) + 1); col++) {
-        if (overlapsBounds(bounds, { x: col * size, y: row * size, width: size, height: size })) patches.push(...this.getCell(col, row, size));
+        if (overlapsBounds(bounds, { x: col * size, y: row * size, width: size, height: size })) {
+          for (const patch of this.getCell(col, row, size)) patches.push(patch);
+        }
       }
     }
     return patches;
@@ -102,7 +104,7 @@ export class SolidTerrain {
 }
 
 /** One path/fill for a union; separate antialiased fills would expose internal seams. */
-export function solidPath(ctx: CanvasRenderingContext2D, polygons: Polygon[], cameraX: number, cameraY: number): void {
+export function solidPath(ctx: CanvasPath, polygons: Polygon[], cameraX: number, cameraY: number): void {
   for (const { vertices } of polygons) {
     vertices.forEach((p, i) => i ? ctx.lineTo(p.x - cameraX, p.y - cameraY) : ctx.moveTo(p.x - cameraX, p.y - cameraY));
     ctx.closePath();

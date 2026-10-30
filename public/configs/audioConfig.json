@@ -1,0 +1,26 @@
+{
+  "master": 1,
+  "weapon": {
+    "secondaryVolume": 0.6,
+    "primaryVolume": 0.55,
+    "reloadVolume": 0.5
+  },
+  "footsteps": {
+    "wetVolume": 0.5,
+    "waterVolume": 0.45,
+    "dryVolume": 0.45
+  },
+  "pickups": {
+    "goldVolume": 0.4,
+    "meatVolume": 0.5
+  },
+  "flashlight": {
+    "switchVolume": 0.5
+  },
+  "chicken": {
+    "stepVolume": 0.25,
+    "cluckVolume": 0.45,
+    "range": 620,
+    "minAttenuation": 0.08
+  }
+}

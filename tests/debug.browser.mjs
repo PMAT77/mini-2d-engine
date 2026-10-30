@@ -50,6 +50,8 @@ try {
     const panel = page.getByRole('complementary', { name: '角色属性调试' });
     const field = name => page.locator(`[data-debug-field="${name}"]`);
     const edit = async (name, value) => { await field(name).fill(String(value)); await field(name).press('Enter'); };
+    const tab = name => page.getByRole('tab', { name, exact: true });
+    const openTab = async name => { if (await tab(name).getAttribute('aria-selected') !== 'true') await tab(name).click(); };
     assert.equal(await panel.isVisible(), false);
     await page.keyboard.press('F2'); assert.equal(await panel.isVisible(), true);
     await page.keyboard.down('F2'); // a held key's repeat must not close/reopen the panel
@@ -58,9 +60,28 @@ try {
     // The preceding fresh keydown toggles closed once; repeating leaves it closed.
     assert.equal(await panel.isVisible(), false); await page.getByRole('button', { name: '调试 · F2' }).click();
 
-    assert.equal(await field('light.radius').inputValue(), '100', 'glow radius defaults to 100');
-    assert.equal(await field('light.intensity').inputValue(), '0.5', 'glow intensity defaults to 0.5');
-    assert.equal(await field('flashlight.intensity').inputValue(), '0.8', 'flashlight intensity defaults to 0.8');
+    const dialog = page.getByRole('dialog', { name: '调试面板' });
+    assert.equal(await dialog.isVisible(), true, 'the panel is a modal dialog');
+    assert.equal(await dialog.getAttribute('aria-modal'), 'true');
+    const box = await panel.boundingBox();
+    assert.ok(Math.abs(box.x + box.width / 2 - 550) <= 2, 'modal is horizontally centered');
+    assert.ok(Math.abs(box.y + box.height / 2 - 400) <= 2, 'modal is vertically centered');
+    assert.equal(await tab('角色').getAttribute('aria-selected'), 'true', 'character tab is active by default');
+
+    await openTab('画面');
+    assert.equal(await field('graphics.playerLight.radius').inputValue(), '100', 'glow radius defaults to 100');
+    assert.equal(await field('graphics.playerLight.intensity').inputValue(), '0.5', 'glow intensity defaults to 0.5');
+    assert.equal(await field('graphics.flashlight.intensity').inputValue(), '0.8', 'flashlight intensity defaults to 0.8');
+
+    await openTab('音效');
+    assert.equal(await field('audio.master').inputValue(), '1', 'master volume defaults to 1');
+    await edit('audio.master', 0.5);
+    assert.equal(await page.evaluate(() => debugTest.scene.audio.master), 0.5);
+    await edit('audio.master', 1);
+    await tab('音效').focus(); await page.keyboard.press('ArrowLeft');
+    assert.equal(await tab('画面').getAttribute('aria-selected'), 'true', 'arrow keys move between tabs');
+
+    await openTab('角色');
 
     await edit('base.maxHealth', 200); await edit('health', 45);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getHealth()), 45);
@@ -70,6 +91,14 @@ try {
     await field('base.maxHealth').fill('-2'); await field('base.maxHealth').press('Enter');
     assert.equal(await field('base.maxHealth').getAttribute('aria-invalid'), 'true');
     assert.equal(await page.evaluate(() => debugTest.scene.player.getMaxHealth()), 200);
+    const slider = name => page.locator(`[data-debug-slider="${name}"]`);
+    assert.equal(await slider('base.maxHealth').getAttribute('max'), '1000');
+    await slider('base.maxHealth').evaluate(element => {
+      element.value = '150';
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getMaxHealth()), 150);
+    assert.equal(await field('base.maxHealth').inputValue(), '150');
     await edit('base.maxHealth', 200);
     await field('shooting.damage').fill('35'); await field('shooting.bulletSpeed').focus(); // blur commits too
     await edit('shooting.fireRate', 10); await edit('shooting.bulletSpeed', 1000);
@@ -93,7 +122,8 @@ try {
     await edit('base.maxSpeed', 500); await edit('sprint.speedMultiplier', 2);
     await edit('movement.startSpeedRatio', 0.4); await edit('movement.startupDuration', 0.2);
     await edit('movement.stopDuration', 0.4); await edit('sprint.rampDuration', 0);
-    await page.locator('canvas').click({ position: { x: 120, y: 120 } });
+    await page.locator('.debug-overlay').click({ position: { x: 5, y: 5 } });
+    assert.equal(await panel.isVisible(), false, 'clicking the backdrop closes the modal');
     await page.keyboard.down('d');
     await page.evaluate(() => debugTest.tick(0.05));
     const startingSpeed = await page.evaluate(() => debugTest.scene.player.getVelocity().length());
@@ -108,7 +138,8 @@ try {
     assert.ok(coasting > 0 && coasting < 1000);
     await page.evaluate(() => debugTest.advance(0.4));
 
-    await page.keyboard.down('d'); await page.mouse.down();
+    await page.keyboard.press('F2'); assert.equal(await panel.isVisible(), true);
+    await page.keyboard.down('d'); await page.mouse.move(550, 400); await page.mouse.down();
     await field('shooting.damage').focus();
     assert.equal(await page.evaluate(() => debugGame.input.isKeyDown('d') || debugGame.input.getPointerState().leftDown), false);
     await page.keyboard.up('d'); await page.mouse.up();
@@ -119,11 +150,13 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.x), beforeEditX);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getBullets().length), 0);
     await edit('shooting.damage', 42);
-    await page.locator('canvas').click({ position: { x: 120, y: 120 } });
+    await page.locator('.debug-overlay').click({ position: { x: 5, y: 5 } });
+    assert.equal(await panel.isVisible(), false, 'backdrop click restores gameplay input');
     await page.mouse.down(); await page.evaluate(() => debugTest.tick(0.01));
     assert.equal(await page.evaluate(() => debugTest.scene.player.getBullets()[0].getDamage()), 42);
     assert.ok(Math.abs(await page.evaluate(() => debugTest.scene.player.getBullets()[0].velocity.length()) - 1000) < 1e-8);
     await page.mouse.up();
+    await page.keyboard.press('F2'); assert.equal(await panel.isVisible(), true);
 
     await edit('sprint.maxStamina', 200); await edit('stamina', 0);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getDebugState().exhausted), true);
@@ -157,40 +190,52 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.getAutoReload()), false);
     await page.getByRole('button', { name: '补满弹匣', exact: true }).click();
 
-    await edit('light.radius', 80); await edit('light.intensity', 1);
+    await openTab('画面');
+    await edit('graphics.playerLight.radius', 80); await edit('graphics.playerLight.intensity', 1);
     const smallLight = await page.evaluate(() => debugTest.brightness());
-    await edit('light.radius', 600);
+    await edit('graphics.playerLight.radius', 600);
     const wideLight = await page.evaluate(() => debugTest.brightness());
     assert.ok(wideLight > smallLight, 'larger radius lights previously dark ground');
-    await edit('light.intensity', 0);
+    await edit('graphics.playerLight.intensity', 0);
     const unlit = await page.evaluate(() => debugTest.brightness());
-    await edit('light.intensity', 2);
+    await edit('graphics.playerLight.intensity', 0.5);
+    const halfLight = await page.evaluate(() => debugTest.brightness());
+    await edit('graphics.playerLight.intensity', 2);
     const brightLight = await page.evaluate(() => debugTest.brightness());
-    assert.ok(brightLight > wideLight && wideLight > unlit, 'intensity changes the rendered ground brightness');
-    await edit('light.intensity', 3);
-    assert.equal(await field('light.intensity').getAttribute('aria-invalid'), 'true');
+    assert.ok(halfLight > unlit, 'intensity brightens the rendered ground');
+    assert.ok(brightLight >= halfLight, 'higher intensity never darkens the ground');
+    await edit('graphics.playerLight.intensity', 3);
+    assert.equal(await field('graphics.playerLight.intensity').getAttribute('aria-invalid'), 'true');
     assert.equal(await page.evaluate(() => debugTest.scene.playerLight.getIntensity()), 2);
-    await edit('light.radius', -1);
-    assert.equal(await field('light.radius').getAttribute('aria-invalid'), 'true');
+    await edit('graphics.playerLight.radius', -1);
+    assert.equal(await field('graphics.playerLight.radius').getAttribute('aria-invalid'), 'true');
     assert.equal(await page.evaluate(() => debugTest.scene.playerLight.getRadius()), 600);
-    await edit('light.radius', 0); await page.evaluate(() => debugTest.brightness());
+    await edit('graphics.playerLight.radius', 0); await page.evaluate(() => debugTest.brightness());
     assert.equal(await page.evaluate(() => debugTest.scene.playerLight.getRadius()), 0);
 
-    await edit('vision.range', 700);
+    await edit('graphics.fog.range', 700);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getVisionRange()), 700);
-    await edit('vision.range', 50);
-    assert.equal(await field('vision.range').getAttribute('aria-invalid'), 'true');
+    await edit('graphics.fog.range', 50);
+    assert.equal(await field('graphics.fog.range').getAttribute('aria-invalid'), 'true');
     assert.equal(await page.evaluate(() => debugTest.scene.player.getVisionRange()), 700);
-    await edit('vision.range', 400);
+    await edit('graphics.fog.range', 400);
 
-    await edit('flashlight.radius', 650);
+    await edit('graphics.flashlight.range', 650);
     assert.equal(await page.evaluate(() => debugTest.scene.flashlight.getRadius()), 650);
-    await edit('flashlight.intensity', 1.2);
+    await edit('graphics.flashlight.intensity', 1.2);
     assert.equal(await page.evaluate(() => debugTest.scene.flashlight.getIntensity()), 1.2);
-    await edit('flashlight.intensity', 3);
-    assert.equal(await field('flashlight.intensity').getAttribute('aria-invalid'), 'true');
+    await edit('graphics.flashlight.intensity', 3);
+    assert.equal(await field('graphics.flashlight.intensity').getAttribute('aria-invalid'), 'true');
     assert.equal(await page.evaluate(() => debugTest.scene.flashlight.getIntensity()), 1.2);
-    await edit('flashlight.radius', 400); await edit('flashlight.intensity', 0.9);
+    await edit('graphics.flashlight.range', 400); await edit('graphics.flashlight.intensity', 0.9);
+
+    const zoomBefore = await page.evaluate(() => debugTest.scene.camera.width);
+    await edit('graphics.camera.zoom', 1);
+    assert.equal(await page.evaluate(() => debugTest.scene.graphics.camera.zoom), 1);
+    assert.notEqual(await page.evaluate(() => debugTest.scene.camera.width), zoomBefore, 'zoom recalculates the camera viewport');
+    await edit('graphics.camera.zoom', 0.85);
+
+    await openTab('角色');
 
     for (const [key, initial, tuned, type] of [['shallow',40,20,'shallow_water'],['water',80,30,'water'],['deep',160,40,'deep_water'],['ultraDeep',320,50,'ultra_deep_water']]) {
       const id=`bulletWaterDrag.${key}`;
@@ -223,6 +268,9 @@ try {
     await page.screenshot({path:join(output,`debug-water-drag-dpr-${dpr}.png`)});
 
     await page.evaluate(() => debugTest.scene.player.addModifier('maxSpeed', 0.5, 0, true));
+    await openTab('画面'); await edit('graphics.camera.zoom', 1.2);
+    await openTab('音效'); await edit('audio.master', 0.6);
+    await openTab('角色');
     await page.getByRole('button', { name: '恢复初始参数', exact: true }).click();
     const initialSpeed = await page.evaluate(() => debugTest.initialSpeed);
     assert.equal(await field('base.maxSpeed').inputValue(), String(initialSpeed));
@@ -236,14 +284,23 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), false);
     assert.deepEqual(await page.evaluate(() => ({ radius: debugTest.scene.playerLight.getRadius(), intensity: debugTest.scene.playerLight.getIntensity() })),
       await page.evaluate(() => debugTest.initialLight));
-    assert.equal(await field('vision.range').inputValue(), '400', 'reset restores the fog radius baseline');
-    assert.equal(await field('flashlight.radius').inputValue(), '400', 'reset restores the flashlight range baseline');
-    assert.equal(await field('flashlight.intensity').inputValue(), '0.8', 'reset restores the flashlight intensity baseline');
+    assert.equal(await field('graphics.fog.range').inputValue(), '400', 'reset restores the fog radius baseline');
+    assert.equal(await field('graphics.flashlight.range').inputValue(), '400', 'reset restores the flashlight range baseline');
+    assert.equal(await field('graphics.flashlight.intensity').inputValue(), '0.8', 'reset restores the flashlight intensity baseline');
+    assert.equal(await field('graphics.camera.zoom').inputValue(), '0.85', 'reset restores the camera zoom baseline');
+    assert.equal(await field('audio.master').inputValue(), '1', 'reset restores the master volume baseline');
+    assert.equal(await page.evaluate(() => debugTest.scene.graphics.camera.zoom), 0.85);
+    assert.equal(await page.evaluate(() => debugTest.scene.audio.master), 1);
     assert.ok((await panel.innerText()).includes(`实际 ${initialSpeed * 1.5}`));
     await panel.locator('.debug-content').evaluate(element => { element.scrollTop = 0; });
     await page.screenshot({ path: join(output, `debug-panel-dpr-${dpr}.png`) });
 
     await page.keyboard.press('Escape'); assert.equal(await panel.isVisible(), false);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), true, 'Escape reveals the system cursor');
+    assert.equal(await page.locator('canvas').evaluate(element => getComputedStyle(element).cursor), 'default');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), false, 'Escape hides the system cursor again');
     await page.keyboard.press('d');
     assert.equal(await page.evaluate(() => debugGame.input.isKeyDown('d')), false, 'keyup after close leaves no stuck key');
     await page.evaluate(async () => {
@@ -258,16 +315,17 @@ try {
     await page.keyboard.press('F2'); assert.equal(await panel.isVisible(), true);
     await page.getByRole('button', { name: '恢复初始参数', exact: true }).click();
     assert.equal(await field('base.maxSpeed').inputValue(), String(initialSpeed), 'reentry retains original reset baseline');
-    assert.equal(await field('light.radius').inputValue(), String(await page.evaluate(() => debugTest.initialLight.radius)));
+    assert.equal(await field('graphics.playerLight.radius').inputValue(), String(await page.evaluate(() => debugTest.initialLight.radius)));
 
     await page.setViewportSize({ width: 360, height: 640 });
     const bounds = await panel.boundingBox();
-    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 360 && bounds.y + bounds.height <= 640);
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 360 && bounds.y >= 0 && bounds.y + bounds.height <= 640);
+    assert.ok(Math.abs(bounds.x + bounds.width / 2 - 180) <= 2 && Math.abs(bounds.y + bounds.height / 2 - 320) <= 2, 'narrow viewport keeps the modal centered');
     assert.ok(await panel.locator('.debug-content').evaluate(element => element.scrollHeight > element.clientHeight));
     await panel.locator('.debug-content').evaluate(element => { element.scrollTop = element.scrollHeight; });
     await page.screenshot({ path: join(output, `debug-panel-narrow-dpr-${dpr}.png`) });
     assert.deepEqual(errors, []);
-    scenarios += 22;
+    scenarios += 40;
     await context.close();
   }
   console.log(`Debug panel: ${scenarios} scenarios passed across DPR 1 / 1.25 / 2`);

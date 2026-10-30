@@ -14,6 +14,8 @@ export class Input {
   private pointerEnabled = false;
   private previousCursor = '';
   private pointer: PointerState = { clientX: 0, clientY: 0, active: false, leftDown: false, rightDown: false, leftPressed: false };
+  /** 指针位置变化时的同步回调：准星等 UI 直接跟随，不必等下一帧渲染。 */
+  onPointerMove?: (clientX: number, clientY: number) => void;
 
   constructor(private canvas?: HTMLCanvasElement) {
     this.previousCursor = canvas?.style.cursor ?? '';
@@ -33,12 +35,14 @@ export class Input {
       this.pointer.leftDown &&= !!(event.buttons & 1);
       this.pointer.rightDown &&= !!(event.buttons & 2);
       this.updateCursor();
+      this.onPointerMove?.(this.pointer.clientX, this.pointer.clientY);
     });
     canvas?.addEventListener('pointerdown', event => {
       if (!this.pointerEnabled || this.blocked || event.pointerType !== 'mouse' || event.defaultPrevented) return;
       this.pointer.clientX = event.clientX; this.pointer.clientY = event.clientY;
       this.pointer.active = true;
       this.updateCursor();
+      this.onPointerMove?.(this.pointer.clientX, this.pointer.clientY);
     });
     // Mouse down/up fire for every button in a chord; pointer down/up only fire for its first/last button.
     canvas?.addEventListener('mousedown', event => {
@@ -49,6 +53,7 @@ export class Input {
       if (event.button === 0) { this.pointer.leftDown = true; this.pointer.leftPressed = true; }
       if (event.button === 2) this.pointer.rightDown = true;
       this.updateCursor();
+      this.onPointerMove?.(this.pointer.clientX, this.pointer.clientY);
     });
     window.addEventListener('mouseup', (event: MouseEvent) => {
       if (event.button === 0) this.pointer.leftDown = false;

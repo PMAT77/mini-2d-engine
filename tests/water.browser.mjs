@@ -3,7 +3,10 @@ import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 const require=createRequire(import.meta.url);
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
-const browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
+// Headless Chromium uses SwiftShader (software raster) by default, which cannot reach the
+// 60 fps sampling budget this file measures; GPU flags are opt-in via BROWSER_ARGS.
+const launchArgs=process.env.BROWSER_ARGS?process.env.BROWSER_ARGS.split(/\s+/).filter(Boolean):[];
+const browser=await chromium.launch({headless:true,...(launchArgs.length?{args:launchArgs}:{}),...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
 const base=process.env.TEST_BASE_URL||'http://127.0.0.1:5173',output=process.env.SCREENSHOT_DIR||'.review';
 const performanceMode=process.argv.includes('--performance'),results=[];
 mkdirSync(output,{recursive:true});

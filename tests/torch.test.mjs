@@ -68,25 +68,86 @@ test('random torches use dry clear ground near walls, stay spaced, and reproduce
   assert.deepEqual(Torch.generate(open, seededRandom(42)), [], 'open ground with no wall nearby gets no torches');
 });
 
-test('walking and shooting through a torch leaves it and its light intact', () => {
+test('a torch can be walked through, but only a crosshair aimed at it lets a bullet extinguish it', () => {
   const scene = new GameScene({ seed: 42, generateWater: false });
+  // 只留火把：避免随机小鸡挡在测试弹道上。
+  scene.chickens = [];
   const torch = scene.torches[0], map = scene.map;
   const body = rectangleCollider(torch.x - 5, torch.y - 5, 10, 10);
   assert.ok(map.isShapeWalkable(body));
   assert.equal(map.castShape(body, { x: 1, y: 0 }), null);
-  const bullet = new Bullet(new Vector2(torch.x - 10, torch.y), new Vector2(100, 0), 10000);
-  bullet.update(0.2, map);
-  assert.equal(bullet.getIsDestroyed(), false);
+
   const count = scene.lightingSystem.getLightCount();
-  map.damageTile(Math.floor(torch.x / 50), Math.floor(torch.y / 50), 10000);
-  map.breakTile(Math.floor(torch.x / 50), Math.floor(torch.y / 50));
+  // 运行时读取 Player 上的私有回调：这里用的就是 GameScene 装配的真实命中链。
+  const hitTest = scene.player.bulletEntityHitTest;
+  assert.equal(typeof hitTest, 'function');
+
+  // 拦截粒子，确认熄灭时冒的是白色烟雾。
+  const particles = scene.particleSystem, bursts = [];
+  scene.particleSystem = { createExplosion: (...args) => bursts.push(args), update() {}, addParticle() {} };
+
+  // 准星在火把外的空地：即使弹道正好穿过火苗，也不算命中。
+  const passing = new Bullet(new Vector2(torch.x - 40, torch.y - 2), new Vector2(1000, 0), 10);
+  passing.setEntityHitTest(hitTest);
+  passing.setAimTarget(new Vector2(torch.x + 200, torch.y - 2));
+  passing.update(0.05);
+  assert.equal(passing.getIsDestroyed(), false);
+  assert.equal(torch.isLit(), true);
+  assert.equal(scene.lightingSystem.getLightCount(), count);
+  // 同一线段显式查询：准星不在火把上返回 null，压在火把上才算命中。
+  assert.equal(hitTest(torch.x - 40, torch.y - 2, torch.x + 40, torch.y - 2, 5, 10,
+    { x: torch.x + 200, y: torch.y - 2 }), null);
+  assert.ok(hitTest(torch.x - 40, torch.y - 2, torch.x + 40, torch.y - 2, 5, 10,
+    { x: torch.x, y: torch.y - 2 }) !== null);
+
+  // 准星压在火苗上：子弹停在火苗边缘，火把永久熄灭并撤掉光源。
+  const aimed = new Bullet(new Vector2(torch.x - 40, torch.y - 2), new Vector2(1000, 0), 10);
+  aimed.setEntityHitTest(hitTest);
+  aimed.setAimTarget(new Vector2(torch.x, torch.y - 2));
+  aimed.update(0.1);
+  assert.equal(aimed.getIsDestroyed(), true);
+  const stop = aimed.getPosition().clone();
+  stop.add(new Vector2(aimed.getSize() / 2, aimed.getSize() / 2));
+  assert.ok(Math.abs(stop.x - (torch.x - Torch.HIT_RADIUS - aimed.getSize() / 2)) < 1e-6, 'bullet stops at the flame edge');
+  assert.ok(Math.abs(stop.y - (torch.y - 2)) < 1e-6);
+  assert.equal(torch.isLit(), false);
+  assert.equal(torch.light.isLightActive(), false);
+  assert.equal(scene.lightingSystem.getLightCount(), count - 1);
+
+  // 白色烟雾：至少有一团大颗粒、慢速、停留久的白烟，颜色全是白／灰白。
+  assert.ok(bursts.length >= 2, 'extinguishing spawns smoke');
+  const smoke = bursts.find(([, amount, , size, life]) => amount >= 12 && size >= 5 && life >= 0.8);
+  assert.ok(smoke, 'a large slow white puff replaces the old ember burst');
+  assert.ok(smoke[5].includes('#ffffff'));
+  const white = new Set(['#ffffff', '#f7f7f7', '#ececec', '#dedede']);
+  assert.ok(smoke[5].every(color => white.has(color)));
+
+  // 已灭的火把不挡子弹，也不能被重复熄灭或重新点亮。
+  assert.equal(hitTest(torch.x - 40, torch.y - 2, torch.x + 40, torch.y - 2, 5, 10,
+    { x: torch.x, y: torch.y - 2 }), null);
+  assert.equal(torch.isAimedAt(torch.x, torch.y), false);
+  assert.equal(torch.extinguish(), false);
+  for (let i = 0; i < 120; i++) torch.update(1 / 60);
+  scene.particleSystem = particles;
   scene.loaded = true;
   scene.update(1 / 60, { isKeyDown: () => false });
+  assert.equal(torch.light.isLightActive(), false);
+  assert.equal(scene.lightingSystem.getLightCount(), count - 1);
   assert.ok(scene.torches.includes(torch));
-  assert.equal(scene.lightingSystem.getLightCount(), count);
-  for (let i = 0; i < 600; i++) {
-    torch.update(1 / 60);
-    assert.ok(torch.light.getIntensity() >= 0.9 && torch.light.getIntensity() <= 1);
-  }
-  assert.equal(torch.light.isLightActive(), true);
+});
+
+test('the torch hit zone is the flame core, and the crosshair must be on the torch', () => {
+  const torch = new Torch(100, 200);
+  // 火苗中心在 (100, 198)：贴着占地边缘横穿、离火苗 22px 的两条线都不算命中。
+  assert.equal(torch.hitTestSegment(40, 220, 140, 220, 5), null);
+  assert.equal(torch.hitTestSegment(40, 240, 140, 240, 5), null);
+  assert.ok(torch.hitTestSegment(40, 198, 140, 198, 5) !== null);
+  // 准星判定覆盖火焰和木柄，偏出 10px 就不再算瞄准。
+  assert.equal(torch.isAimedAt(100, 200), true);
+  assert.equal(torch.isAimedAt(100, 210), true);
+  assert.equal(torch.isAimedAt(100, 211), false);
+  assert.equal(torch.isAimedAt(111, 200), false);
+  torch.extinguish();
+  assert.equal(torch.hitTestSegment(40, 198, 140, 198, 5), null, 'a dead torch is no longer a target');
+  assert.equal(torch.isAimedAt(100, 200), false, 'a dead torch is no longer aimable');
 });

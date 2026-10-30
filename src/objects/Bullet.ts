@@ -30,9 +30,11 @@ export interface BulletEntityHit {
  * 子弹每次位移时的单位命中查询。
  * @param radius 子弹半径，命中半径由目标自行与本值相加
  * @param damage 本颗子弹已结算增益后的伤害
+ * @param aim 开火瞬间冻结的准星世界落点，用于判断这一枪是否瞄准了火把
  */
 export type BulletEntityHitTest = (
   startX: number, startY: number, endX: number, endY: number, radius: number, damage: number,
+  aim?: { x: number; y: number },
 ) => BulletEntityHit | null;
 
 /**
@@ -61,6 +63,9 @@ export class Bullet {
 
   /** 场景注入的单位命中查询；命中单位时子弹优先于该点之后的地形结算。 */
   private entityHitTest?: BulletEntityHitTest;
+
+  /** 开火瞬间冻结的准星世界落点；火把只在这一枪确实瞄着它时才可被熄灭。 */
+  private aimTarget?: Vector2;
 
   /** 子弹渲染颜色 */
   private color = "#ffffff";
@@ -191,7 +196,7 @@ export class Bullet {
     const terrainHit = map ? map.castShape(circleCollider(startX, startY, this.size / 2), movement, 'projectile') : null;
     // 单位线段检测使用中心点；如果地形更近，仍由地形先吞掉子弹。
     const entityHit = this.entityHitTest?.(startX, startY, startX + movement.x, startY + movement.y,
-      this.size / 2, this.damage);
+      this.size / 2, this.damage, this.aimTarget);
     if (entityHit && (!terrainHit || entityHit.fraction < terrainHit.fraction - 1e-9)) {
       this.pos.x += movement.x * entityHit.fraction;
       this.pos.y += movement.y * entityHit.fraction;
@@ -305,6 +310,13 @@ export class Bullet {
   /** 注入/移除场景的单位命中查询；由玩家在发射时转发。 */
   setEntityHitTest(test?: BulletEntityHitTest): void {
     this.entityHitTest = test;
+  }
+
+  /** 冻结开火瞬间的准星落点，命中查询据此判断这一枪是否瞄准了目标。 */
+  setAimTarget(target?: { x: number; y: number }): void {
+    this.aimTarget = target && Number.isFinite(target.x) && Number.isFinite(target.y)
+      ? new Vector2(target.x, target.y)
+      : undefined;
   }
 
   /**

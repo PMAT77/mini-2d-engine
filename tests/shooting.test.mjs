@@ -231,3 +231,23 @@ test('pointer click edges survive release between frames and clear on ownership,
   let prevented = false; canvasListeners.contextmenu({ preventDefault() { prevented = true; } }); assert.equal(prevented, true);
   input.setPointerEnabled(false); prevented = false; canvasListeners.contextmenu({ preventDefault() { prevented = true; } }); assert.equal(prevented, false);
 });
+
+test('muzzle flash lights up on a firearm shot, fades quickly, and never shows while unarmed', () => {
+  const p = makePlayer();
+  assert.equal(p.getMuzzleFlashTime(), 0);
+  p.update(0, idle, undefined, aim());
+  const lit = p.getMuzzleFlashTime();
+  assert.ok(lit > 0 && lit <= .07);
+  // 冷却期间不会重新点燃，但剩余时间继续衰减。
+  p.update(.02, idle, undefined, aim());
+  assert.ok(p.getMuzzleFlashTime() > 0 && p.getMuzzleFlashTime() < lit);
+  p.update(.06, idle, undefined, aim());
+  assert.equal(p.getMuzzleFlashTime(), 0);
+
+  // 空手（近战槽没有枪）时点左键既不出子弹，也不点亮火焰。
+  const unarmed = makePlayer();
+  unarmed.toggleMelee();
+  unarmed.update(0, idle, undefined, aim());
+  assert.equal(unarmed.getBullets().length, 0);
+  assert.equal(unarmed.getMuzzleFlashTime(), 0);
+});

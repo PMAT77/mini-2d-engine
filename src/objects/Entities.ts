@@ -18,9 +18,16 @@ export abstract class Entities extends GameObject {
   protected terrainSpeedFactor = 1;
   protected terrainWaterCoverage = { fraction: 0, depth: 0 };
 
-  public setCollider(shape: ColliderShape): void { this.colliderShape = compileShape(shape); }
+  public setCollider(shape: ColliderShape): void { this.colliderShape = compileShape(shape); this.colliderCache = undefined; }
+  private colliderCache?: { x: number; y: number; size: number; rotation: number; collider: Collider };
   public getCollider(): Collider {
-    return transformCollider(this.colliderShape, { x: this.x + this.size / 2, y: this.y + this.size / 2, size: this.size, rotation: this.getBodyRotation() });
+    const x = this.x + this.size / 2, y = this.y + this.size / 2, rotation = this.getBodyRotation();
+    const cache = this.colliderCache;
+    // Entities query their collider several times per substep; reuse it while the pose is unchanged.
+    if (cache && cache.x === x && cache.y === y && cache.size === this.size && cache.rotation === rotation) return cache.collider;
+    const collider = transformCollider(this.colliderShape, { x, y, size: this.size, rotation });
+    this.colliderCache = { x, y, size: this.size, rotation, collider };
+    return collider;
   }
   public getCollisionContacts(): Contact[] { return this.collisionContacts.slice(); }
   public getMaxSpeed(): number { return this.maxSpeed; }

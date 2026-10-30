@@ -3,7 +3,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const browser = await chromium.launch({ headless: true, ...(process.env.BROWSER_EXECUTABLE ? { executablePath: process.env.BROWSER_EXECUTABLE } : {}) });
+// Headless Chromium falls back to SwiftShader (software raster) unless GPU flags are passed;
+// the frame budget below only means anything on the real GPU path, so allow opt-in flags.
+const launchArgs = process.env.BROWSER_ARGS ? process.env.BROWSER_ARGS.split(/\s+/).filter(Boolean) : [];
+const browser = await chromium.launch({
+  headless: true,
+  ...(launchArgs.length ? { args: launchArgs } : {}),
+  ...(process.env.BROWSER_EXECUTABLE ? { executablePath: process.env.BROWSER_EXECUTABLE } : {}),
+});
 const cases = process.env.PERF_CASE ? [process.env.PERF_CASE] : ['desktop', 'dpr2', 'dense'];
 const results = [];
 mkdirSync('.review', { recursive: true });
@@ -64,7 +71,10 @@ try {
       });
       const summarize = values => {
         const sorted = values.slice().sort((a, b) => a - b);
-        return { medianMs: sorted[Math.floor(sorted.length * .5)], p95Ms: sorted[Math.floor(sorted.length * .95)], maximumMs: sorted[sorted.length - 1] };
+        // performance.now() sums carry float noise (e.g. 16.700000000000728 for one 60 Hz
+        // frame); microsecond resolution is already far below anything this test can act on.
+        const round = value => Math.round(value * 1000) / 1000;
+        return { medianMs: round(sorted[Math.floor(sorted.length * .5)]), p95Ms: round(sorted[Math.floor(sorted.length * .95)]), maximumMs: round(sorted[sorted.length - 1]) };
       };
       const main = scene.lightingSystem.shadowCaches.get(scene.playerLight);
       const fixed = scene.lightingSystem.shadowCaches.get(auxiliary);

@@ -7,6 +7,12 @@ import { Input } from "./Input";
  */
 export abstract class Scene {
   /**
+   * 场景是否每帧覆盖整个画布。为 true 时主循环可跳过清屏，
+   * 省下一次全屏填充；过渡动画期间仍会清屏。
+   */
+  public readonly opaque: boolean = false;
+
+  /**
    * 所属游戏实例的引用
    * @protected
    */
@@ -102,6 +108,11 @@ export class SceneManager {
  */
   public getCurrentScene(): Scene | null {
     return this.currentScene;
+  }
+
+  /** 过渡期间需要完整清屏，因此主循环需要读取这个状态。 */
+  public isSceneTransitioning(): boolean {
+    return this.isTransitioning;
   }
 
   /**
