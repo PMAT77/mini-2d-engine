@@ -29,8 +29,8 @@
     "restartThreshold": 0.15
   },
   "roll": {
-    "duration": 0.3,
-    "speedMultiplier": 3,
+    "duration": 0.42,
+    "speedMultiplier": 2.15,
     "cooldown": 0.4,
     "staminaCost": 20
   },

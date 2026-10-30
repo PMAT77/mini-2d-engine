@@ -65,7 +65,7 @@ export const DEFAULT_SPRINT = {
   regenPerSecond: 35, regenDelay: 0.6, restartThreshold: 0.15,
 };
 
-/** 空格翻滚：方向锁定的短冲刺，消耗体力；速度按 1−t² 衰减，总位移约为满速 × duration × 2/3。 */
+/** 空格翻滚：方向锁定的短冲刺，消耗体力；速度包络 0–12% 加速、12–45% 保持、45–100% 减速，积分面积 0.665。 */
 export interface RollConfig {
   /** 翻滚动作时长（秒），期间方向锁定。 */
   duration: number;
@@ -76,7 +76,7 @@ export interface RollConfig {
   /** 每次翻滚消耗的体力；0 表示不消耗。 */
   staminaCost: number;
 }
-export const DEFAULT_ROLL: RollConfig = { duration: 0.3, speedMultiplier: 3, cooldown: 0.4, staminaCost: 20 };
+export const DEFAULT_ROLL: RollConfig = { duration: 0.42, speedMultiplier: 2.15, cooldown: 0.4, staminaCost: 20 };
 
 /** 每个配置分组允许的字段；调试面板的覆盖检查也读这份清单。 */
 export const PLAYER_CONFIG_GROUPS: Record<string, readonly string[]> = {

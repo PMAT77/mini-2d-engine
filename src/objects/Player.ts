@@ -83,20 +83,15 @@ const RUN_SWAY_WEIGHT_RATE = 12;
 /** 翻滚速度包络：前 12% 加速、12–45% 保持、45–100% 减速。 */
 const ROLL_ACCEL_END = 0.12;
 const ROLL_DECEL_START = 0.45;
+/**
+ * 翻滚结束时普通移动的起步预热比例。
+ * 翻滚末帧速度已经接近 0，若 movementTime 也从 0 开始，会再花 80ms 才回到全速，
+ * 手感上就是起身后“顿一下”。这里预先推进一部分起步曲线，让第一帧就有明显速度，
+ * 又保留几帧的加速过渡，不会从 0 直接跳到全速。
+ */
+const ROLL_EXIT_MOVEMENT_START = 0.45;
 
-/** 速度包络 v/v0（u 为翻滚进度）。三段的积分面积恰好是 0.665。 */
-function rollSpeedRatio(u: number): number {
-  const p = Math.min(1, Math.max(0, u));
-  if (p <= ROLL_ACCEL_END) {
-    const t = ROLL_ACCEL_END > 0 ? p / ROLL_ACCEL_END : 1;
-    return t * t * (3 - 2 * t);
-  }
-  if (p <= ROLL_DECEL_START) return 1;
-  const t = (p - ROLL_DECEL_START) / (1 - ROLL_DECEL_START);
-  return 1 - t * t * (3 - 2 * t);
-}
-
-/** ∫0^u v/v0 dp：解析累计距离，避免逐帧累加速度带来的帧率依赖。 */
+/** 速度包络：0–12% smoothstep 加速、12–45% 保持、45–100% smoothstep 减速；积分面积 0.665。 */
 function rollEnvelopeArea(u: number): number {
   const p = Math.min(1, Math.max(0, u));
   if (p <= 0) return 0;
@@ -458,8 +453,13 @@ export class Player extends Entities {
       this.emitRollDust();
       // 翻滚在本帧中结束：余下的时间继续普通移动，长帧不会把输入吞掉。
       if (this.rollTimeLeft > 0) return;
+      this.handoffRollMovement(input);
     }
-    if (remaining <= 1e-9) return;
+    if (remaining <= 1e-9) {
+      // delta 为 0 时仍要走一次实体更新，让 map.limitPosition 把角色夹回地图边界。
+      super.update(0, input, map);
+      return;
+    }
     const shift = input.isKeyDown("Shift");
     const moving = this.getMoveDirection(input).length() > 0;
     if (!shift && this.exhausted) this.releasedAfterExhaustion = true;
@@ -506,6 +506,22 @@ export class Player extends Entities {
   }
 
   /**
+   * 翻滚物理结束的交接：如果玩家还按着方向，提前推进一点普通移动的起步曲线。
+   * 只改 movementTime / movementDirection，不改位移、碰撞或翻滚距离；
+   * 没有方向输入时保持原样，正常进入刹车。
+   */
+  private handoffRollMovement(input: Input): void {
+    const move = this.getMoveDirection(input);
+    if (move.length() === 0) return;
+    this.movementTime = Math.max(
+      this.movementTime,
+      this.movement.startupDuration * ROLL_EXIT_MOVEMENT_START,
+    );
+    this.movementDirection.set(move.x, move.y);
+    this.stopTime = 0;
+  }
+
+  /**
    * 请求一次翻滚：方向取当前移动输入，没有输入时用身体朝向；扣体力并进入动作+冷却锁定。
    * 返回 false 表示这次按下没有生效（正在翻滚、冷却中或体力不足）。
    */
@@ -530,8 +546,8 @@ export class Player extends Entities {
     this.movementTime = 0;
     this.stopTime = 0;
     this.muzzleFlashTime = 0;
-    this.armLift = 0;
-    this.shotPoseTime = 0;
+    // 不重置 armLift / shotPoseTime：翻滚入场和收尾都要混合回“真实的”抬枪姿态，
+    // 起滚瞬间把手臂清零反而会在第一帧产生跳变。翻滚期间不开火，由射击限制兜底。
     if (this.roll.staminaCost > 0) {
       this.stamina = Math.max(0, this.stamina - this.roll.staminaCost);
       this.staminaRegenDelay = this.sprint.regenDelay;
@@ -546,11 +562,15 @@ export class Player extends Entities {
     return true;
   }
 
-  /** 解析位移曲线：v(t) = v0·(1 − u²) 的积分，u = t / duration。 */
+  /**
+   * 解析位移：三段速度包络的积分，u = t / duration。
+   * v(u) = v0 · ramp(0→12%) · hold(12–45%) · fall(45→100%)，面积 0.665；
+   * 默认 v0 = 200 × 2.15 = 430px/s、duration 0.42s，总位移约 120px。
+   */
   private getRollDistance(elapsed: number): number {
     const total = this.roll.duration;
     const u = total > 0 ? Math.min(1, Math.max(0, elapsed / total)) : 1;
-    return this.getMaxSpeed() * this.roll.speedMultiplier * total * (u - u * u * u / 3);
+    return this.getMaxSpeed() * this.roll.speedMultiplier * total * rollEnvelopeArea(u);
   }
 
   private emitRollDust(): void {
@@ -672,13 +692,16 @@ export class Player extends Entities {
     const ratio = Number.isFinite(maxSpeed) && maxSpeed > 0
       ? Math.min(RUN_SWAY_MAX_WEIGHT, travel / delta / maxSpeed)
       : 0;
-    this.runSwayWeight = ratio;
+    // 权重平滑到目标值：翻滚结束切回普通姿态时，摇摆不会在一帧内跳变。
+    this.runSwayWeight += (ratio - this.runSwayWeight) * (1 - Math.exp(-delta * RUN_SWAY_WEIGHT_RATE));
     this.runSwayPhase = (this.runSwayPhase + delta * this.runSwaySpeed * ratio) % (Math.PI * 2);
   }
 
-  /** World-space hand endpoint shared by rendering and projectile creation. */
-  getMuzzlePosition(): { x: number; y: number } {
-    const facing = this.currentRotation - Math.PI;
+  /**
+   * World-space hand endpoint shared by rendering and projectile creation.
+   * facing 可以显式传入，供姿态混合/测试在同一局部坐标系里取样。
+   */
+  getMuzzlePosition(facing: number = this.currentRotation - Math.PI): { x: number; y: number } {
     const restX = Math.cos(facing) * .04 - Math.sin(facing) * .46;
     const restY = Math.sin(facing) * .04 + Math.cos(facing) * .46;
     const reach = Math.min(this.size * .78, Math.max(0, this.armDistance - 5));
@@ -1289,8 +1312,9 @@ export class Player extends Entities {
     const startX = this.x, startY = this.y;
     const movingInput = this.getMoveDirection(input).length() > 0;
     this.updateMovement(delta, input, map);
-    // 翻滚时收着武器、不抬枪：渲染旋转与瞄准方向会对不上。
-    if (!this.isRolling()) this.updateAimPose(delta);
+    // 翻滚姿态本身不使用 armLift/armAngle；持续更新它们，末段混合回正常姿态时
+    // 抬枪与瞄准方向才是当前值，不会在结束帧突然换成旧朝向。
+    this.updateAimPose(delta);
     this.updateRunSway(delta, startX, startY);
     this.wadingMap = this.terrainSpeedFactor < 1 - 1e-6 && this.terrainWaterCoverage.fraction > 1e-6 ? map : undefined;
     if (this.wadingMap) {
@@ -1516,41 +1540,23 @@ export class Player extends Entities {
   }
 
   private drawModel(ctx: CanvasRenderingContext2D, centerX: number, centerY: number): void {
+    const state = this.getRenderState();
     ctx.save();
-
-    // Visual breathing only: getCollider() uses size and never this render scale.
-    let scale = 1;
-    if (this.isIdle() && this.armLift === 0) {
-      scale = Math.max(0, 1 + Math.sin(this.idleTime * this.breathingSpeed) * this.breathingAmplitude / 100);
-    }
-
-    // 应用变换并绘制
     ctx.translate(centerX, centerY);
-    const facing = this.currentRotation - Math.PI;
-    const progress = this.getRollProgress();
-    if (progress > 0) {
-      // 翻滚的视觉朝向跟着锁定的 rollDirection，而不是鼠标拉出来的 currentRotation；
-      // 起滚与收尾各有一段权重过渡，所以两端都不会突跳。
-      const rollAngle = Math.atan2(this.rollDirection.y, this.rollDirection.x);
-      ctx.rotate(rollVisualAngle(progress, facing, rollAngle));
-    } else {
-      ctx.rotate(facing);
-    }
-    ctx.scale(scale, scale);
-
-    if (progress > 0) this.drawRollPose(ctx, this.size, getRollPose(progress), progress);
-    else this.drawNormalPose(ctx, this.size, facing);
-
+    ctx.rotate(state.angle);
+    ctx.scale(state.scale, state.scale);
+    this.drawBody(ctx, this.size, state.pose, state.stowedAlpha);
     ctx.restore();
   }
 
   /**
-   * 站立/奔跑/瞄准姿态：沿用原来的 sway、瞄准与换枪偏移。
-   * 仍然走同一套 drawBody，所以头、手、躯干的图层与旧版完全一致。
+   * 正常站立/奔跑/瞄准姿态的数据（不直接绘制）。
+   * 翻滚入场把这份真实姿态混合进翻滚姿态，收尾再混合回来，因此抬枪、
+   * 换枪偏移、跑步摇摆和瞄准方向都能连续衔接，而不是硬编码回 ROLL_REST_POSE。
    */
-  private drawNormalPose(ctx: CanvasRenderingContext2D, s: number, facing: number): void {
+  getNormalPose(s: number = this.size, facing: number = this.currentRotation - Math.PI): RollPose {
     const c = Math.cos(facing), sn = Math.sin(facing);
-    const muzzle = this.getMuzzlePosition();
+    const muzzle = this.getMuzzlePosition(facing);
     const dx = muzzle.x - this.x - s / 2, dy = muzzle.y - this.y - s / 2;
     const hand = { x: dx * c + dy * sn, y: -dx * sn + dy * c };
     // Running sway: the hands swing front and back in opposite phase (alternating),
@@ -1575,13 +1581,58 @@ export class Player extends Entities {
       [sx + (hx - sx) * NORMAL_ELBOW_T, sy + (hy - sy) * NORMAL_ELBOW_T];
     [pose.leftElbowX, pose.leftElbowY] = elbow(pose.leftShoulderX, pose.leftShoulderY, pose.leftHandX, pose.leftHandY);
     [pose.rightElbowX, pose.rightElbowY] = elbow(pose.rightShoulderX, pose.rightShoulderY, pose.rightHandX, pose.rightHandY);
-    this.drawBody(ctx, s, pose);
+    return pose;
   }
 
-  /** 翻滚姿态：头、躯干、双臂、腿、肩背外壳各自按姿态数据运动。 */
-  private drawRollPose(ctx: CanvasRenderingContext2D, s: number, pose: RollPose, progress: number): void {
-    // 斜挎武器会横穿收起的头，翻滚中先淡出、收尾再淡回。
-    this.drawBody(ctx, s, pose, rollStowedAlpha(progress));
+  /**
+   * 本帧绘制所需的姿态/朝向/缩放/斜挎武器透明度。
+   * 翻滚入场（0–12%）从当前真实姿态混入，收尾（84–100%）混回当前真实姿态；
+   * 两端都调用同一份 getNormalPose，所以物理翻滚结束的那一帧不会跳变。
+   */
+  getRenderState(): PlayerRenderState {
+    const facing = this.currentRotation - Math.PI;
+    const progress = this.getRollProgress();
+
+    // Visual breathing only: getCollider() uses size and never this render scale.
+    let breathScale = 1;
+    if (this.isIdle() && this.armLift === 0) {
+      breathScale = Math.max(0, 1 + Math.sin(this.idleTime * this.breathingSpeed) * this.breathingAmplitude / 100);
+    }
+
+    if (progress <= 0) {
+      return {
+        pose: this.getNormalPose(this.size, facing),
+        angle: facing,
+        scale: breathScale,
+        stowedAlpha: 1,
+        progress: 0,
+        rolling: false,
+      };
+    }
+
+    const rollAngle = Math.atan2(this.rollDirection.y, this.rollDirection.x);
+    const angle = rollVisualAngle(progress, facing, rollAngle);
+    const enter = rollEntryBlend(progress);
+    const exit = rollExitBlend(progress);
+    let pose = getRollPose(progress);
+    let scale = 1;
+    if (enter < 1 || exit > 0) {
+      const normal = this.getNormalPose(this.size, facing);
+      if (enter < 1) pose = interpolateRollPose(normal, pose, enter);
+      if (exit > 0) pose = interpolateRollPose(pose, normal, exit);
+      // 呼吸缩放也沿同一段过渡，避免起滚/结束帧整颗人突然缩一下。
+      const breath = exit > 0 ? exit : 1 - enter;
+      scale = 1 + (breathScale - 1) * breath;
+    }
+
+    return {
+      pose,
+      angle,
+      scale,
+      stowedAlpha: rollStowedAlpha(progress),
+      progress,
+      rolling: true,
+    };
   }
 
   /**

@@ -69,8 +69,9 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
 const clamp01 = (x: number): number => (Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0);
 
 /**
- * 静止/站立姿态：翻滚开始（0%）与结束（100%）都必须落在这里，
- * 所以两端与 drawNormalPose 的静态形状完全一致，不会跳变。
+ * 静止/站立姿态：翻滚开始（0%）与结束（100%）都必须落在这里。
+ * Player 会在两端把这份固定姿态与当前真实的站立/瞄准姿态混合，
+ * 所以固定 REST 只作为翻滚自身的锚点，不再直接承担“起滚/收尾不跳变”。
  */
 export const ROLL_REST_POSE: RollPose = {
   headX: .09, headY: 0, headR: .265, headAlpha: 1,
@@ -90,115 +91,278 @@ export const ROLL_REST_POSE: RollPose = {
   weaponAngle: 0,
 };
 
+interface FrameSpec {
+  at: number;
+  head: readonly [number, number, number, number];
+  body: readonly [number, number, number, number];
+  left: readonly [number, number, number, number, number, number];
+  right: readonly [number, number, number, number, number, number];
+  legs: readonly [number, number, number, number, number, number, number, number];
+  legAlpha: number;
+  shell: readonly [number, number, number, number, number];
+  weaponAngle: number;
+}
+
 /**
- * 五个阶段的关键姿态。at 是翻滚进度（0–1），改这里的比例就能调整各阶段长短：
- * A 0–15% 降重心、低头、双臂前移；B 15–35% 头收胸前、肩前移、手臂弯曲支撑；
- * C 35–65% 蜷缩、肩背翻过去、头被躯干遮住；D 65–85% 手臂伸出、躯干舒展、头重新显露；
- * E 85–100% 回到站立。
+ * 五段节奏的关键姿态（占比是初始参考）：
+ * A 0–12% 蓄力俯身：头略降、重心前移、双臂收紧，身体还没缩起来；
+ * B 12–34% 前倾入滚：头收向胸口、左臂前伸、肩背开始成为视觉主体；
+ * C 34–58% 核心翻滚：躯干收成窄椭圆，肩背外壳盖住头，双腿完全收起；
+ * D 58–84% 撑地起身：左臂先前伸撑地，再随身体前移“扫”回体侧，
+ *   重心从肩背回到躯干，头从外壳下逐渐露出，双腿伸展后收回；
+ * E 84–100% 收势站立：外壳淡出，双手与武器回到站立位置。
+ *
+ * 所有数值都是“相对翻滚体”的局部坐标。肩背 back / 胸板 plate 由躯干自动派生，
+ * 避免多份数据在插值时互相打架。
  */
-const ROLL_KEY_FRAMES: ReadonlyArray<{ at: number; pose: Partial<RollPose> }> = [
+const ROLL_KEY_FRAMES: ReadonlyArray<FrameSpec> = [
   {
-    at: .15, pose: {
-      headX: .10, headY: .02, headR: .25, headAlpha: 1,
-      bodyX: 0, bodyY: .02, bodyRx: .40, bodyRy: .41,
-      backX: -.05, backY: .02, backR: .44,
-      plateX: .05, plateY: .02, plateR: .285,
-      leftShoulderX: 0, leftShoulderY: -.30, leftElbowX: .10, leftElbowY: -.34, leftHandX: .26, leftHandY: -.34,
-      rightShoulderX: 0, rightShoulderY: .30, rightElbowX: .10, rightElbowY: .34, rightHandX: .26, rightHandY: .34,
-      leftKneeX: -.18, leftKneeY: -.18, leftFootX: -.38, leftFootY: -.20,
-      rightKneeX: -.18, rightKneeY: .18, rightFootX: -.38, rightFootY: .20,
-      legAlpha: .25,
-      shellAlpha: 0,
-      weaponAngle: -.15,
-    },
+    // A：重心刚刚压下去，手臂开始收，但头还完整露着。
+    at: .06,
+    head: [.105, .005, .255, 1],
+    body: [.02, 0, .398, .398],
+    left: [.015, -.30, .06, -.37, .10, -.40],
+    right: [.015, .30, .06, .37, .10, .40],
+    legs: [-.20, -.18, -.33, -.22, -.20, .18, -.33, .22],
+    legAlpha: .10,
+    shell: [-.03, 0, .33, .30, .04],
+    weaponAngle: -.06,
   },
   {
-    at: .35, pose: {
-      headX: .09, headY: .03, headR: .19, headAlpha: .35,
-      bodyX: .02, bodyY: .03, bodyRx: .36, bodyRy: .40,
-      backX: -.04, backY: .03, backR: .43,
-      plateX: .03, plateY: .03, plateR: .26,
-      leftShoulderX: .04, leftShoulderY: -.28, leftElbowX: .24, leftElbowY: -.30, leftHandX: .18, leftHandY: -.40,
-      rightShoulderX: .04, rightShoulderY: .28, rightElbowX: .24, rightElbowY: .30, rightHandX: .18, rightHandY: .40,
-      leftKneeX: -.34, leftKneeY: -.26, leftFootX: -.50, leftFootY: -.18,
-      rightKneeX: -.34, rightKneeY: .26, rightFootX: -.50, rightFootY: .18,
-      legAlpha: .7,
-      shellX: -.02, shellY: .01, shellRx: .31, shellRy: .35, shellAlpha: .6,
-      weaponAngle: -.45,
-    },
+    // A 末：深蹲蓄力，手臂收到胸前，为入滚做准备。
+    at: .12,
+    head: [.115, .010, .248, 1],
+    body: [.04, .010, .388, .382],
+    left: [.03, -.285, .11, -.335, .17, -.345],
+    right: [.03, .285, .11, .335, .17, .345],
+    legs: [-.23, -.21, -.36, -.25, -.23, .21, -.36, .25],
+    legAlpha: .30,
+    shell: [-.015, .005, .325, .305, .15],
+    weaponAngle: -.14,
   },
   {
-    at: .5, pose: {
-      headX: 0, headY: .02, headR: .15, headAlpha: 0,
-      bodyX: 0, bodyY: 0, bodyRx: .30, bodyRy: .37,
-      backX: -.02, backY: 0, backR: .44,
-      plateX: .02, plateY: 0, plateR: .22,
-      leftShoulderX: -.02, leftShoulderY: -.24, leftElbowX: .14, leftElbowY: -.32, leftHandX: .20, leftHandY: -.34,
-      rightShoulderX: -.02, rightShoulderY: .24, rightElbowX: .14, rightElbowY: .32, rightHandX: .20, rightHandY: .34,
-      leftKneeX: -.34, leftKneeY: -.30, leftFootX: -.52, leftFootY: -.20,
-      rightKneeX: -.34, rightKneeY: .30, rightFootX: -.52, rightFootY: .20,
-      legAlpha: 1,
-      shellX: -.03, shellY: 0, shellRx: .33, shellRy: .40, shellAlpha: 1,
-      weaponAngle: -.55,
-    },
+    // B：左臂向前探，头开始往胸口收，肩背露头。
+    at: .20,
+    head: [.13, .008, .225, .90],
+    body: [.055, .015, .365, .383],
+    left: [.04, -.27, .18, -.31, .30, -.31],
+    right: [.03, .27, .12, .32, .20, .315],
+    legs: [-.27, -.25, -.41, -.20, -.27, .25, -.41, .20],
+    legAlpha: .55,
+    shell: [0, .005, .34, .335, .35],
+    weaponAngle: -.28,
   },
   {
-    at: .65, pose: {
-      headX: .06, headY: .02, headR: .21, headAlpha: .55,
-      bodyX: .01, bodyY: .02, bodyRx: .35, bodyRy: .39,
-      backX: -.04, backY: .02, backR: .44,
-      plateX: .04, plateY: .02, plateR: .27,
-      leftShoulderX: 0, leftShoulderY: -.28, leftElbowX: .28, leftElbowY: -.30, leftHandX: .30, leftHandY: -.30,
-      rightShoulderX: 0, rightShoulderY: .28, rightElbowX: .28, rightElbowY: .30, rightHandX: .30, rightHandY: .30,
-      leftKneeX: -.28, leftKneeY: -.38, leftFootX: -.44, leftFootY: -.30,
-      rightKneeX: -.28, rightKneeY: .38, rightFootX: -.44, rightFootY: .30,
-      legAlpha: .55,
-      shellX: -.03, shellY: 0, shellRx: .31, shellRy: .35, shellAlpha: .45,
-      weaponAngle: -.4,
-    },
+    // B 末：身体压得更低，左臂几乎撑到地，肩背盖住后脑。
+    at: .28,
+    head: [.12, .002, .19, .55],
+    body: [.07, .012, .338, .386],
+    left: [.05, -.255, .24, -.29, .38, -.26],
+    right: [.04, .255, .14, .305, .22, .295],
+    legs: [-.31, -.28, -.45, -.16, -.31, .28, -.45, .16],
+    legAlpha: .80,
+    shell: [.01, 0, .35, .36, .62],
+    weaponAngle: -.42,
   },
   {
-    at: .75, pose: {
-      headX: .08, headY: .01, headR: .24, headAlpha: 1,
-      bodyX: 0, bodyY: .01, bodyRx: .38, bodyRy: .40,
-      backX: -.05, backY: 0, backR: .44,
-      plateX: .05, plateY: .01, plateR: .28,
-      leftShoulderX: 0, leftShoulderY: -.30, leftElbowX: .06, leftElbowY: -.38, leftHandX: .16, leftHandY: -.42,
-      rightShoulderX: 0, rightShoulderY: .30, rightElbowX: .06, rightElbowY: .38, rightHandX: .16, rightHandY: .42,
-      leftKneeX: -.22, leftKneeY: -.24, leftFootX: -.36, leftFootY: -.26,
-      rightKneeX: -.22, rightKneeY: .24, rightFootX: -.36, rightFootY: .26,
-      legAlpha: .35,
-      shellAlpha: 0,
-      weaponAngle: -.2,
-    },
+    // C：完全蜷起，头只剩一点轮廓；撑地手收回到身体侧面。
+    at: .36,
+    head: [.09, -.004, .155, .20],
+    body: [.06, .005, .31, .385],
+    left: [.04, -.245, .16, -.33, .10, -.35],
+    right: [.03, .235, .10, .315, .15, .325],
+    legs: [-.34, -.30, -.47, -.12, -.34, .30, -.47, .12],
+    legAlpha: .95,
+    shell: [.02, 0, .36, .385, .88],
+    weaponAngle: -.52,
   },
   {
-    at: .85, pose: {
-      headX: .09, headY: .01, headR: .26, headAlpha: 1,
-      bodyX: 0, bodyY: 0, bodyRx: .40, bodyRy: .41,
-      backX: -.055, backY: 0, backR: .45,
-      plateX: .055, plateY: 0, plateR: .285,
-      leftShoulderX: 0, leftShoulderY: -.31, leftElbowX: .02, leftElbowY: -.40, leftHandX: .08, leftHandY: -.45,
-      rightShoulderX: 0, rightShoulderY: .31, rightElbowX: .02, rightElbowY: .40, rightHandX: .08, rightHandY: .45,
-      leftKneeX: -.18, leftKneeY: -.16, leftFootX: -.30, leftFootY: -.20,
-      rightKneeX: -.18, rightKneeY: .16, rightFootX: -.30, rightFootY: .20,
-      legAlpha: .12,
-      shellAlpha: 0,
-      weaponAngle: -.1,
-    },
+    // C 核心：肩背外壳完全盖住头，躯干最窄，双腿收到身体两侧。
+    at: .44,
+    head: [.04, -.008, .125, 0],
+    body: [.045, 0, .285, .385],
+    left: [.01, -.22, 0, -.31, -.09, -.31],
+    right: [.02, .22, .07, .31, .12, .33],
+    legs: [-.36, -.31, -.48, -.08, -.36, .31, -.48, .08],
+    legAlpha: 1,
+    shell: [.03, 0, .37, .40, 1],
+    weaponAngle: -.58,
+  },
+  {
+    // C 末：外壳仍盖着头，左臂重新向前探，准备撑地。
+    at: .52,
+    head: [.07, -.004, .14, 0],
+    body: [.05, 0, .30, .385],
+    left: [.02, -.23, .10, -.31, .20, -.33],
+    right: [.02, .23, .09, .31, .15, .325],
+    legs: [-.35, -.30, -.47, -.10, -.35, .30, -.47, .10],
+    legAlpha: 1,
+    shell: [.02, 0, .36, .385, .94],
+    weaponAngle: -.53,
+  },
+  {
+    // D 起：左臂前伸找到支点，头开始从外壳下露出。
+    at: .60,
+    head: [.10, 0, .195, .32],
+    body: [.05, .008, .325, .382],
+    left: [.03, -.265, .20, -.335, .36, -.34],
+    right: [.02, .25, .11, .32, .18, .33],
+    legs: [-.32, -.28, -.44, -.15, -.32, .28, -.44, .15],
+    legAlpha: .90,
+    shell: [.005, .004, .35, .36, .68],
+    weaponAngle: -.42,
+  },
+  {
+    // D：手撑住，身体从肩背上方挪过去；手相对身体向后“扫”。
+    at: .70,
+    head: [.115, .002, .225, .72],
+    body: [.04, .008, .35, .388],
+    left: [.03, -.295, .27, -.38, .48, -.40],
+    right: [.02, .265, .12, .34, .20, .35],
+    legs: [-.28, -.25, -.40, -.20, -.28, .25, -.40, .20],
+    legAlpha: .70,
+    shell: [-.015, .004, .335, .335, .38],
+    weaponAngle: -.30,
+  },
+  {
+    // D 末：重心回到躯干，头基本露出，左臂卸力回扫，双腿伸开。
+    at: .78,
+    head: [.115, .004, .248, .92],
+    body: [.03, .004, .375, .398],
+    left: [.025, -.305, .18, -.39, .32, -.45],
+    right: [.015, .285, .10, .36, .18, .39],
+    legs: [-.24, -.22, -.36, -.24, -.24, .22, -.36, .24],
+    legAlpha: .45,
+    shell: [-.035, .002, .315, .30, .15],
+    weaponAngle: -.16,
+  },
+  {
+    // E：身体展开，外壳只剩一点轮廓，手还在回收。
+    at: .86,
+    head: [.102, .003, .26, .99],
+    body: [.015, .002, .395, .402],
+    left: [.01, -.31, .11, -.395, .22, -.45],
+    right: [.01, .30, .06, .385, .13, .435],
+    legs: [-.20, -.185, -.32, -.23, -.20, .185, -.32, .23],
+    legAlpha: .20,
+    shell: [-.043, 0, .30, .27, .04],
+    weaponAngle: -.06,
+  },
+  {
+    // E 末：只剩很轻的收势惯性，交给 Player 混合回真实站立姿态。
+    at: .93,
+    head: [.094, .001, .263, 1],
+    body: [.004, 0, .402, .404],
+    left: [0, -.31, .04, -.40, .10, -.455],
+    right: [0, .31, .04, .40, .10, .455],
+    legs: [-.18, -.165, -.30, -.205, -.18, .165, -.30, .205],
+    legAlpha: .06,
+    shell: [-.04, 0, .28, .25, .01],
+    weaponAngle: -.02,
   },
 ];
 
-/** 关键帧展开成完整姿态，插值时不必再处理缺省字段。 */
-const ROLL_FRAMES: ReadonlyArray<{ at: number; pose: RollPose }> = ROLL_KEY_FRAMES.map(frame => ({
-  at: frame.at,
-  pose: { ...ROLL_REST_POSE, ...frame.pose },
-}));
+/** 肩背与胸板跟着躯干走，减少每帧重复数据。 */
+function buildPose(frame: FrameSpec): RollPose {
+  const [headX, headY, headR, headAlpha] = frame.head;
+  const [bodyX, bodyY, bodyRx, bodyRy] = frame.body;
+  const [leftShoulderX, leftShoulderY, leftElbowX, leftElbowY, leftHandX, leftHandY] = frame.left;
+  const [rightShoulderX, rightShoulderY, rightElbowX, rightElbowY, rightHandX, rightHandY] = frame.right;
+  const [leftKneeX, leftKneeY, leftFootX, leftFootY, rightKneeX, rightKneeY, rightFootX, rightFootY] = frame.legs;
+  const [shellX, shellY, shellRx, shellRy, shellAlpha] = frame.shell;
+  const ratio = (bodyRx + bodyRy) / (ROLL_REST_POSE.bodyRx * 2);
+  return {
+    headX, headY, headR, headAlpha,
+    bodyX, bodyY, bodyRx, bodyRy,
+    backX: bodyX - .055, backY: bodyY, backR: .45,
+    plateX: bodyX + .055, plateY: bodyY, plateR: ROLL_REST_POSE.plateR * ratio * ratio,
+    leftShoulderX, leftShoulderY, leftElbowX, leftElbowY, leftHandX, leftHandY,
+    rightShoulderX, rightShoulderY, rightElbowX, rightElbowY, rightHandX, rightHandY,
+    leftKneeX, leftKneeY, leftFootX, leftFootY,
+    rightKneeX, rightKneeY, rightFootX, rightFootY,
+    legAlpha: frame.legAlpha,
+    shellX, shellY, shellRx, shellRy, shellAlpha,
+    weaponAngle: frame.weaponAngle,
+  };
+}
+
+const ROLL_FRAMES: ReadonlyArray<{ at: number; pose: RollPose }> =
+  ROLL_KEY_FRAMES.map(frame => ({ at: frame.at, pose: buildPose(frame) }));
 
 /** 每个关键帧的进度，方便测试与调参；首尾固定落在静止姿态。 */
 export const ROLL_POSE_STOPS: readonly number[] = [0, ...ROLL_FRAMES.map(frame => frame.at), 1];
 
-/** 线性插值两个姿态；t 会被夹到 0–1。 */
+const STOP_POSES: readonly RollPose[] = [
+  ROLL_REST_POSE,
+  ...ROLL_FRAMES.map(frame => frame.pose),
+  ROLL_REST_POSE,
+];
+
+const POSE_KEYS = Object.keys(ROLL_REST_POSE) as (keyof RollPose)[];
+
+/**
+ * 单调三次 Hermite 的切线（Fritsch–Carlson）：
+ * 段内不会过冲，关键帧处速度连续；局部极值处切线为 0，动作会自然“顿”一下，
+ * 而不是旧版每段 smoothstep 首尾都把速度归零。
+ */
+function monotoneTangents(xs: readonly number[], ys: readonly number[]): number[] {
+  const n = xs.length;
+  const slopes: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    slopes.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  }
+  const tangents = new Array<number>(n);
+  tangents[0] = slopes[0];
+  tangents[n - 1] = slopes[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    if (slopes[i - 1] * slopes[i] <= 0) {
+      tangents[i] = 0;
+    } else {
+      const h0 = xs[i] - xs[i - 1];
+      const h1 = xs[i + 1] - xs[i];
+      const w0 = 2 * h1 + h0;
+      const w1 = h1 + 2 * h0;
+      tangents[i] = (w0 + w1) / (w0 / slopes[i - 1] + w1 / slopes[i]);
+    }
+  }
+  // 限制切线，保证每一段都单调，不会让身体尺寸/透明度冲过关键帧。
+  for (let i = 0; i < n - 1; i++) {
+    const slope = slopes[i];
+    if (Math.abs(slope) < 1e-12) {
+      tangents[i] = 0;
+      tangents[i + 1] = 0;
+      continue;
+    }
+    const a = tangents[i] / slope;
+    const b = tangents[i + 1] / slope;
+    const sum = a * a + b * b;
+    if (sum > 9) {
+      const scale = 3 / Math.sqrt(sum);
+      tangents[i] = scale * a * slope;
+      tangents[i + 1] = scale * b * slope;
+    }
+  }
+  return tangents;
+}
+
+const TANGENTS = {} as Record<keyof RollPose, number[]>;
+for (const key of POSE_KEYS) {
+  TANGENTS[key] = monotoneTangents(ROLL_POSE_STOPS, STOP_POSES.map(pose => pose[key]));
+}
+
+function hermite(
+  x0: number, x1: number, y0: number, y1: number, m0: number, m1: number, t: number,
+): number {
+  const h = x1 - x0;
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return (2 * t3 - 3 * t2 + 1) * y0
+    + (t3 - 2 * t2 + t) * h * m0
+    + (-2 * t3 + 3 * t2) * y1
+    + (t3 - t2) * h * m1;
+}
+
+/** 线性插值两个姿态；t 会被夹到 0–1。Player 用它把翻滚姿态与真实站立姿态混合。 */
 export function interpolateRollPose(a: RollPose, b: RollPose, t: number): RollPose {
   if (t <= 0) return { ...a };
   if (t >= 1) return { ...b };
@@ -213,30 +377,58 @@ export function interpolateRollPose(a: RollPose, b: RollPose, t: number): RollPo
 /** 翻滚进度对应的姿态；0 与 1 都精确等于静止姿态。 */
 export function getRollPose(progress: number): RollPose {
   const p = clamp01(progress);
-  if (p <= 0) return { ...ROLL_REST_POSE };
-  for (let i = 0; i < ROLL_FRAMES.length; i++) {
-    const frame = ROLL_FRAMES[i];
-    if (p > frame.at) continue;
-    const prevAt = i === 0 ? 0 : ROLL_FRAMES[i - 1].at;
-    const prevPose = i === 0 ? ROLL_REST_POSE : ROLL_FRAMES[i - 1].pose;
-    const span = frame.at - prevAt;
-    const t = span <= 0 ? 1 : smoothstep(0, 1, (p - prevAt) / span);
-    return interpolateRollPose(prevPose, frame.pose, t);
+  if (p <= 0 || p >= 1) return { ...ROLL_REST_POSE };
+
+  let index = 0;
+  while (index < ROLL_POSE_STOPS.length - 2 && p > ROLL_POSE_STOPS[index + 1]) index++;
+  const x0 = ROLL_POSE_STOPS[index];
+  const x1 = ROLL_POSE_STOPS[index + 1];
+  const t = (p - x0) / (x1 - x0);
+  const from = STOP_POSES[index];
+  const to = STOP_POSES[index + 1];
+  const out = {} as RollPose;
+  for (const key of POSE_KEYS) {
+    out[key] = hermite(x0, x1, from[key], to[key], TANGENTS[key][index], TANGENTS[key][index + 1], t);
   }
-  // 最后一个关键帧之后回到静止姿态，保证 100% 与站立完全一致。
-  const last = ROLL_FRAMES[ROLL_FRAMES.length - 1];
-  const t = smoothstep(0, 1, (p - last.at) / (1 - last.at));
-  return interpolateRollPose(last.pose, ROLL_REST_POSE, t);
+  // 切线受限已经保证不过冲；这里只做最后一道 0–1 / 非负保护。
+  out.headAlpha = clamp01(out.headAlpha);
+  out.legAlpha = clamp01(out.legAlpha);
+  out.shellAlpha = clamp01(out.shellAlpha);
+  out.headR = Math.max(0, out.headR);
+  out.bodyRx = Math.max(0, out.bodyRx);
+  out.bodyRy = Math.max(0, out.bodyRy);
+  out.backR = Math.max(0, out.backR);
+  out.plateR = Math.max(0, out.plateR);
+  out.shellRx = Math.max(0, out.shellRx);
+  out.shellRy = Math.max(0, out.shellRy);
+  return out;
 }
 
 /**
- * 翻滚视觉朝向对 rollDirection 的权重：起滚 14% 内升到 1，55% 后开始回落到 0。
- * 中段为 1，视觉朝向完全对齐锁定的 rollDirection（鼠标瞄准转身体也拉不动它）；
- * 两端为 0，回到 currentRotation 的实际朝向，所以起滚/收尾都不会突跳。
+ * 起滚入场混合：0 是真实站立姿态，12% 时完全进入翻滚姿态。
+ * 与视觉转向错开（转向从 12% 才开始），两段姿态不会在同一帧里用错坐标系。
+ */
+export function rollEntryBlend(progress: number): number {
+  return smoothstep(0, .12, clamp01(progress));
+}
+
+/**
+ * 收尾出场混合：84% 开始从翻滚姿态回到当前真实站立/瞄准姿态。
+ * 到 100% 时绘制姿态与 drawNormalPose 完全相同，物理结束那一帧不会跳。
+ */
+export function rollExitBlend(progress: number): number {
+  return smoothstep(.84, 1, clamp01(progress));
+}
+
+/**
+ * 翻滚视觉朝向对 rollDirection 的权重：12–30% 升到 1，58–84% 回落到 0。
+ * 中段完全对齐锁定的 rollDirection（鼠标瞄准转身体也拉不动它）；
+ * 两端为 0，回到 currentRotation 的实际朝向。入场/出场姿态混合正好在
+ * 权重为 0 的区间里完成，所以不会出现“姿态在错误坐标系里混合”的错位。
  */
 export function rollFacingWeight(progress: number): number {
   const p = clamp01(progress);
-  return smoothstep(0, .14, p) * (1 - smoothstep(.55, 1, p));
+  return smoothstep(.12, .30, p) * (1 - smoothstep(.58, .84, p));
 }
 
 /**
