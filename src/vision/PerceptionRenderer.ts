@@ -1,5 +1,6 @@
 import { lightFalloff, projectShadow } from "../core/LightingSystem";
 import type { VisibilityConfig } from "../core/GraphicsConfig";
+import { SolidTerrain, solidPath } from "../map/SolidTerrain";
 import { TILE_TYPES, TileTypeId } from "../map/TileType";
 import type { TileMap } from "../map/TileMap";
 import type { ExplorationGrid } from "./ExplorationGrid";
@@ -49,8 +50,16 @@ export class PerceptionRenderer {
   private memoryCtx: CanvasRenderingContext2D | null = null;
   private scratch: HTMLCanvasElement | null = null;
   private scratchCtx: CanvasRenderingContext2D | null = null;
+  private groundMask: HTMLCanvasElement | null = null;
+  private groundMaskCtx: CanvasRenderingContext2D | null = null;
+  private shadow: HTMLCanvasElement | null = null;
+  private shadowCtx: CanvasRenderingContext2D | null = null;
   private exploredTexture: HTMLCanvasElement | null = null;
   private exploredRevision = -1;
+  private memorySolids: SolidTerrain | null = null;
+  private memorySolidRevision = -1;
+  private memoryPath: Path2D | null = null;
+  private memoryPathKey = "";
 
   private scale: number;
   private viewWidth = 0;
@@ -111,16 +120,18 @@ export class PerceptionRenderer {
     overlay.fillRect(0, 0, this.overlay.width, this.overlay.height);
 
     // 1. 未探索区域的低对比地形轮廓（B 模式）。
-    overlay.setTransform(this.scale, 0, 0, this.scale,
-      -cameraX * this.scale, -cameraY * this.scale);
-    this.outline.draw(overlay, cameraX, cameraY, viewWidth, viewHeight);
-    overlay.setTransform(1, 0, 0, 1, 0, 0);
+    // 先画到 scratch，再按 25px 探索覆盖层擦掉已探索部分，避免初始墙体在探索后残留成幽灵。
+    this.drawOutline(cameraX, cameraY, viewWidth, viewHeight, explored);
 
     // 2. 已探索但当前未被观察的地形记忆。
     this.drawMemory(cameraX, cameraY, viewWidth, viewHeight, explored, memory);
     overlay.globalAlpha = this.config.memoryBrightness;
     overlay.drawImage(this.memory, 0, 0);
     overlay.globalAlpha = 1;
+
+    // 地面轮廓在一帧内只栅格化一次；每个光源的阴影都复用这张遮罩，
+    // 避免多光源时反复对大 Path2D 做 clip（软件栅格下这是主要开销）。
+    this.prepareGroundMask(cameraX, cameraY, viewWidth, viewHeight);
 
     // 3. 近身感知孔洞：硬墙遮挡，按 nearRevealAlpha 压暗而非完全去掉。
     this.punchNear(observer, cameraX, cameraY);
@@ -147,8 +158,49 @@ export class PerceptionRenderer {
     this.memoryCtx = this.memory.getContext("2d");
     this.scratch = createCanvas(width, height);
     this.scratchCtx = this.scratch.getContext("2d");
+    this.groundMask = createCanvas(width, height);
+    this.groundMaskCtx = this.groundMask.getContext("2d");
+    this.shadow = createCanvas(width, height);
+    this.shadowCtx = this.shadow.getContext("2d");
     this.exploredTexture = null;
     this.exploredRevision = -1;
+  }
+
+  /**
+   * 未知轮廓先独立烘焙到 scratch，再擦掉已探索覆盖。
+   * 这样已探索区域不会残留“建图时存在、现在已被破坏”的初始墙体。
+   */
+  private drawOutline(cameraX: number, cameraY: number, viewWidth: number,
+    viewHeight: number, explored: ExplorationGrid): void {
+    const ctx = this.scratchCtx;
+    if (!ctx || !this.scratch) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    ctx.clearRect(0, 0, this.scratch.width, this.scratch.height);
+    ctx.setTransform(this.scale, 0, 0, this.scale,
+      -cameraX * this.scale, -cameraY * this.scale);
+    this.outline.draw(ctx, cameraX, cameraY, viewWidth, viewHeight);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.eraseExplored(ctx, explored, cameraX, cameraY);
+    const overlay = this.overlayCtx;
+    if (!overlay) return;
+    overlay.setTransform(1, 0, 0, 1, 0, 0);
+    overlay.drawImage(this.scratch, 0, 0);
+  }
+
+  private eraseExplored(ctx: CanvasRenderingContext2D, explored: ExplorationGrid,
+    cameraX: number, cameraY: number): void {
+    const texture = this.getExploredTexture(explored);
+    if (!texture) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.imageSmoothingEnabled = false;
+    ctx.setTransform(this.scale, 0, 0, this.scale,
+      -cameraX * this.scale, -cameraY * this.scale);
+    ctx.drawImage(texture, 0, 0, explored.cols * explored.cellSize,
+      explored.rows * explored.cellSize);
+    ctx.restore();
   }
 
   private drawMemory(cameraX: number, cameraY: number, viewWidth: number,
@@ -173,10 +225,18 @@ export class PerceptionRenderer {
         const cell = memory.get(col, row);
         if (!cell) continue;
         const type = MEMORY_TILE_ORDER[cell.typeIndex];
-        if (!type) continue;
+        if (!type || TILE_TYPES[type]?.blocksLight) continue;
         ctx.fillStyle = memoryColor(type);
         ctx.fillRect(col * tileSize, row * tileSize, tileSize, tileSize);
       }
+    }
+
+    // 记忆中的墙体/矿石也复用 SolidTerrain 的圆角拓扑；未观察过的邻居视为空，
+    // 因此探索边界会自然收成圆角，而不是把整块初始墙体画出来。
+    const solids = this.getMemoryPath(memory, cameraX, cameraY, viewWidth, viewHeight);
+    if (solids) {
+      ctx.fillStyle = "#2b3644";
+      ctx.fill(solids);
     }
 
     // 用 25px 探索覆盖层裁剪：半块瓦片只显示被观察到的部分。
@@ -192,6 +252,49 @@ export class PerceptionRenderer {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = "source-over";
     }
+  }
+
+  private getMemoryPath(memory: TerrainMemory, cameraX: number, cameraY: number,
+    viewWidth: number, viewHeight: number): Path2D | null {
+    if (!this.memorySolids || this.memorySolidRevision !== memory.revision) {
+      this.memorySolids = new SolidTerrain((col, row) => {
+        const cell = memory.get(col, row);
+        if (!cell) return false;
+        const type = MEMORY_TILE_ORDER[cell.typeIndex];
+        return !!type && !!TILE_TYPES[type]?.blocksLight;
+      });
+      this.memorySolidRevision = memory.revision;
+      this.memoryPath = null;
+      this.memoryPathKey = "";
+    }
+
+    const size = this.terrain.tileSize;
+    const margin = size * 2;
+    const startCol = Math.max(0, Math.floor((cameraX - margin) / size));
+    const startRow = Math.max(0, Math.floor((cameraY - margin) / size));
+    const endCol = Math.min(this.terrain.width, Math.ceil((cameraX + viewWidth + margin) / size));
+    const endRow = Math.min(this.terrain.height, Math.ceil((cameraY + viewHeight + margin) / size));
+    if (endCol <= startCol || endRow <= startRow) return null;
+
+    const key = `${memory.revision}:${startCol},${startRow},${endCol},${endRow}`;
+    if (this.memoryPath && this.memoryPathKey === key) return this.memoryPath;
+
+    const polygons = this.memorySolids.query({
+      x: startCol * size,
+      y: startRow * size,
+      width: (endCol - startCol) * size,
+      height: (endRow - startRow) * size,
+    }, size, this.terrain.width, this.terrain.height).map(patch => patch.polygon);
+    if (polygons.length === 0) {
+      this.memoryPath = null;
+      this.memoryPathKey = key;
+      return null;
+    }
+    const path = new Path2D();
+    solidPath(path, polygons, 0, 0);
+    this.memoryPath = path;
+    this.memoryPathKey = key;
+    return path;
   }
 
   private getExploredTexture(explored: ExplorationGrid): HTMLCanvasElement | null {
@@ -210,6 +313,21 @@ export class PerceptionRenderer {
     this.exploredTexture = canvas;
     this.exploredRevision = explored.revision;
     return canvas;
+  }
+
+  private prepareGroundMask(cameraX: number, cameraY: number,
+    viewWidth: number, viewHeight: number): void {
+    const ctx = this.groundMaskCtx;
+    if (!ctx || !this.groundMask) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    ctx.clearRect(0, 0, this.groundMask.width, this.groundMask.height);
+    ctx.setTransform(this.scale, 0, 0, this.scale,
+      -cameraX * this.scale, -cameraY * this.scale);
+    ctx.fillStyle = "#fff";
+    ctx.fill(this.map.getGroundContour(cameraX, cameraY, viewWidth, viewHeight), "evenodd");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   private punchNear(observer: VisionObserver, cameraX: number, cameraY: number): void {
@@ -234,7 +352,8 @@ export class PerceptionRenderer {
     ctx.arc(observer.x, observer.y, radius, 0, Math.PI * 2);
     ctx.fill();
 
-    this.carveShadowQuads(ctx, this.shadowQuads(observer.x, observer.y, radius + feather));
+    this.carveGroundShadowQuads(ctx, this.shadowQuads(observer.x, observer.y, radius + feather),
+      cameraX, cameraY);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.punchScratch(this.rules.nearRevealAlpha);
   }
@@ -256,10 +375,13 @@ export class PerceptionRenderer {
       -cameraX * this.scale, -cameraY * this.scale);
 
     this.fillLight(ctx, light);
-    // 先减去光源自身阴影，再减去观察者阴影：拐角后被照亮的地面可以看见，但墙后的光源本体不会露出来。
-    this.carveShadowQuads(ctx, this.shadowQuads(light.x, light.y, light.radius));
-    this.carveShadowQuads(ctx, this.shadowQuads(observer.x, observer.y,
-      observer.maxObservationRange + this.config.edgeFeather));
+    // 先减去光源自身阴影，再减去观察者阴影；两者都只裁地面，墙顶不参与地面阴影多边形。
+    const shadows = [
+      ...this.shadowQuads(light.x, light.y, light.radius),
+      ...this.shadowQuads(observer.x, observer.y,
+        observer.maxObservationRange + this.config.edgeFeather),
+    ];
+    this.carveGroundShadowQuads(ctx, shadows, cameraX, cameraY);
 
     // 超过最大观察范围的部分不显示。
     ctx.globalCompositeOperation = "destination-in";
@@ -276,25 +398,16 @@ export class PerceptionRenderer {
     const radius = light.radius;
     const intensity = Math.max(0, Math.min(2, light.intensity));
     const angle = light.angle;
-    const hasCone = angle !== undefined && angle > 0 && angle < Math.PI * 2 - 1e-6;
+    const fullCircle = Math.PI * 2;
+    const hasCone = angle !== undefined && angle > 0 && angle < fullCircle - 1e-6;
 
-    ctx.save();
-    if (hasCone) {
-      const half = angle! / 2;
-      const direction = light.direction ?? 0;
-      ctx.beginPath();
-      ctx.moveTo(light.x, light.y);
-      ctx.arc(light.x, light.y, radius, direction - half, direction + half);
-      ctx.closePath();
-      ctx.clip();
-    }
-
+    // 径向衰减直接使用 LightingSystem 的 lightFalloff，保证画面和辨识逻辑同一个数值模型。
     const gradient = ctx.createRadialGradient(light.x, light.y, 0, light.x, light.y, radius);
     const inner = light.innerRadius ?? 0;
     const innerFade = Math.max(1, light.innerFade ?? 14);
-    for (let i = 0; i <= 12; i++) {
-      const distance = radius * i / 12;
-      let alpha = falloff(distance, radius) * intensity;
+    for (let i = 0; i <= 16; i++) {
+      const distance = radius * i / 16;
+      let alpha = lightFalloff(distance, radius) * intensity;
       if (inner > 0) {
         if (distance <= inner) alpha = 0;
         else if (distance < inner + innerFade) {
@@ -302,13 +415,48 @@ export class PerceptionRenderer {
           alpha *= t * t * (3 - 2 * t);
         }
       }
-      gradient.addColorStop(i / 12, `rgba(255,255,255,${Math.max(0, Math.min(1, alpha))})`);
+      gradient.addColorStop(i / 16, `rgba(255,255,255,${Math.max(0, Math.min(1, alpha))})`);
     }
     ctx.fillStyle = gradient;
     ctx.beginPath();
-    ctx.arc(light.x, light.y, radius, 0, Math.PI * 2);
+    ctx.arc(light.x, light.y, radius, 0, fullCircle);
     ctx.fill();
-    ctx.restore();
+
+    if (!hasCone) return;
+    const half = angle! / 2;
+    const direction = light.direction ?? 0;
+    const softness = Math.max(0, Math.min(0.5, light.softness ?? 0));
+    const feather = Math.min(half, angle! * softness);
+
+    // 角向柔边用 conic gradient 做一次 alpha 乘法，避免整屏模糊。
+    // 强度与 ConeLight/IlluminationProbe 一致：softness 决定边缘 feather，内圈仍是硬半径。
+    if (feather > 1e-6) {
+      const conic = ctx.createConicGradient(direction - half, light.x, light.y);
+      const edge = feather / fullCircle;
+      const inside = (angle! - feather) / fullCircle;
+      conic.addColorStop(0, "rgba(255,255,255,0)");
+      conic.addColorStop(edge, "rgba(255,255,255,1)");
+      conic.addColorStop(inside, "rgba(255,255,255,1)");
+      conic.addColorStop(angle! / fullCircle, "rgba(255,255,255,0)");
+      conic.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.fillStyle = conic;
+      ctx.beginPath();
+      ctx.arc(light.x, light.y, radius, 0, fullCircle);
+      ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+      return;
+    }
+
+    // 无 softness 时退化为硬边锥形，不引入额外模糊。
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.moveTo(light.x, light.y);
+    ctx.arc(light.x, light.y, radius, direction - half, direction + half);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
   }
 
   private shadowQuads(x: number, y: number, radius: number): number[][] {
@@ -320,6 +468,46 @@ export class PerceptionRenderer {
       if (quad) quads.push(quad);
     }
     return quads;
+  }
+
+  /**
+   * 地面阴影只裁到地面轮廓内：墙/矿顶面不参与阴影多边形，
+   * 避免手电或近身光在墙顶画出深色三角。隐藏实体仍由 VisibilityPolicy 负责，不靠这里。
+   */
+  private carveGroundShadowQuads(ctx: CanvasRenderingContext2D,
+    quads: readonly number[][], cameraX: number, cameraY: number): void {
+    if (quads.length === 0) return;
+    const shadowCtx = this.shadowCtx;
+    const mask = this.groundMask;
+    if (!shadowCtx || !this.shadow || !mask) return;
+
+    shadowCtx.setTransform(1, 0, 0, 1, 0, 0);
+    shadowCtx.globalCompositeOperation = "source-over";
+    shadowCtx.globalAlpha = 1;
+    shadowCtx.clearRect(0, 0, this.shadow.width, this.shadow.height);
+    shadowCtx.setTransform(this.scale, 0, 0, this.scale,
+      -cameraX * this.scale, -cameraY * this.scale);
+    shadowCtx.fillStyle = "#000";
+    for (const quad of quads) {
+      shadowCtx.beginPath();
+      shadowCtx.moveTo(quad[0], quad[1]);
+      shadowCtx.lineTo(quad[2], quad[3]);
+      shadowCtx.lineTo(quad[4], quad[5]);
+      shadowCtx.lineTo(quad[6], quad[7]);
+      shadowCtx.closePath();
+      shadowCtx.fill();
+    }
+    // 只保留地面上的阴影：墙/矿顶面不参与，避免墙顶出现深色三角。
+    shadowCtx.setTransform(1, 0, 0, 1, 0, 0);
+    shadowCtx.globalCompositeOperation = "destination-in";
+    shadowCtx.drawImage(mask, 0, 0);
+    shadowCtx.globalCompositeOperation = "source-over";
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.drawImage(this.shadow, 0, 0);
+    ctx.restore();
   }
 
   private carveShadowQuads(ctx: CanvasRenderingContext2D, quads: readonly number[][]): void {
@@ -350,10 +538,3 @@ export class PerceptionRenderer {
   }
 }
 
-/** 与 LightingSystem 的 lightFalloff 相同，避免渲染器依赖模块内部私有实现。 */
-function falloff(distance: number, radius: number): number {
-  if (!Number.isFinite(distance) || !Number.isFinite(radius) || radius <= 0 || distance >= radius) return 0;
-  const t = Math.max(0, distance) / radius;
-  const edge = Math.max(0, (t - 0.75) / 0.25);
-  return (1 - edge * edge * (3 - 2 * edge)) / (1 + (t / 0.6) ** 2);
-}

@@ -83,7 +83,8 @@ export class ParticleSystem {
   /**
    * 渲染所有活跃的粒子（批处理 + 视口剔除，逐粒子透明度保持原样）
    */
-  draw(ctx: CanvasRenderingContext2D, offsetX: number, offsetY: number): void {
+  draw(ctx: CanvasRenderingContext2D, offsetX: number, offsetY: number,
+    visibleAt?: (worldX: number, worldY: number) => boolean): void {
     const groups = this.colorGroups;
     for (const list of groups.values()) list.length = 0;
 
@@ -96,6 +97,7 @@ export class ParticleSystem {
       const particle = this.particles[i];
       if (!particle.isAlive()) continue;
       const pos = particle.getPosition();
+      if (visibleAt && !visibleAt(pos.x, pos.y)) continue;
       const x = pos.x - offsetX, y = pos.y - offsetY;
       if (x < -margin || y < -margin || x > viewWidth + margin || y > viewHeight + margin) continue;
       let list = groups.get(particle.getColor());

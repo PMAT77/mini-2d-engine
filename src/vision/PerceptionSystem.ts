@@ -281,6 +281,23 @@ export class PerceptionSystem {
 
       if (!grid.isExploredCell(col, row)) grid.markCell(col, row);
       state.memory.captureWorld(cx, cy);
+
+      // 墙体/矿石的中心点位于实心多边形内部，直接对中心做 LOS 会永远得到“被墙挡住”。
+      // 因此只要一个可视格紧邻占用格，就把占用格也记为已观察并捕获快照：
+      // 这既留下墙体记忆，也让未知轮廓在真正走到墙边后被擦掉。
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const ncol = col + dx;
+          const nrow = row + dy;
+          if (ncol < 0 || nrow < 0 || ncol >= grid.cols || nrow >= grid.rows) continue;
+          const nx = (ncol + 0.5) * cell;
+          const ny = (nrow + 0.5) * cell;
+          if (!this.map.blocksLightAt(nx, ny)) continue;
+          if (!grid.isExploredCell(ncol, nrow)) grid.markCell(ncol, nrow);
+          state.memory.captureWorld(nx, ny);
+        }
+      }
     }
   }
 }

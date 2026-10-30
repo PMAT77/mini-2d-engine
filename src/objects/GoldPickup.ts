@@ -48,25 +48,26 @@ export class GoldPickup extends GameObject {
   }
 
   /** 所有金块先画光晕，再统一绘制短投影，避免相邻光晕填平阴影。 */
-  drawGlow(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
+  drawGlow(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0, visibility = 1): void {
     const x = this.x - offsetX + GoldPickup.SIZE / 2;
     const groundY = this.y - offsetY + GoldPickup.SIZE / 2;
     if (x < -32 || groundY < -32 || x > ctx.canvas.width + 32 || groundY > ctx.canvas.height + 32) return;
     const t = Math.min(1, this.age / GoldPickup.SCATTER_DURATION);
     const y = groundY - Math.sin(t * Math.PI) * 18;
     const pulse = 0.7 + Math.sin(this.age * 3 + this.glowPhase) * 0.3;
+    const fade = Math.max(0, Math.min(1, visibility));
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     const sprite = GoldPickup.glowSprite();
     if (sprite) {
       // The baked halo carries the exact falloff; the pulse only scales its alpha, so the
       // per-gold radial gradient object (and its allocations) disappear from the frame.
-      ctx.globalAlpha = pulse;
+      ctx.globalAlpha = pulse * fade;
       ctx.drawImage(sprite, x - 15, y - 15, 30, 30);
     } else {
       const glow = ctx.createRadialGradient(x, y, 0, x, y, 15);
-      glow.addColorStop(0, `rgba(255, 205, 70, ${0.24 * pulse})`);
-      glow.addColorStop(0.4, `rgba(255, 175, 35, ${0.1 * pulse})`);
+      glow.addColorStop(0, `rgba(255, 205, 70, ${0.24 * pulse * fade})`);
+      glow.addColorStop(0.4, `rgba(255, 175, 35, ${0.1 * pulse * fade})`);
       glow.addColorStop(1, "rgba(255, 150, 20, 0)");
       ctx.fillStyle = glow;
       ctx.fillRect(x - 15, y - 15, 30, 30);
@@ -130,12 +131,13 @@ export class GoldPickup extends GameObject {
   }
 
   /** 每块固定三个循环光点，不累积粒子或新增场景光源。 */
-  drawSparkles(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
+  drawSparkles(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0, visibility = 1): void {
     const x = this.x - offsetX + GoldPickup.SIZE / 2;
     const groundY = this.y - offsetY + GoldPickup.SIZE / 2;
     if (x < -32 || groundY < -32 || x > ctx.canvas.width + 32 || groundY > ctx.canvas.height + 32) return;
     const t = Math.min(1, this.age / GoldPickup.SCATTER_DURATION);
     const y = groundY - Math.sin(t * Math.PI) * 18;
+    const fade = Math.max(0, Math.min(1, visibility));
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     for (let i = 0; i < 3; i++) {
@@ -143,7 +145,7 @@ export class GoldPickup extends GameObject {
       const angle = this.glowPhase + i * 2.4;
       const px = x + Math.cos(angle + progress * 1.5) * (6 + i * 2);
       const py = y + Math.sin(angle) * 4 - progress * 16;
-      ctx.globalAlpha = Math.sin(progress * Math.PI) * 0.8;
+      ctx.globalAlpha = Math.sin(progress * Math.PI) * 0.8 * fade;
       ctx.fillStyle = "#ffe9a0";
       ctx.fillRect(px - 1, py - 1, 2, 2);
       if (i === 0) {

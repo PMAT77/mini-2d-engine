@@ -30,7 +30,7 @@ import { PerceptionSystem } from "../vision/PerceptionSystem";
 import { PerceptionRenderer } from "../vision/PerceptionRenderer";
 import { createVisionRules } from "../vision/VisionRules";
 import type {
-  EntityVisibility, PerceptionLight, PerceptionTarget, VisionMode, VisionObserver,
+  EntityVisibility, PerceptionLight, PerceptionTarget, PerceptionView, VisionMode, VisionObserver,
 } from "../vision/VisionTypes";
 import { ModifierManager } from "../core/ModifierManager";
 import {
@@ -49,17 +49,15 @@ import { seededRandom } from "../map/WaterTerrain";
 import { ColliderShape, DEFAULT_SHAPE, compileShape, rectangleCollider, transformCollider } from "../physics/Collider";
 import { SoundPlayer } from "../core/SoundPlayer";
 import type { PlayOptions, SoundHandle } from "../core/SoundPlayer";
-import type { FootstepEvent } from "../objects/FootprintSystem";
 
 /**
  * 声音资源。目录按 `public/audio/<分类>/<用途>.<扩展名>` 组织，分类与 audioConfig 的分组
  * （footsteps／pickups／flashlight／chicken／weapon）一一对应，文件名只写用途、不重复分类。
  * 枪声与换弹声由当前武器决定，见 Player 的武器状态。
  */
-/** 干地与湿身脚步，以及一段循环的涉水行走采样。 */
+/** 干地循环与涉水循环。 */
 const DRY_STEP_SOUND = "/audio/footsteps/dry.wav";
 const WATER_STEP_SOUND = "/audio/footsteps/water.wav";
-const WET_STEP_SOUND = "/audio/footsteps/wet.wav";
 /** 小鸡：走路时每一步的轻响，以及停下时偶尔的叫声。 */
 const CHICKEN_STEP_SOUND = "/audio/chicken/step.wav";
 /** 三段真实鸡叫，每次随机取一段；每段都完整播完，不用同一句反复循环。 */
@@ -125,13 +123,13 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly perceptionTargets: PerceptionTarget[] = [];
   private readonly perceptionIds = new WeakMap<object, string>();
   private nextPerceptionId = 0;
+  /** 剪影复用的临时画布；按最大目标尺寸增长，不在每帧为每只目标 new canvas。 */
+  private silhouetteCanvas: HTMLCanvasElement | null = null;
   private audio: AudioConfig = DEFAULT_AUDIO_CONFIG;
-  /** 击发与脚步的一次性音效。 */
+  /** 击发、拾取等一次性音效。 */
   private readonly sfx = new SoundPlayer();
   /** 正在播放的换弹音效；换弹结束或被打断时提前收掉，不会拖到下一声枪响上。 */
   private reloadVoice: SoundHandle | null = null;
-  /** 脚步声的剩余冷却时间（秒），按移动速度调整间隔。 */
-  private footstepSoundDelay = 0;
   /** 小鸡的脚步声与叫声各自计时：叫声稀疏，不能被密集的脚步挤掉。 */
   private chickenStepDelay = 0;
   private chickenCluckDelay = 0;
@@ -291,7 +289,6 @@ export class GameScene extends Scene {  private player!: Player;
     // 移动时在干燥地面留下脚印；涉水时改写为朝行进反方向扩散的涟漪。
     this.player.setOnFootstepCallback(step => {
       if (!this.footprintSystem.spawn(step, this.map)) this.rippleSystem.spawn(step, this.map);
-      this.playFootstepSound(step);
     });
 
     const playerCenterX = this.player.x + this.player.getSize() / 2;
@@ -392,21 +389,6 @@ export class GameScene extends Scene {  private player!: Player;
   }
 
   /**
-   * 出水后湿身的那 1.5 秒里按脚步补一声踩踏；干地和涉水都改成了整段循环，不走这里。
-   * 脚印步距只有 26 像素，声音按速度抽稀到每 0.28–0.6 秒一次，听起来才像走路。
-   */
-  private playFootstepSound(step: FootstepEvent): void {
-    if (this.footstepSoundDelay > 0) return;
-    // 水里踩得再密也只该有一段连续的涉水声，重放会把循环截成碎片。
-    if (step.inWater) return;
-    // 干地的脚步由 updateFootstepSound 整段循环负责，这里只补湿身的踩踏声。
-    if (step.wetness <= 0) return;
-    this.footstepSoundDelay = Math.min(0.6, 90 / Math.max(80, this.player.getVelocity().length()));
-    // 轻微随机音高，避免重复播放同一段采样时听出机械感。
-    this.sfx.play(WET_STEP_SOUND, this.volume(this.audio.footsteps.wetVolume), 0.94 + Math.random() * 0.12);
-  }
-
-  /**
    * 涉水行走的循环音效：身体接触水面且这一帧真的挪动了位置时才出声。
    * 整段采样按 loop 播放，播放速率跟实际速度成正比，快走时叠得更密、慢淌时拖得更长；
    * 离水、停下或被墙挡住时目标音量归零，由 SoundPlayer 在 120 毫秒内淡出。
@@ -419,13 +401,12 @@ export class GameScene extends Scene {  private player!: Player;
 
   /**
    * 干地走路的循环音效：砖地采样是连续行走的整段录音，首尾静音已裁掉（现长 4.035 秒），
-   * 录音里一步约 0.58 秒。播放速率按「采样步距 / 玩家步距」折算，取样步距与原有
-   * 90 毫秒抽稀闸门对齐，即速率 ≈ 速度 / 156：慢走 0.95 倍，常速 200 px/s 约 1.28 倍，
-   * 冲刺 320 px/s 到 2.05 倍，跑起来脚步更密、音高也略高。
-   * 涉水和刚出水湿身时让位给别的脚步，停下或顶墙时淡出。
+   * 录音里一步约 0.58 秒。播放速率按「采样步距 / 玩家步距」折算：慢走 0.95 倍，
+   * 常速 200 px/s 约 1.28 倍，冲刺 320 px/s 到 2.05 倍，跑起来脚步更密、音高也略高。
+   * 涉水时让位给水声，停下或顶墙时淡出。
    */
   private updateFootstepSound(speed: number): void {
-    const walking = !this.player.isInWater() && !this.player.isFootWet() && speed > 20;
+    const walking = !this.player.isInWater() && speed > 20;
     const base = walking ? this.audio.footsteps.dryVolume : 0;
     this.sfx.loop(DRY_STEP_SOUND, this.volume(base), Math.max(0.95, Math.min(2.05, speed / 156)));
   }
@@ -1084,7 +1065,6 @@ export class GameScene extends Scene {  private player!: Player;
     this.updateFootstepSound(movedSpeed);
     // 两条循环音效的目标音量都设好了，统一推进一步淡入淡出，各自都是 120 毫秒。
     this.sfx.update(delta);
-    this.footstepSoundDelay = Math.max(0, this.footstepSoundDelay - delta);
     this.chickenStepDelay = Math.max(0, this.chickenStepDelay - delta);
     this.chickenCluckDelay = Math.max(0, this.chickenCluckDelay - delta);
 
@@ -1275,17 +1255,30 @@ export class GameScene extends Scene {  private player!: Player;
     return id;
   }
 
-  private getEntityVisibility(target: object): EntityVisibility {
+  private getPerceptionView(target: object): PerceptionView {
     const perception = this.perception;
-    if (!perception) return "identified";
+    if (!perception) return { level: "identified", alpha: 1 };
     const id = this.perceptionIds.get(target);
-    if (!id) return "hidden";
-    return perception.getView("player", id).level;
+    if (!id) return { level: "hidden", alpha: 0 };
+    return perception.getView("player", id);
+  }
+
+  private getEntityVisibility(target: object): EntityVisibility {
+    return this.getPerceptionView(target).level;
+  }
+
+  /** 完整辨识的渐隐权重；剪影/隐藏不读取它。 */
+  private getEntityAlpha(target: object): number {
+    if (this.visionMode !== "three-layer") return 1;
+    return Math.max(0, Math.min(1, this.getPerceptionView(target).alpha));
   }
 
   /**
-   * 剪影直接画在遮蔽层之上：它描述“这里有东西”，不负责揭示材质和颜色。
-   * 用源对象自身 draw 生成轮廓再 source-in 压成暗色，避免每种对象各写一套剪影几何。
+   * 剪影在遮蔽层之前绘制：遮蔽层会把墙后部分盖住，只有近身/照明的孔洞能露出它。
+   * 这比在遮蔽之后整块画轮廓更符合“部分身体露出时不能看见完整剪影”。
+   *
+   * 轮廓仍来自对象自身 draw，再 source-in 压成低饱和冷灰；画布按最大目标尺寸复用，
+   * 不再每帧为每只鸡/每块战利品创建新 canvas。
    */
   private drawPerceptionSilhouettes(ctx: CanvasRenderingContext2D,
     cameraX: number, cameraY: number): void {
@@ -1299,18 +1292,21 @@ export class GameScene extends Scene {  private player!: Player;
         || bounds.y + bounds.height - cameraY < -pad
         || bounds.x - cameraX > ctx.canvas.width + pad
         || bounds.y - cameraY > ctx.canvas.height + pad) return;
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
+      const canvas = this.getSilhouetteScratch(width, height);
       const sctx = canvas.getContext("2d");
       if (!sctx) return;
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.globalCompositeOperation = "source-over";
+      sctx.globalAlpha = 1;
+      sctx.clearRect(0, 0, canvas.width, canvas.height);
       drawSource(sctx, pad);
       sctx.globalCompositeOperation = "source-in";
-      sctx.fillStyle = "rgba(22, 28, 36, 0.94)";
+      sctx.fillStyle = "rgba(138, 154, 172, 0.92)";
       sctx.fillRect(0, 0, width, height);
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(canvas, bounds.x - pad - cameraX, bounds.y - pad - cameraY);
+      ctx.drawImage(canvas, 0, 0, width, height,
+        bounds.x - pad - cameraX, bounds.y - pad - cameraY, width, height);
       ctx.restore();
     };
 
@@ -1340,6 +1336,17 @@ export class GameScene extends Scene {  private player!: Player;
         sctx.restore();
       });
     }
+  }
+
+  private getSilhouetteScratch(width: number, height: number): HTMLCanvasElement {
+    let canvas = this.silhouetteCanvas;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      this.silhouetteCanvas = canvas;
+    }
+    if (canvas.width < width) canvas.width = width;
+    if (canvas.height < height) canvas.height = height;
+    return canvas;
   }
 
   /**
@@ -1492,34 +1499,41 @@ export class GameScene extends Scene {  private player!: Player;
       // 和地图共用像素边界，地面投影不能覆盖墙壁、矿石的顶面。
       for (const pickup of this.goldPickups) {
         if (visible(pickup.x, pickup.y, 48) && identified(pickup)) {
+          units.globalAlpha = this.getEntityAlpha(pickup);
           pickup.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
         }
       }
       for (const chicken of this.chickens) {
         if (visible(chicken.x, chicken.y, 72) && identified(chicken)) {
+          units.globalAlpha = this.getEntityAlpha(chicken);
           chicken.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
         }
       }
       for (const pickup of this.meatPickups) {
         if (visible(pickup.x, pickup.y, 32) && identified(pickup)) {
+          units.globalAlpha = this.getEntityAlpha(pickup);
           pickup.drawShadow(units, cameraOffset.x, cameraOffset.y);
         }
       }
+      units.globalAlpha = 1;
       units.restore();
     }
     for (const pickup of this.goldPickups) {
       if (visible(pickup.x, pickup.y, 48) && identified(pickup)) {
+        units.globalAlpha = this.getEntityAlpha(pickup);
         pickup.draw(units, cameraOffset.x, cameraOffset.y);
       }
     }
     for (const pickup of this.meatPickups) {
       if (visible(pickup.x, pickup.y, 32) && identified(pickup)) {
+        units.globalAlpha = this.getEntityAlpha(pickup);
         pickup.draw(units, cameraOffset.x, cameraOffset.y);
       }
     }
     // 绘制道具（在子弹上方，金块下方）
     for (const pickup of this.pickupItems) {
       if (!visible(pickup.x, pickup.y, 88) || !identified(pickup)) continue;
+      units.globalAlpha = this.getEntityAlpha(pickup);
       units.save();
       units.translate(-cameraOffset.x, -cameraOffset.y);
       pickup.draw(units);
@@ -1528,15 +1542,21 @@ export class GameScene extends Scene {  private player!: Player;
     // 小鸡在拾取物之上、子弹之下；随后统一做迷雾裁剪，因此迷雾外不可见。
     for (const chicken of this.chickens) {
       if (visible(chicken.x, chicken.y, 72) && identified(chicken)) {
+        units.globalAlpha = this.getEntityAlpha(chicken);
         chicken.draw(units, cameraOffset.x, cameraOffset.y);
       }
     }
+    units.globalAlpha = 1;
     // 所有世界对象共用包含震动的相机偏移
     for (const bullet of bullets) {
       const position = bullet.getPosition();
       if (visible(position.x, position.y, 40)) bullet.draw(units, cameraOffset.x, cameraOffset.y, this.map);
     }
-    this.particleSystem.draw(units, cameraOffset.x, cameraOffset.y);
+    const particlePerception = threeLayer ? this.perception : undefined;
+    this.particleSystem.draw(units, cameraOffset.x, cameraOffset.y,
+      particlePerception
+        ? (x: number, y: number) => particlePerception.getTerrainRecall("player", x, y) === "observed"
+        : undefined);
     if (!threeLayer) {
       this.prepareFog(cameraOffset.x, cameraOffset.y);
       if (unitBounds.width > 0 && unitBounds.height > 0) {
@@ -1574,8 +1594,11 @@ export class GameScene extends Scene {  private player!: Player;
       effects.setTransform(1, 0, 0, 1, 0, 0);
       effects.globalCompositeOperation = "source-over";
       effects.clearRect(0, 0, this.effectCanvas.width, this.effectCanvas.height);
-      glowGold.forEach(pickup => pickup.drawGlow(effects, cameraOffset.x, cameraOffset.y));
-      glowGold.forEach(pickup => pickup.drawSparkles(effects, cameraOffset.x, cameraOffset.y));
+      for (const pickup of glowGold) {
+        const visibility = this.getEntityAlpha(pickup);
+        pickup.drawGlow(effects, cameraOffset.x, cameraOffset.y, visibility);
+        pickup.drawSparkles(effects, cameraOffset.x, cameraOffset.y, visibility);
+      }
       if (effectBounds.width > 0 && effectBounds.height > 0) {
         // 三层模式的光晕只对已辨识金块绘制，不再走旧迷雾裁剪。
         if (!threeLayer) this.visibilitySystem.apply(effects, effectBounds);
@@ -1592,6 +1615,8 @@ export class GameScene extends Scene {  private player!: Player;
       this.map.width * this.map.tileSize, this.map.height * this.map.tileSize,
       screenContext.canvas.width / ctx.canvas.width, window.devicePixelRatio || 1);
     if (threeLayer && perception && this.perceptionObserver && this.perceptionRenderer) {
+      // 剪影先画在遮蔽层之下：墙后/阴影部分由感知遮罩盖住，只有真实可见的孔洞露出轮廓。
+      this.drawPerceptionSilhouettes(ctx, cameraOffset.x, cameraOffset.y);
       const explored = perception.getExplorationGrid("player");
       const memory = perception.getTerrainMemory("player");
       if (explored && memory) {
@@ -1599,8 +1624,6 @@ export class GameScene extends Scene {  private player!: Player;
           ctx.canvas.width, ctx.canvas.height, this.perceptionObserver,
           this.perceptionLights, explored, memory);
       }
-      // 剪影在遮蔽之后画：它不依赖光照，表达“近处有东西的轮廓”。
-      this.drawPerceptionSilhouettes(ctx, cameraOffset.x, cameraOffset.y);
       // 边界反馈是玩法信号，放在遮蔽之后，避免在未探索区域被压黑。
       this.boundaryRippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y,
         ctx.canvas.width, ctx.canvas.height);
