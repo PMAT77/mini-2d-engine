@@ -15,6 +15,8 @@ import type { VisionState } from "../core/VisibilitySystem";
 import type { FootstepEvent } from "./FootprintSystem";
 import type { ReloadMode, WeaponKind, WeaponSlot, WeaponView } from "./Weapon";
 import { drawHeldWeapon, drawMuzzleFlame, drawStowedWeapons } from "./WeaponVisuals";
+import { getRollPose, rollStowedAlpha, rollVisualAngle, ROLL_REST_POSE } from "./RollPose";
+import type { RollPose } from "./RollPose";
 
 interface WeaponState {
   slot: WeaponSlot;
@@ -74,6 +76,8 @@ const RUN_SWAY_HAND_SCALE = 0.75;
 const RUN_SWAY_HAND_LAG = 0.5;
 /** 头部摇摆相对整体摇摆的比例；行走与奔跑都只保留轻微晃动。 */
 const RUN_SWAY_HEAD_SCALE = 0.5;
+/** 站立姿态的肘点在肩手连线上的位置：两段胶囊拼起来与旧版整根胶囊重合。 */
+const NORMAL_ELBOW_T = 0.6;
 
 export interface PlayerAimInput {
   target: { x: number; y: number };
@@ -99,12 +103,9 @@ export class Player extends Entities {
   private health = 100;
   private maxHealth = 100;
   private gold = 0;
-  private meat = 0;
 
   getGold(): number { return this.gold; }
   collectGold(): void { this.gold++; }
-  getMeat(): number { return this.meat; }
-  collectMeat(): void { this.meat++; }
 
   private movement = { ...DEFAULT_MOVEMENT };
   private sprint = { ...DEFAULT_SPRINT };
@@ -331,6 +332,14 @@ export class Player extends Entities {
     // 归一化向量，确保多方向移动时速度一致
     if (dir.length() > 0) dir.normalize();
     return dir;
+  }
+
+  /**
+   * 原始移动意图，供边界反馈使用。
+   * 撞墙后 Entities 会把向内速度清零，getVelocity() 读不到“还在往里推”。
+   */
+  getMoveIntent(input: Input): Vector2 {
+    return this.getMoveDirection(input);
   }
 
   protected getMovementSpeed(): number {
@@ -1467,20 +1476,29 @@ export class Player extends Entities {
     // 应用变换并绘制
     ctx.translate(centerX, centerY);
     const facing = this.currentRotation - Math.PI;
-    ctx.rotate(facing);
-    const rollProgress = this.getRollProgress();
-    if (rollProgress > 0) {
-      // 翻滚是绕身体左右轴的向前翻，不是屏幕平面里的整圈自转：
-      // 俯视正交投影下，绕左右轴转动会把身体沿朝向轴（local x）压扁，
-      // 翻过 90° 后镜像（头脚互换），看起来才是前后滚过去。
-      // 用 ctx.rotate 转的是屏幕垂直轴，在俯视图里只会像原地左右转身。
-      const tumble = Math.cos(rollProgress * Math.PI * 2);
-      const width = (tumble < 0 ? -1 : 1) * (0.18 + 0.82 * Math.abs(tumble));
-      const tuck = 1 - 0.22 * Math.sin(Math.PI * rollProgress);
-      ctx.scale(width * tuck, tuck);
+    const progress = this.getRollProgress();
+    if (progress > 0) {
+      // 翻滚的视觉朝向跟着锁定的 rollDirection，而不是鼠标拉出来的 currentRotation；
+      // 起滚与收尾各有一段权重过渡，所以两端都不会突跳。
+      const rollAngle = Math.atan2(this.rollDirection.y, this.rollDirection.x);
+      ctx.rotate(rollVisualAngle(progress, facing, rollAngle));
+    } else {
+      ctx.rotate(facing);
     }
     ctx.scale(scale, scale);
-    const s = this.size, c = Math.cos(facing), sn = Math.sin(facing);
+
+    if (progress > 0) this.drawRollPose(ctx, this.size, getRollPose(progress), progress);
+    else this.drawNormalPose(ctx, this.size, facing);
+
+    ctx.restore();
+  }
+
+  /**
+   * 站立/奔跑/瞄准姿态：沿用原来的 sway、瞄准与换枪偏移。
+   * 仍然走同一套 drawBody，所以头、手、躯干的图层与旧版完全一致。
+   */
+  private drawNormalPose(ctx: CanvasRenderingContext2D, s: number, facing: number): void {
+    const c = Math.cos(facing), sn = Math.sin(facing);
     const muzzle = this.getMuzzlePosition();
     const dx = muzzle.x - this.x - s / 2, dy = muzzle.y - this.y - s / 2;
     const hand = { x: dx * c + dy * sn, y: -dx * sn + dy * c };
@@ -1490,43 +1508,136 @@ export class Player extends Entities {
     const headSway = Math.sin(this.runSwayPhase) * sway * RUN_SWAY_HEAD_SCALE;
     const handSway = Math.sin(this.runSwayPhase - RUN_SWAY_HAND_LAG) * sway
       * RUN_SWAY_HAND_SCALE * (1 - this.armLift);
+    const swapProgress = this.weaponSwapTime > 0 ? 1 - this.weaponSwapTime / WEAPON_SWAP_DURATION : 1;
+    const swap = Math.sin(Math.PI * swapProgress);
+    const handX = hand.x - s * .10 * swap, handY = hand.y + s * .18 * swap;
+    const leftX = s * .04 * (1 - this.armLift) + hand.x * .67 * this.armLift;
+    const leftY = -s * .46 * (1 - this.armLift) + (hand.y - s * .13) * this.armLift;
+    const pose: RollPose = {
+      ...ROLL_REST_POSE,
+      headY: headSway / s,
+      leftHandX: (leftX + handSway) / s, leftHandY: leftY / s,
+      rightHandX: (handX - handSway) / s, rightHandY: handY / s,
+    };
+    // 肘落在肩手连线上：两段胶囊与旧版的一整根完全重合。
+    const elbow = (sx: number, sy: number, hx: number, hy: number): [number, number] =>
+      [sx + (hx - sx) * NORMAL_ELBOW_T, sy + (hy - sy) * NORMAL_ELBOW_T];
+    [pose.leftElbowX, pose.leftElbowY] = elbow(pose.leftShoulderX, pose.leftShoulderY, pose.leftHandX, pose.leftHandY);
+    [pose.rightElbowX, pose.rightElbowY] = elbow(pose.rightShoulderX, pose.rightShoulderY, pose.rightHandX, pose.rightHandY);
+    this.drawBody(ctx, s, pose);
+  }
+
+  /** 翻滚姿态：头、躯干、双臂、腿、肩背外壳各自按姿态数据运动。 */
+  private drawRollPose(ctx: CanvasRenderingContext2D, s: number, pose: RollPose, progress: number): void {
+    // 斜挎武器会横穿收起的头，翻滚中先淡出、收尾再淡回。
+    this.drawBody(ctx, s, pose, rollStowedAlpha(progress));
+  }
+
+  /**
+   * 按姿态数据绘制本地坐标下的角色，站立与翻滚共用：
+   * 腿 → 双臂 → 背影 → 躯干 → 胸板 → 枪 → 头 → 肩背外壳。
+   * 外壳最后画，中段会盖住头/胸板，形成“肩背从上面翻过去”的遮挡。
+   */
+  private drawBody(ctx: CanvasRenderingContext2D, s: number, pose: RollPose, stowedAlpha = 1): void {
     const disc = (x: number, y: number, r: number, color: string | CanvasGradient) => {
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+    };
+    const ellipse = (x: number, y: number, rx: number, ry: number, color: string | CanvasGradient) => {
+      ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
       ctx.fillStyle = color; ctx.fill();
     };
     const capsule = (ax: number, ay: number, bx: number, by: number, width: number, color: string) => {
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
       ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke();
     };
-    // Rounded shoulders, sleeves and hands sit below the head in the top-down view.
-    const swapProgress = this.weaponSwapTime > 0 ? 1 - this.weaponSwapTime / WEAPON_SWAP_DURATION : 1;
-    const swap = Math.sin(Math.PI * swapProgress);
-    const handX = hand.x - s * .10 * swap, handY = hand.y + s * .18 * swap;
-    const leftX = s * .04 * (1 - this.armLift) + hand.x * .67 * this.armLift;
-    const leftY = -s * .46 * (1 - this.armLift) + (hand.y - s * .13) * this.armLift;
-    capsule(0, -s * .31, leftX + handSway, leftY, s * .22, '#183c4a');
-    capsule(0, s * .31, handX - handSway, handY, s * .22, '#183c4a');
-    capsule(s * .02, -s * .31, leftX + handSway, leftY, s * .15, '#4d8999');
-    capsule(s * .02, s * .31, handX - handSway, handY, s * .15, '#4d8999');
-    disc(leftX + handSway, leftY, s * .085, '#e5ccb0');
-    disc(handX - handSway, handY, s * .085, '#eed7b9');
-    disc(-s * .055, 0, s * .45, '#102c39');
-    const body = ctx.createLinearGradient(-s * .4, s * .3, s * .35, -s * .3);
-    body.addColorStop(0, '#245362'); body.addColorStop(1, '#73b4bf');
-    disc(0, 0, s * .405, body);
-    disc(s * .055, 0, s * .29, '#23404a');
-    // 未拿在手上的枪斜挎在背上、挂在腰间，压在身体上面、头下面，两端从头两侧露出。
-    drawStowedWeapons(ctx, s, this.activeSlot);
-    // 手中的武器压在身体之上、头之下，换枪时随手下沉。
-    drawHeldWeapon(ctx, s, this.weaponKind, this.activeSlot, { x: handX, y: handY });
-    const head = ctx.createRadialGradient(
-      s * .16, -s * .12 + headSway, s * .015, s * .09, headSway, s * .28);
-    head.addColorStop(0, '#fff1d6'); head.addColorStop(.65, '#ead3b2'); head.addColorStop(1, '#b49a7a');
-    disc(s * .09, headSway, s * .265, head);
-    // A small crown highlight indicates facing without drawing a face.
-    capsule(s * .22, -s * .08 + headSway, s * .27, s * .025 + headSway, s * .035, '#fff4dd');
 
-    ctx.restore();
+    // 1) 简化腿部：只在翻滚姿态里淡入，画在身体后面。
+    if (pose.legAlpha > .001) {
+      const hipX = (pose.bodyX - pose.bodyRx * .4) * s;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, pose.legAlpha);
+      for (const side of [-1, 1]) {
+        const kneeX = (side < 0 ? pose.leftKneeX : pose.rightKneeX) * s;
+        const kneeY = (side < 0 ? pose.leftKneeY : pose.rightKneeY) * s;
+        const footX = (side < 0 ? pose.leftFootX : pose.rightFootX) * s;
+        const footY = (side < 0 ? pose.leftFootY : pose.rightFootY) * s;
+        capsule(hipX, side * pose.bodyRy * .38 * s, kneeX, kneeY, s * .13, '#1d3f4b');
+        capsule(kneeX, kneeY, footX, footY, s * .11, '#1d3f4b');
+        disc(footX, footY, s * .055, '#2b5560');
+      }
+      ctx.restore();
+    }
+
+    // 2) 双臂：肩→肘→手两段圆头胶囊；先两臂外层再两臂内层，最后画手。
+    const arms = [
+      { sx: pose.leftShoulderX, sy: pose.leftShoulderY, ex: pose.leftElbowX, ey: pose.leftElbowY, hx: pose.leftHandX, hy: pose.leftHandY },
+      { sx: pose.rightShoulderX, sy: pose.rightShoulderY, ex: pose.rightElbowX, ey: pose.rightElbowY, hx: pose.rightHandX, hy: pose.rightHandY },
+    ];
+    for (const arm of arms) {
+      capsule(arm.sx * s, arm.sy * s, arm.ex * s, arm.ey * s, s * .22, '#183c4a');
+      capsule(arm.ex * s, arm.ey * s, arm.hx * s, arm.hy * s, s * .22, '#183c4a');
+    }
+    for (const arm of arms) {
+      capsule(arm.sx * s, arm.sy * s, arm.ex * s, arm.ey * s, s * .15, '#4d8999');
+      capsule(arm.ex * s, arm.ey * s, arm.hx * s, arm.hy * s, s * .15, '#4d8999');
+    }
+    disc(arms[0].hx * s, arms[0].hy * s, s * .085, '#e5ccb0');
+    disc(arms[1].hx * s, arms[1].hy * s, s * .085, '#eed7b9');
+
+    // 3) 背影轮廓 + 4) 躯干 + 5) 胸板
+    disc(pose.backX * s, pose.backY * s, pose.backR * s, '#102c39');
+    const bx = pose.bodyX * s, by = pose.bodyY * s;
+    const body = ctx.createLinearGradient(bx - s * .4, by + s * .3, bx + s * .35, by - s * .3);
+    body.addColorStop(0, '#245362'); body.addColorStop(1, '#73b4bf');
+    // 圆是站立姿态的常态；只有蜷缩的翻滚姿态才会变成椭圆。
+    if (Math.abs(pose.bodyRx - pose.bodyRy) < 1e-6) disc(bx, by, pose.bodyRx * s, body);
+    else ellipse(bx, by, pose.bodyRx * s, pose.bodyRy * s, body);
+    disc(pose.plateX * s, pose.plateY * s, pose.plateR * s, '#23404a');
+
+    // 未拿在手上的枪斜挎在背上、挂在腰间，压在身体上面、头下面，两端从头两侧露出。
+    drawStowedWeapons(ctx, s, this.activeSlot, stowedAlpha);
+    // 手中的武器压在身体之上、头之下，换枪时随手下沉，翻滚时随手腕额外旋转。
+    drawHeldWeapon(ctx, s, this.weaponKind, this.activeSlot,
+      { x: pose.rightHandX * s, y: pose.rightHandY * s }, pose.weaponAngle);
+
+    // 6) 头：径向渐变随头的位置和半径缩放，头能独立低头/缩起而不带动躯干。
+    if (pose.headAlpha > .001) {
+      const hx = pose.headX * s, hy = pose.headY * s;
+      const k = pose.headR / ROLL_REST_POSE.headR;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, pose.headAlpha);
+      const head = ctx.createRadialGradient(
+        hx + s * .07 * k, hy - s * .12 * k, s * .015 * k, hx, hy, s * .28 * k);
+      head.addColorStop(0, '#fff1d6'); head.addColorStop(.65, '#ead3b2'); head.addColorStop(1, '#b49a7a');
+      disc(hx, hy, pose.headR * s, head);
+      // A small crown highlight indicates facing without drawing a face.
+      capsule(hx + s * .13 * k, hy - s * .08 * k, hx + s * .18 * k, hy + s * .025 * k, s * .035 * k, '#fff4dd');
+      ctx.restore();
+    }
+
+    // 7) 肩背外壳：只在中段出现，盖住头与胸板，表示背/肩从上面翻过去。
+    if (pose.shellAlpha > .001) {
+      const alpha = Math.min(1, pose.shellAlpha);
+      const sx = pose.shellX * s, sy = pose.shellY * s, rx = pose.shellRx * s, ry = pose.shellRy * s;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const shell = ctx.createLinearGradient(sx - rx, sy, sx + rx, sy);
+      shell.addColorStop(0, '#16343e'); shell.addColorStop(.6, '#1f4854'); shell.addColorStop(1, '#2f6572');
+      ellipse(sx, sy, rx, ry, shell);
+      // 外壳刚出现时只是压暗轮廓，纹理要等背真正翻上来才显形，
+      // 否则脊柱线会像一根棍子横在还没收起来的头上。
+      const detail = Math.max(0, Math.min(1, (alpha - .35) / .5));
+      if (detail > .001) {
+        ctx.globalAlpha = alpha * detail;
+        // 背面纹理：一条脊柱沟 + 两道斜向肩胛，避免睁眼/张嘴的观感。
+        capsule(sx + s * .22, sy, sx - s * .26, sy, s * .05, '#0f2831');
+        capsule(sx + s * .20, sy - s * .035, sx - s * .24, sy - s * .035, s * .018, '#3d7b89');
+        capsule(sx + s * .10, sy - s * .13, sx - s * .08, sy - s * .21, s * .12, '#2d6573');
+        capsule(sx + s * .10, sy + s * .13, sx - s * .08, sy + s * .21, s * .12, '#2d6573');
+      }
+      ctx.restore();
+    }
   }
 
   /** Screen-space overlays are drawn after lighting. */

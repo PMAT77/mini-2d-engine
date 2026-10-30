@@ -71,13 +71,14 @@ test('shooting a chicken kills it, drops meat after the puff, and collects it', 
   chicken.velocity.set(0, 0);
   chicken.timer = 999;
   scene.chickens = [chicken];
+  scene.player.takeDamage(50);
   const cx = chicken.x + Chicken.SIZE / 2, cy = chicken.y + Chicken.SIZE / 2;
   scene.player.shootAt({ x: cx, y: cy }, 1000, scene.map);
   assert.equal(scene.player.getBullets().length, 1);
 
   for (let frame = 0; frame < 30; frame++) scene.update(1 / 60, idle);
   assert.equal(scene.chickens.length, 0, 'lethal bullet removes the chicken');
-  assert.equal(scene.player.getMeat(), 0);
+  assert.equal(scene.player.getHealth(), 50, 'killing a chicken does not heal by itself');
 
   for (let frame = 0; frame < 60; frame++) scene.update(1 / 60, idle);
   assert.equal(scene.meatPickups.length, 1, 'meat drops after the death puff');
@@ -88,6 +89,7 @@ test('shooting a chicken kills it, drops meat after the puff, and collects it', 
   scene.player.x = meatCenter.x - scene.player.getSize() / 2;
   scene.player.y = meatCenter.y - scene.player.getSize() / 2;
   for (let frame = 0; frame < 5; frame++) scene.update(1 / 60, idle);
-  assert.equal(scene.player.getMeat(), 1);
+  assert.equal(scene.player.getHealth(), 55, 'each meat restores five health');
   assert.equal(scene.meatPickups.length, 0);
+  assert.ok(scene.floatingTexts.getTexts().some(text => text.text === 'HP+5'));
 });

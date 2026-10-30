@@ -14,7 +14,7 @@ export const DEFAULT_AUDIO_CONFIG: AudioConfig = {
   footsteps: { wetVolume: 0.5, waterVolume: 0.45, dryVolume: 0.45 },
   pickups: { goldVolume: 0.4, meatVolume: 0.5 },
   flashlight: { switchVolume: 0.5 },
-  chicken: { stepVolume: 0.25, cluckVolume: 0.45, range: 620, minAttenuation: 0.08 },
+  chicken: { stepVolume: 0.25, cluckVolume: 0.25, range: 450, minAttenuation: 0.08 },
 };
 
 export function cloneAudioConfig(config: AudioConfig = DEFAULT_AUDIO_CONFIG): AudioConfig {

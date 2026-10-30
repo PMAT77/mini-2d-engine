@@ -1,0 +1,2599 @@
+{
+  "name": "keyboard-mouse-icons",
+  "version": "1.0.0",
+  "generatedAt": "2026-10-30",
+  "source": {
+    "pack": "MengGe's Game UI Icons v1.0.0",
+    "subset": "Keyboard&Mouse_Icons",
+    "author": "MengGe (menggekkd)",
+    "url": "https://github.com/menggekkd/mengge_game_ui_icons",
+    "license": "CC BY-ND 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-nd/4.0/",
+    "attribution": "Keyboard & Mouse icons from MengGe's Game UI Icons v1.0.0 by MengGe (menggekkd), licensed under CC BY-ND 4.0. Source: https://github.com/menggekkd/mengge_game_ui_icons",
+    "originalFormat": "PNG RGBA，原包分 x128（键高 128 px）与 x64（键高 64 px）两档"
+  },
+  "format": {
+    "container": "png",
+    "colorType": "RGBA",
+    "bitDepth": 8,
+    "background": "transparent",
+    "palette": [
+      "#EEEEEE",
+      "#EEEEEE4D",
+      "#0F0F0F"
+    ]
+  },
+  "naming": "public/assets/images/ui/keyboard-mouse/<size>/<原文件名>.png",
+  "url": "/assets/images/ui/keyboard-mouse/<size>/<原文件名>.png",
+  "sizes": [
+    "64",
+    "128"
+  ],
+  "total": 124,
+  "geometry": {
+    "height": 128,
+    "note": "所有图标高度固定；宽键按比例加宽（Enter／Space 256、Shift 188、Backspace／CapsLock 138 等），绘制时按实际宽高比缩放，不要强行拉成正方形。64 版是 128 版的 0.5 倍。"
+  },
+  "notes": [
+    "文件按原样拷贝，未裁剪、缩放、改色或重新编码；CC BY-ND 4.0 不允许分发修改版。",
+    "键帽为浅灰 #EEEEEE 实心、字形 #0F0F0F，适合深色界面；浅色背景上需要另加底色或描边。",
+    "Keyboard_Arrows* 只有键位高亮（#EEEEEE 与 #EEEEEE4D 两档），没有箭头字形；箭头字形见 Keyboard_Arrow_*。",
+    "同一套图标提供 64 与 128 两档，按显示尺寸选择，避免把 64 放大。"
+  ],
+  "categories": [
+    {
+      "id": "letters",
+      "label": "字母键",
+      "description": "A–Z 单字形键帽。",
+      "count": 26
+    },
+    {
+      "id": "digits",
+      "label": "数字键",
+      "description": "0–9 数字键。",
+      "count": 10
+    },
+    {
+      "id": "digits-shift",
+      "label": "数字上档符号",
+      "description": "数字键的 Shift 组合字形，文件名带 _Cape。",
+      "count": 10
+    },
+    {
+      "id": "numpad",
+      "label": "小键盘",
+      "description": "小键盘（Numpad）键位。",
+      "count": 6
+    },
+    {
+      "id": "function",
+      "label": "功能键",
+      "description": "F1–F12 与 Fn。",
+      "count": 13
+    },
+    {
+      "id": "punctuation",
+      "label": "标点符号键",
+      "description": "键帽同时印上下两个字形，如 , < 和 . >。",
+      "count": 11
+    },
+    {
+      "id": "modifiers",
+      "label": "修饰键",
+      "description": "Ctrl／Shift／Alt／Win 与 macOS 修饰键。",
+      "count": 10
+    },
+    {
+      "id": "editing",
+      "label": "编辑键",
+      "description": "退格、回车、Tab、空格、Caps Lock、Esc、Del、Ins。",
+      "count": 8
+    },
+    {
+      "id": "navigation",
+      "label": "导航键",
+      "description": "Home／End／PageUp／PageDown。",
+      "count": 4
+    },
+    {
+      "id": "arrows",
+      "label": "方向键",
+      "description": "Keyboard_Arrow_* 是单键箭头字形；Keyboard_Arrows* 是四键簇的按下高亮，没有箭头字形。",
+      "count": 12
+    },
+    {
+      "id": "mouse",
+      "label": "鼠标",
+      "description": "鼠标移动、滚轮与按键。",
+      "count": 11
+    },
+    {
+      "id": "device",
+      "label": "设备图标",
+      "description": "键盘／鼠标整机图形，适合做「键鼠操作」提示的标题图标。",
+      "count": 3
+    }
+  ],
+  "icons": [
+    {
+      "name": "Keyboard_A",
+      "category": "letters",
+      "label": "A",
+      "zh": "字母 A",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 985,
+          "sha256": "3fa673983c83ee035e22f54454b7d9c8c7873a7cb98f08f4f3e50b48843c5848"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1777,
+          "sha256": "5ef644016c34e9b2e173dee5cb5a0da568cf9671f7737de484618f9fe7be2089"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_B",
+      "category": "letters",
+      "label": "B",
+      "zh": "字母 B",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 939,
+          "sha256": "fa30442eaac1f82d72ee26ca5a5afc9f405725ad2c4ea03c5f3f0f462a9c4df4"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1682,
+          "sha256": "c7051bf8df4b58e8339c9f997589318377c5abe4506539bdb94ef59020ef2f4e"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_C",
+      "category": "letters",
+      "label": "C",
+      "zh": "字母 C",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1050,
+          "sha256": "ba86d2b410caf4eac48cfd733cc48e8b23eb9cf95206956f8b98b1fc9db544f9"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1931,
+          "sha256": "208ccd1ec6557f40f3d2cfbc9363a7852f01ff121d695dc05995e897d64cdc65"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_D",
+      "category": "letters",
+      "label": "D",
+      "zh": "字母 D",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 925,
+          "sha256": "366c840f9a7f6fd45586fe8994bf230aab14920ed4d8bc62a53a74ba23300b44"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1668,
+          "sha256": "a2c14c757474bf54459d96be1709d619c404b006c503eebd35ee6e1f3ab794b1"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_E",
+      "category": "letters",
+      "label": "E",
+      "zh": "字母 E",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 729,
+          "sha256": "4f2964856b86376ef8e148b9413fe7411b2ee21159ea5e58671db89916c02e13"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1227,
+          "sha256": "94583f1c72d605a7e3d6417f6964320423f496df699143c5bff9619a5b027bf1"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F",
+      "category": "letters",
+      "label": "F",
+      "zh": "字母 F",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 786,
+          "sha256": "fe3f32995078a8d66a344463ef7b2c9145a46f31b481593b5c2e011e08e753fe"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1334,
+          "sha256": "5b72526b6f6781ed4aec18b4316b6173d87295a47c9bc7554c4e8a9abb1525c7"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_G",
+      "category": "letters",
+      "label": "G",
+      "zh": "字母 G",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1049,
+          "sha256": "a3bac97140f4542864fa82d762f922d6f38b64186a37b8b3cfd162b713812e82"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1931,
+          "sha256": "365ec96f6ba14be3d4fb24e1e92b45a70c7f2634eeb06851e19c7b644aa8672b"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_H",
+      "category": "letters",
+      "label": "H",
+      "zh": "字母 H",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 728,
+          "sha256": "bb04837fdd7f9a1c224f8682e036f35b6b951d362a046477b4d91824bedd8cdf"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1224,
+          "sha256": "fa5488e15e537b1bd63432e53134a916d871fe7cfd1343f5daa114ccbbf6653a"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_I",
+      "category": "letters",
+      "label": "I",
+      "zh": "字母 I",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 638,
+          "sha256": "12a75ee470afd3c7dace67c17f9b9e5e1bf14ebb5ed4bfc0414507325e393aaa"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1126,
+          "sha256": "9de7f40d20b2c556efa53855bc00caff6454a5e60753f69a3492ad49060aa5d8"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_J",
+      "category": "letters",
+      "label": "J",
+      "zh": "字母 J",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 861,
+          "sha256": "7ee2aa7532206e34e3b538041a55b92bfc8f2f83d2f1c939e7703dba084885d2"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1611,
+          "sha256": "7da93c014e51e6a1dedd554da7931984a39d3ea3a5f6c0b9d6caabe109bd0db1"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_K",
+      "category": "letters",
+      "label": "K",
+      "zh": "字母 K",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 949,
+          "sha256": "72c9d29cc77eeb61e6b80cc952bfae04c2bd728bbe6e84e3bddf2cd413a1ecd4"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1635,
+          "sha256": "554009d1ec2445bd7ca7496200dcb2247df434a49335fd9ff9225987194e7987"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_L",
+      "category": "letters",
+      "label": "L",
+      "zh": "字母 L",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 671,
+          "sha256": "ad2d3b03471c2da77f487ea3650c2ac41f67d46c7d19b2e189568fd8bf8d2907"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1156,
+          "sha256": "368e3ca40078f9d9d43b922846db1741a17f7d3bb9c25eb7205f783f9676de1d"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_M",
+      "category": "letters",
+      "label": "M",
+      "zh": "字母 M",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 912,
+          "sha256": "393ead00292acfaf8236e93eb377f7e3b558da50bf1189eb02af832bf9a9ade3"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1621,
+          "sha256": "8a3aa9bc174f44066eec1f9ccee09c9aefc29dc23fcd6dac405128363081ba42"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_N",
+      "category": "letters",
+      "label": "N",
+      "zh": "字母 N",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 876,
+          "sha256": "3e37621892a1809bebcad7f1dce85ab01552fc88520f9490031eca9c2e3cecaa"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1492,
+          "sha256": "0c014695355c08e3514df843a14d48fac297d5d82c92d830bb49fdd5de6106d6"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_O",
+      "category": "letters",
+      "label": "O",
+      "zh": "字母 O",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1063,
+          "sha256": "405d60aa5eae2da128ca39ffd213c3174814e7d485c27863711c2e0d7b6d96c2"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2011,
+          "sha256": "6c94ced8239f9086f3033ad829c5c7b6eff4de2b6a9c0e84338a343c9f7a0148"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_P",
+      "category": "letters",
+      "label": "P",
+      "zh": "字母 P",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 864,
+          "sha256": "a0b57f56389bbc2f531fecf9aedb5898986d0d40c2381c8801391d846528900a"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1535,
+          "sha256": "836e06a2df62a46a88a70aa5a69c07d6ade419fa189771934d947190677ee1ae"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Q",
+      "category": "letters",
+      "label": "Q",
+      "zh": "字母 Q",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1126,
+          "sha256": "c8bbb4047db1f87750231d730a71573fcafe401e5425833bdfb9ed91e972608d"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2117,
+          "sha256": "14cd66621af093b88494ced8e031f048055ecef3a5e7f4d52cc5b37a4ca4b0b7"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_R",
+      "category": "letters",
+      "label": "R",
+      "zh": "字母 R",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 962,
+          "sha256": "9620f2533c5e82fb72629fb5c213b7389f1ecbead46efc7a9147bdef5d208cfb"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1671,
+          "sha256": "ce3247949180acedee2256f9687cb186e2f76de927d8a3ad1e2bae7b01891220"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_S",
+      "category": "letters",
+      "label": "S",
+      "zh": "字母 S",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1113,
+          "sha256": "335ac73eba10a2ccca6fe045ebdd1d86b45ea0c0b864823077fae025f19b8f2d"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2012,
+          "sha256": "902a52455661970e84470b82bc0977603e47540651587d7aeb7b79ba7e167d59"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_T",
+      "category": "letters",
+      "label": "T",
+      "zh": "字母 T",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 688,
+          "sha256": "c858e7ab708ba3cc6f2605a617840e76059bc4693ad85c9be3c75a666f840b63"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1189,
+          "sha256": "afbda1f38a8bc2ac4ddf768c5aa5baea508781df66ea1e9bdbed83692dd0f842"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_U",
+      "category": "letters",
+      "label": "U",
+      "zh": "字母 U",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 853,
+          "sha256": "c8276ed761b149284cb4ead98c63700ee6de9fd75536f41dc04e3e1cf2acf672"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1560,
+          "sha256": "1ae3e18ca117e1446db4a21a81f483f9831c7cb304a6d66e08afe1e06e71cfb3"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_V",
+      "category": "letters",
+      "label": "V",
+      "zh": "字母 V",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1035,
+          "sha256": "ea44e338c9e9de15e171a4c9c8c50a0693eea74cd34d5f81818c7d01c571cdc8"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1859,
+          "sha256": "6bc908f68e77cd389472534dc422c2a350bb45cfe0e90217218d9e7c6c7e57f8"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_W",
+      "category": "letters",
+      "label": "W",
+      "zh": "字母 W",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1128,
+          "sha256": "72c7a7134be767dea94740ccdc34e79e33438596958f191d9736e33dd896c5d8"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2073,
+          "sha256": "47623b093f37d8e6b127f76821a388393ac45b5f7a8133a4f73cfb13a0343e95"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_X",
+      "category": "letters",
+      "label": "X",
+      "zh": "字母 X",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1075,
+          "sha256": "d57dd53d4994e2b132ea52e72a2ed52a67e42e0a69e5e6619c8ddd7f855d1375"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1955,
+          "sha256": "a74b57fa71a074ebd1c54d141ddd1756752022ce406429ab7b363305d8776d47"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Y",
+      "category": "letters",
+      "label": "Y",
+      "zh": "字母 Y",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 927,
+          "sha256": "e6c5948ada788ecd57d776d5992c868a0a738d1eae433f24c4c929dd5a12a3ec"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1630,
+          "sha256": "cb223551c260183ce32c5efaacc11fc0f48d9aced7a34fd149c34b2fd11b4ce7"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Z",
+      "category": "letters",
+      "label": "Z",
+      "zh": "字母 Z",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 845,
+          "sha256": "6c24ddb8e059366295f270cb93e5a141580f571de5cff48a2fc11e538d262bea"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1387,
+          "sha256": "cfa40e9b46af78313198a3c9d4cad37491a91058023e6c7090fd4fdcc18d87e1"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_0",
+      "category": "digits",
+      "label": "0",
+      "zh": "数字 0",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1019,
+          "sha256": "bd9fa57cbb6a16612e9a35714f30fe764ffd80f599ba66983de169443fa9cbb7"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1880,
+          "sha256": "7ce8974d645b7e4168756c34234ad1ba835e045b0748cd85c01f85bf6ec9eee9"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_1",
+      "category": "digits",
+      "label": "1",
+      "zh": "数字 1",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 700,
+          "sha256": "95260f64c45326466a07fc8c8f6438fc8e45e02f5aacc13e326e7ab1107d289b"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1238,
+          "sha256": "401c2304f7768a751b25240560fa53c00a2a4a30a1dfdc00dc91328f8065cc82"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_2",
+      "category": "digits",
+      "label": "2",
+      "zh": "数字 2",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 968,
+          "sha256": "87aca1f28ed6fc1feef685f1a86f6b33c579e0e4ddaf1af09958eb3d72203b65"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1743,
+          "sha256": "aecd106104dcbdcd53d5a94880aec5ec299513c6a6af9123ec868a790899be45"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_3",
+      "category": "digits",
+      "label": "3",
+      "zh": "数字 3",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1013,
+          "sha256": "6c821e146a616379152225e84cb7982f19fa957522b82a91472a6c697f7c4ef2"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1816,
+          "sha256": "fd4d7e4b3b13beff29f2a09bf34d2a510941fe5691df9bbbaebebf992349e0ec"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_4",
+      "category": "digits",
+      "label": "4",
+      "zh": "数字 4",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 812,
+          "sha256": "4871500e3ad19e65daa407f41d695a1bff9a135a0208fc9ca7ba6f043f87e37b"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1423,
+          "sha256": "a3bcc542dd81b5284cc4e560a1f796563936dc436bdbfa2d310470eb9b1dfde3"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_5",
+      "category": "digits",
+      "label": "5",
+      "zh": "数字 5",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1004,
+          "sha256": "046bcd660447aceb8d715a818cbf01d1a75a0fd47afed5c67bbb141741473663"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1800,
+          "sha256": "ec688b65c503afacda176d0f8bf180f279ea285d1342667b7928331d12998dea"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_6",
+      "category": "digits",
+      "label": "6",
+      "zh": "数字 6",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1032,
+          "sha256": "44bcd2ca333cf378bff8d9992d9df03b1ff67f0aeea29bcdab1313202520e74b"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1868,
+          "sha256": "f368c16cf07d769472e9b04eb7c846ae96c523449496a35649958269fc63dab0"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_7",
+      "category": "digits",
+      "label": "7",
+      "zh": "数字 7",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 853,
+          "sha256": "8059753997771166712a6a97f8d8846252f3e036bda5980ed24db8ab4b4547b1"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1478,
+          "sha256": "e47e8018409c3ec82004fea124dbb12c994498ea348fee0b327bdd569c52c743"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_8",
+      "category": "digits",
+      "label": "8",
+      "zh": "数字 8",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1093,
+          "sha256": "e447e28793243357487bce2eec634e1b5847556600c57a1c69dd40a26367a847"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1999,
+          "sha256": "940dfa2972710c8dd13246ed9a35280194e558f9e8858293fe319e8467b48778"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_9",
+      "category": "digits",
+      "label": "9",
+      "zh": "数字 9",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1026,
+          "sha256": "d71d1b8b94e91201436819b4d2e4fcf22a1d44e17ad179e176c2d7d84a03ca91"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1896,
+          "sha256": "9b0da3b84da185b3a20c3b92af11a0b13705bb0256058257245e355ab6f627f8"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_0_Cape",
+      "category": "digits-shift",
+      "label": ")",
+      "zh": "0 的上档符号（Shift+0）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 876,
+          "sha256": "c1e09aa8e8071028861cd90bfe39e46c38583e2eb5f35c73dc49b9325f45fbc3"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1542,
+          "sha256": "6963a2f221b40755529738284bca8b1ef9aa82a29f91c9358d1da4ae0c615667"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_1_Cape",
+      "category": "digits-shift",
+      "label": "!",
+      "zh": "1 的上档符号（Shift+1）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 735,
+          "sha256": "cc27d89be004c14a742b2421597b570a0d0724971d35e7bbb5a922ff9e71b9bb"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1264,
+          "sha256": "bbc79ed76864888f718f72a745b0303f866fb1757134706eda63f1c632e95f51"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_2_Cape",
+      "category": "digits-shift",
+      "label": "@",
+      "zh": "2 的上档符号（Shift+2）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1294,
+          "sha256": "e6495c23b58485464de7574c622aa6b3bddebada26010d719f193b46a872b35a"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2419,
+          "sha256": "1cf4196537deb9800513a9f6c096cd8fc135f81b64334a5e200c4b8db3d17b20"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_3_Cape",
+      "category": "digits-shift",
+      "label": "#",
+      "zh": "3 的上档符号（Shift+3）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 981,
+          "sha256": "c29579db30d09740e368f0fa74a0a863224fb2aa81ae806e59cdd1909582bf50"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1621,
+          "sha256": "532fad26b6b78f2dc0adeb63a7e43ae099438212848e450e7d18e1fa826ed4b7"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_4_Cape",
+      "category": "digits-shift",
+      "label": "$",
+      "zh": "4 的上档符号（Shift+4）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1099,
+          "sha256": "133cc62bcb96990497ac6cc2d510546bd7b7de7911d547c17afbb4085388483d"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2029,
+          "sha256": "d04add6bde2dfa287e3d6c0ce3b87d3b58e02c626688c7f8defc1e0095c57336"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_5_Cape",
+      "category": "digits-shift",
+      "label": "%",
+      "zh": "5 的上档符号（Shift+5）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1264,
+          "sha256": "f9750e094d3a419fbd482911a49164ac449dee28e65083d783964ea4f7f2ff3d"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2286,
+          "sha256": "84731d13f384bd6b6042dc3adba0e0435cc42fb436d451592017940915339f78"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_6_Cape",
+      "category": "digits-shift",
+      "label": "^",
+      "zh": "6 的上档符号（Shift+6）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 779,
+          "sha256": "29381a3230f27d513feb609b61893c8904a348657849a1daf155fc4b57c4a525"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1415,
+          "sha256": "63204cef9c6db4d9f96820ce08eac39dd9c0707c2b9be0b8377c8e4353dd3ab5"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_7_Cape",
+      "category": "digits-shift",
+      "label": "&",
+      "zh": "7 的上档符号（Shift+7）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1130,
+          "sha256": "4a28338ee0eac417531f383779301df22b593bc3ba0ae52be03be5cce91fe74d"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2104,
+          "sha256": "22da3d1f9dea9ca165fb211d653b8b51af9b652b47c5fc16ebec9af2658a7a36"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_8_Cape",
+      "category": "digits-shift",
+      "label": "*",
+      "zh": "8 的上档符号（Shift+8）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 872,
+          "sha256": "d72e61e64567ffd6459d5c72cd3d0e7a5179bc48e313cbf7386dc0b05a182fc3"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1636,
+          "sha256": "61e8f7dd4052c2da574926e8eac4cc50bd8700902c3b609528750d68af348a18"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_9_Cape",
+      "category": "digits-shift",
+      "label": "(",
+      "zh": "9 的上档符号（Shift+9）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 892,
+          "sha256": "369b81f108f5d0383fb5fa7806dfff5c40de3ab62a6750063f6890a9d59a6e48"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1548,
+          "sha256": "90803a3b59739bc72bf2a5317cb433483dcf275103cf3711d5a5fb98be917f4f"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Num_Minus",
+      "category": "numpad",
+      "label": "−",
+      "zh": "小键盘减号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 642,
+          "sha256": "f96e7f5ef986bb423a2fb87095e15561ad15baa27dfa1980f3a8942ab20912ae"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1139,
+          "sha256": "a8ce5bd8a10cad94257b40f21674350ae9f397ca12d9cd382df00aa1752f2490"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Num_MultiplicationSign",
+      "category": "numpad",
+      "label": "×",
+      "zh": "小键盘乘号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 858,
+          "sha256": "cae9c2b047b2406bb3b811c90c15773adf731b2f790f25f1963b8fe0814f6113"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1638,
+          "sha256": "508d1fe9440372286048fae01923e4bbf408feb7e1dd4a5371e5aad7f90a9b8a"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Num_Numlock",
+      "category": "numpad",
+      "label": "NUM",
+      "zh": "小键盘锁定键",
+      "sizes": {
+        "64": {
+          "width": 69,
+          "height": 64,
+          "bytes": 1018,
+          "sha256": "256bd4efa315070f25df844c98d994e85d36b5ae398dfa7e5f2cddfdc6eafc67"
+        },
+        "128": {
+          "width": 138,
+          "height": 128,
+          "bytes": 1810,
+          "sha256": "86c81c525322056719802fd2e9ed3a8490ede945ecc18a990d7d21477425adf8"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Num_Obelus",
+      "category": "numpad",
+      "label": "÷",
+      "zh": "小键盘除号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 832,
+          "sha256": "2599605e066cc8ed1e3c96c292d31b9e0660634d366c7668ebb864c8a4bfcac5"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1423,
+          "sha256": "d2b0e2e74b942d602c3a74b33ee6bc8163b376b806a1456571e84bd3902b35cf"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Num_Plus",
+      "category": "numpad",
+      "label": "+",
+      "zh": "小键盘加号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 732,
+          "sha256": "52e2bce7fde90b50dd346130f3b413da5ba4dc8193b4ec5a5fbd5f508c08c4eb"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1245,
+          "sha256": "ad3e1d72137e2b763b8fe7d6c720c6f4ada470c03fc9fb7cca61d2d568953df8"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Num_Point",
+      "category": "numpad",
+      "label": ".",
+      "zh": "小键盘小数点",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 643,
+          "sha256": "15476bb7058b11c64f7fe922992758732d200264a29851436dc0c811f48618c1"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1138,
+          "sha256": "ac970c849c4b2b34b7d015a25c0c1c078471bde2a75152de838444d157eccdf6"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F1",
+      "category": "function",
+      "label": "F1",
+      "zh": "功能键 F1",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 777,
+          "sha256": "36a6bf96d1d41fa7c507fe4fa572b73b41bcb141c0b83f115ec829762bc51c49"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1330,
+          "sha256": "d91eb0ea134d533510ab1499fe521c95c63ad4afb72fe564cb6f81b5589e395f"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F10",
+      "category": "function",
+      "label": "F10",
+      "zh": "功能键 F10",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1019,
+          "sha256": "14423ee7bd0d80ff65b55c3d0aeb149b88757afcf2f341c6729d45b4f63997ea"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1825,
+          "sha256": "8b5fb8ca4b920a63973aee16a1359f47253fd01314ffb3ab601c1831cd521ede"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F11",
+      "category": "function",
+      "label": "F11",
+      "zh": "功能键 F11",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 845,
+          "sha256": "d405af4164e4d9094599c3a865b60a360899aaea4689ea0195e0e74691c87ee1"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1374,
+          "sha256": "7ecd19f7bc9c74a52381c99d82d792d0e475f8aa47197ee6755c1cde811a2a4e"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F12",
+      "category": "function",
+      "label": "F12",
+      "zh": "功能键 F12",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1010,
+          "sha256": "1d3491bb520dcb470396b5d0f44e1352e8243e3bf26a4f6fc14dac2fbfd30684"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1719,
+          "sha256": "6d1b5bf555950afdbf786e6f7b8542ddd7c7ac45114d34a90892ee14a6aa6b1c"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F2",
+      "category": "function",
+      "label": "F2",
+      "zh": "功能键 F2",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 931,
+          "sha256": "428829ef43ea3ca0b2d1e54eef66975bb635fa63a7678f0306784e6cea38926f"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1624,
+          "sha256": "5033ce56ef95e8bc61bd119aac0618accebb050e695f18eed55c73fc5abbe848"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F3",
+      "category": "function",
+      "label": "F3",
+      "zh": "功能键 F3",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 959,
+          "sha256": "011c7aa7824a09f8345f7518e38c19c23583c84e64f2a50c0e6b40170c3b7418"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1741,
+          "sha256": "a0e3ee766634f49463cbab04a85391675b1a4fd670643fbf98c2815a806bd059"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F4",
+      "category": "function",
+      "label": "F4",
+      "zh": "功能键 F4",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 875,
+          "sha256": "1bc65460960f621a26cde87c0c01377f542f49532ce5fb3c0bc09a392bfb26b2"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1457,
+          "sha256": "726791996141d3a6398887bdd2d9d6e13816acd15a77bdb4d1c9cfd8bd2779b8"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F5",
+      "category": "function",
+      "label": "F5",
+      "zh": "功能键 F5",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 954,
+          "sha256": "441956fdd884e70c51ba58f8d5e8b03854d2c54bf83d11fdd79bb3974ad3f6bf"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1722,
+          "sha256": "7cc6a56e3670ed64618885a6bc9928293789a5617612561142f9037867068e86"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F6",
+      "category": "function",
+      "label": "F6",
+      "zh": "功能键 F6",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 965,
+          "sha256": "7ba7935d5665102531e034424fdf4e75f7b0bb73a63951fcd2c4c412cb283b9b"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1722,
+          "sha256": "23c93afe90edf0f1d3c775e00a1a16623fef35d9579ccfbfdc65f6795d2a38ad"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F7",
+      "category": "function",
+      "label": "F7",
+      "zh": "功能键 F7",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 864,
+          "sha256": "4f3602ee57604aa51e507d1c207d61a26f552966ed202786de6e2585374f9aa9"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1482,
+          "sha256": "d06871814605bcf0393a69c70416d81af4966d4ac0985a095b10ecf0c77f93a1"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F8",
+      "category": "function",
+      "label": "F8",
+      "zh": "功能键 F8",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1032,
+          "sha256": "033a36395b888a3c08642cad40bb2dcc6371d326f6d3cc4c0962b71c969ea6cd"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1824,
+          "sha256": "a935465331faf5c6fed1fe37f0c6d830353376c75c55249bb70540a420fcd075"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_F9",
+      "category": "function",
+      "label": "F9",
+      "zh": "功能键 F9",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 977,
+          "sha256": "83a02f8f50a1fd69db859a18dbcc7e3b3bdb64089e2554b2a95970aa7dba6c08"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1712,
+          "sha256": "ea1158f708fd62f4dab986a2a816a6949ea6348848dd2708d266aa6bb9d14beb"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Function",
+      "category": "function",
+      "label": "FN",
+      "zh": "Fn 功能键",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 897,
+          "sha256": "16c95323346c902dfd6f0e9cf33c8a159c07e81d6c304ad3abf20933f0f2d95c"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1551,
+          "sha256": "e7ee770e90f1115ab1f33c4e8230a8ec36503956d833505647f46bc9fbe0c417"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_BracketClose",
+      "category": "punctuation",
+      "label": "] }",
+      "zh": "右方括号／右花括号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 993,
+          "sha256": "6911d05b8d8bae965c11a942cc4dd47bb54c50979832137e3ff217ad81006398"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1704,
+          "sha256": "e31ccd86db96d3d2c705b725ccfa75f65aee3c0e03cbfde480473902d2c2ccb5"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_BracketOpen",
+      "category": "punctuation",
+      "label": "[ {",
+      "zh": "左方括号／左花括号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 971,
+          "sha256": "71567b74fd1778957fdb1cee6be6ce9aa7a1f6bacb68915eebacc7cb6852af24"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1698,
+          "sha256": "218e65545f043e21cc08d56cf8c4d3c85fbd41ef639d8f131bc9bf11309df271"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Comma",
+      "category": "punctuation",
+      "label": ", <",
+      "zh": "逗号／小于号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 969,
+          "sha256": "b4bb9f43d99490317c465199f97ca41478ba468fa391e0666e2a85a0ee782112"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1693,
+          "sha256": "6c52f1baad76fb28b3f9c87129c0cfcbe6bd34a410e4eb8daf954991d029ce50"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Equals",
+      "category": "punctuation",
+      "label": "= +",
+      "zh": "等号／加号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 812,
+          "sha256": "cb1da6e61760f997ebdea047526140e85b9cede55548e5f4de0a843a90527df2"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1294,
+          "sha256": "3799a4a2f50ac9ec08009f8773287a863331c2a98fc60e520108e44f6f57cd80"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Minus",
+      "category": "punctuation",
+      "label": "- _",
+      "zh": "连字符／下划线",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 660,
+          "sha256": "f99d1a84e18aef256046487617ac48b3406caca05a35b4a07a29380a88290855"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1189,
+          "sha256": "f7a5d792ef5ddc2a5ba38e0932fffa68ae2c73b8af6b772337f1507b54faed90"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Period",
+      "category": "punctuation",
+      "label": ". >",
+      "zh": "句点／大于号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 916,
+          "sha256": "8d236e263bb008432bf54656f7961d1ac9dc28ad05fe64bd116b1817f345dbb5"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1534,
+          "sha256": "eb3889beaf6a8634e503d3ae8ea0a0776ca54b00416f5dbc5de80526fd7c0272"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Quote",
+      "category": "punctuation",
+      "label": "' \"",
+      "zh": "单引号／双引号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 948,
+          "sha256": "f5e6da07d5daf363d659c0b635e952f187cbe520cafa604225b8227507c9ca1d"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1671,
+          "sha256": "545e84063afd1a815911c05151049fd1ed9dfc633da8165e6e946292937b9cfd"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Semicolon",
+      "category": "punctuation",
+      "label": "; :",
+      "zh": "分号／冒号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 782,
+          "sha256": "9f73086af1d58b6911b2d576f9beb636da5e04144a3387be33d4f1f44f62c41e"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1457,
+          "sha256": "be956640373804e76e2cdd4977a7bfb1e6d180429e64a6985ff2cd663ad7df02"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_SlashBack",
+      "category": "punctuation",
+      "label": "\\ |",
+      "zh": "反斜杠／竖线",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 857,
+          "sha256": "5961ee9ceaf8dfdd9f1bbc0c3a78508e322df491792e200f7c0de2dd19b4ee11"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1483,
+          "sha256": "4d7342db9ff5d8236a935397732d6f0cc236f25324585246dbfcdf827eb4a0ea"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_SlashForward",
+      "category": "punctuation",
+      "label": "/ ?",
+      "zh": "斜杠／问号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1113,
+          "sha256": "0fd52842ec0febbdfd844590d5f4bc418931280e2c9df894f701aabfe852938b"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1969,
+          "sha256": "10e8fa63b343e181789e48a0b7c4f8d9d7f468d4434ac93b4667e1585779e7f7"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Tilde",
+      "category": "punctuation",
+      "label": "` ~",
+      "zh": "反引号／波浪号",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 859,
+          "sha256": "30cd75bb39cba4e8fee55e9c8dc188b5c46885a2f60481afda39498da783ef78"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1548,
+          "sha256": "81e1132a4d2b5891ca559f6ccdf7ce138d4c95ea5a944c8c95b4a2182d3f902f"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Alt_L",
+      "category": "modifiers",
+      "label": "L ALT",
+      "zh": "左 Alt",
+      "sizes": {
+        "64": {
+          "width": 94,
+          "height": 64,
+          "bytes": 975,
+          "sha256": "a33b7392b8f570a01098b097804c921c86fa8b74e7ca2ca25dbcfe92ad5690ed"
+        },
+        "128": {
+          "width": 188,
+          "height": 128,
+          "bytes": 1660,
+          "sha256": "83b976bd88071723f19c250b08121e678d3ae4414e875f7ae51eecc96ded2eaf"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Alt_R",
+      "category": "modifiers",
+      "label": "R ALT",
+      "zh": "右 Alt",
+      "sizes": {
+        "64": {
+          "width": 94,
+          "height": 64,
+          "bytes": 1079,
+          "sha256": "836421db104695a41c605f3bc78e814b6ba9fd4ee31e0de770cca2ba5d3b8449"
+        },
+        "128": {
+          "width": 188,
+          "height": 128,
+          "bytes": 1920,
+          "sha256": "2fadf61563c5e935c6da5126ebccdcb9c088cce0f2dece3cf3e746a021294701"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Ctrl_L",
+      "category": "modifiers",
+      "label": "L CTRL",
+      "zh": "左 Ctrl",
+      "sizes": {
+        "64": {
+          "width": 94,
+          "height": 64,
+          "bytes": 1125,
+          "sha256": "4b82760ef4d40f6f79634fa5b93461cc3e2f3fbe4f61167025790ac7a9e9e695"
+        },
+        "128": {
+          "width": 188,
+          "height": 128,
+          "bytes": 2018,
+          "sha256": "190621860034b203ee642e1db0d868cfe580430213c0ed8f330631e48c086f14"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Ctrl_R",
+      "category": "modifiers",
+      "label": "R CTRL",
+      "zh": "右 Ctrl",
+      "sizes": {
+        "64": {
+          "width": 94,
+          "height": 64,
+          "bytes": 1216,
+          "sha256": "1fa958a8bc78ca935e06c478f0c748e0cc3d3dde3fb32841efe6e0d32e160fe5"
+        },
+        "128": {
+          "width": 188,
+          "height": 128,
+          "bytes": 2215,
+          "sha256": "a260810fc6ceef0cfee7ff0e93a1c1ff4b3b2f94dbeb62a43e664d56e338fe71"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Shift_L",
+      "category": "modifiers",
+      "label": "L SHIFT",
+      "zh": "左 Shift",
+      "sizes": {
+        "64": {
+          "width": 94,
+          "height": 64,
+          "bytes": 1086,
+          "sha256": "a00c5982c110d620b103a6b8f6ea10aa0ddc1ce19c2f759889510589b127db98"
+        },
+        "128": {
+          "width": 188,
+          "height": 128,
+          "bytes": 1926,
+          "sha256": "6435f57cfa47d13dca1864978ece2352714039c5efa90d2a079430ed1fbc5ad6"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Shift_R",
+      "category": "modifiers",
+      "label": "R SHIFT",
+      "zh": "右 Shift",
+      "sizes": {
+        "64": {
+          "width": 94,
+          "height": 64,
+          "bytes": 1207,
+          "sha256": "c90b8fa4d8272d1338e4ab90dbbb12928f183ebe78c35afe68d81c6054042cfb"
+        },
+        "128": {
+          "width": 188,
+          "height": 128,
+          "bytes": 2142,
+          "sha256": "f4175743caf7a3710a12cada65b4f772b043dd2d4d534ddb6ec235d5a33ddae2"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Win",
+      "category": "modifiers",
+      "label": "WIN",
+      "zh": "Windows 键",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 693,
+          "sha256": "0206477039dd8f81a9d8d54586628afdeafb01b169d81ebf2d4dca0f55f5a85f"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1300,
+          "sha256": "9bb8cc945ca4a3a1fd98129c3f1ffb53412e2a6ffd911b3498eab756a0957591"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_macOS_Command",
+      "category": "modifiers",
+      "label": "⌘",
+      "zh": "macOS Command",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1295,
+          "sha256": "19c1be3bb838dbe3fb45f8d5d33c9394c7081adb9036d49101badec0d1ef7cf6"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2341,
+          "sha256": "01f0b6a0a5cebc4e0a3af7fe2a9bd713c087d9984e05d570bc01167e66e2c5d7"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_macOS_Control",
+      "category": "modifiers",
+      "label": "⌃",
+      "zh": "macOS Control",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 839,
+          "sha256": "3a51da5e7cbacbfd730ea4fc0a14bbbac7cee7b43c4987b834a8bc871eac9d10"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1547,
+          "sha256": "72a301a778065d77aa09f9f43bd28be0fba0dd9cb63e290d7fe5eabb0691c6cd"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_macOS_Option",
+      "category": "modifiers",
+      "label": "⌥",
+      "zh": "macOS Option",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 921,
+          "sha256": "319e7a9e605a053453993f9531970b5df21eb2fd572bed9cd8da65371a31fd15"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1704,
+          "sha256": "52e7699daabdf968a7d498abf276d2ffbf2938a332a1587a7d86fc0241203580"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_BackSpace",
+      "category": "editing",
+      "label": "⌫",
+      "zh": "退格键",
+      "sizes": {
+        "64": {
+          "width": 69,
+          "height": 64,
+          "bytes": 861,
+          "sha256": "f94557ead24b2d62e51075510e4b58cbcc7f62fe5ee6834548b6707a6a84c095"
+        },
+        "128": {
+          "width": 138,
+          "height": 128,
+          "bytes": 1561,
+          "sha256": "952269acd682cfacea0d972ac4bbcb63c20adc05df94f3d0fff585deb770f262"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_CapsLock",
+      "category": "editing",
+      "label": "CAPS LOCK",
+      "zh": "大写锁定键",
+      "sizes": {
+        "64": {
+          "width": 69,
+          "height": 64,
+          "bytes": 1110,
+          "sha256": "145755488ccdbcab79cbda25750633ba6f46be7279dc6666a126dfd7ce408b34"
+        },
+        "128": {
+          "width": 138,
+          "height": 128,
+          "bytes": 1968,
+          "sha256": "6c1142c658c2d1db902488a24fe68db41b721657bdeacc279ff197d3ec2d94ba"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Delete",
+      "category": "editing",
+      "label": "DEL",
+      "zh": "删除键",
+      "sizes": {
+        "64": {
+          "width": 69,
+          "height": 64,
+          "bytes": 897,
+          "sha256": "b09218225c512089484b288a0d536cc9e6440dc49607a47e6f21bd361837606b"
+        },
+        "128": {
+          "width": 138,
+          "height": 128,
+          "bytes": 1564,
+          "sha256": "afd586f47976f29eaac64d6fb33546ad27ad0748e10a9a9973c13714923f2ddb"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Enter",
+      "category": "editing",
+      "label": "ENTER ↵",
+      "zh": "回车键",
+      "sizes": {
+        "64": {
+          "width": 128,
+          "height": 64,
+          "bytes": 1343,
+          "sha256": "e72c9e81e23e6eec6a2e235216fa047778c6fc53a292b77ac3aa35f0b4f56ee3"
+        },
+        "128": {
+          "width": 256,
+          "height": 128,
+          "bytes": 2308,
+          "sha256": "9d10fbab29e51842d4eec12660a5abc428a1115910401b9ed471bc782234253b"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Esc",
+      "category": "editing",
+      "label": "ESC",
+      "zh": "退出键",
+      "sizes": {
+        "64": {
+          "width": 69,
+          "height": 64,
+          "bytes": 1123,
+          "sha256": "a9bfb8c2d3a6ef0002ff3fae8a4037264abdb790cb495940b6278b36fbd33807"
+        },
+        "128": {
+          "width": 138,
+          "height": 128,
+          "bytes": 2042,
+          "sha256": "70849c582bdff9b7a70bcfa055d3c34664d3aa64995e76fa65df888bcf2f61bb"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Insert",
+      "category": "editing",
+      "label": "INS",
+      "zh": "插入键",
+      "sizes": {
+        "64": {
+          "width": 69,
+          "height": 64,
+          "bytes": 1019,
+          "sha256": "7a2db07b77dfcce1e0699d1073b83ec18180718e57064197f27f8ac5e313cdc3"
+        },
+        "128": {
+          "width": 138,
+          "height": 128,
+          "bytes": 1889,
+          "sha256": "1f1efaf77975cfbd40f28ce99d2aa9200eb7f8653a0d4adff8aad5125577d886"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Space",
+      "category": "editing",
+      "label": "SPACE ␣",
+      "zh": "空格键",
+      "sizes": {
+        "64": {
+          "width": 128,
+          "height": 64,
+          "bytes": 1502,
+          "sha256": "037abd82749fa4545e6a4c944131c6e4568e6d2ac682571cf817272138f11cd8"
+        },
+        "128": {
+          "width": 256,
+          "height": 128,
+          "bytes": 2762,
+          "sha256": "539a924eace0279a1a1ad8f5f13f78c527fa467bb252470820f960ff87749d22"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Tab",
+      "category": "editing",
+      "label": "TAB ⇥",
+      "zh": "制表键",
+      "sizes": {
+        "64": {
+          "width": 109,
+          "height": 64,
+          "bytes": 1216,
+          "sha256": "c4afe55ea6a18d3bd8220b262c89f26822640a4ae46a49c9e85ebcfe7a2cb266"
+        },
+        "128": {
+          "width": 218,
+          "height": 128,
+          "bytes": 2166,
+          "sha256": "8a7f924ce45f183e4b4de7f5e37f60adbdde30cfd0ba7862925e861589f120cd"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_End",
+      "category": "navigation",
+      "label": "END",
+      "zh": "行尾键",
+      "sizes": {
+        "64": {
+          "width": 69,
+          "height": 64,
+          "bytes": 1028,
+          "sha256": "7a170834c2cedeb187180bbfd9bf52b5f77f9dc6e86af7983872a2b29cbe127a"
+        },
+        "128": {
+          "width": 138,
+          "height": 128,
+          "bytes": 1730,
+          "sha256": "8fefd2fdd3d2114237b0287a3e3cb437ae0b4c90d797a594d211847d6819183c"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Home",
+      "category": "navigation",
+      "label": "HOME",
+      "zh": "行首键",
+      "sizes": {
+        "64": {
+          "width": 90,
+          "height": 64,
+          "bytes": 1150,
+          "sha256": "27da5094eada932dea4cd0dbfbd689fce5c2e744e7393b446b7b46d8899048f5"
+        },
+        "128": {
+          "width": 180,
+          "height": 128,
+          "bytes": 2048,
+          "sha256": "9bf8290d6f3d6ab1311d7a1b036daf2d5defb9e3bebfcf66b75cfbd461ed84ed"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_PageDown",
+      "category": "navigation",
+      "label": "PAGE DN",
+      "zh": "向下翻页",
+      "sizes": {
+        "64": {
+          "width": 128,
+          "height": 64,
+          "bytes": 1478,
+          "sha256": "066be97ad76107824475c973167afb9d352ad015762fb967eaf124898c3821c8"
+        },
+        "128": {
+          "width": 256,
+          "height": 128,
+          "bytes": 2686,
+          "sha256": "ebc40c33654acfcea8d698b215eaab896cbe5f09317a16ca18b6902d5485e9bb"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_PageUp",
+      "category": "navigation",
+      "label": "PAGE UP",
+      "zh": "向上翻页",
+      "sizes": {
+        "64": {
+          "width": 128,
+          "height": 64,
+          "bytes": 1418,
+          "sha256": "e6dac22547c05eaf6c46870c1f8f3d3325bd62dae0260878e1a01d4b6c5bb92b"
+        },
+        "128": {
+          "width": 256,
+          "height": 128,
+          "bytes": 2625,
+          "sha256": "d907293ce15380ed222e7110d7b9f9473c18ee90462585e61a734dd18a4b5361"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrow_Down",
+      "category": "arrows",
+      "label": "↓",
+      "zh": "方向键 下（单键键帽）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 793,
+          "sha256": "f9307f6ae076ac5eb85a9459949df5e75ffb1bbaed4a758d79f71e59e546a6fd"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1461,
+          "sha256": "549083ad344dfe60d3c6bef04911a146c1a7287f4978cee8e514460b326be0a3"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrow_Left",
+      "category": "arrows",
+      "label": "←",
+      "zh": "方向键 左（单键键帽）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 765,
+          "sha256": "95d10ad424b7b7f0695bacef3c8f96fe9350aa25684d72557a128d49a80951e6"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1444,
+          "sha256": "3d73ce9f4e6cd13d2f14c7835e9ea253ba39dbb4fed2b35f1021c642031ef5f5"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrow_Right",
+      "category": "arrows",
+      "label": "→",
+      "zh": "方向键 右（单键键帽）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 765,
+          "sha256": "eb0caa820b9cda8d3169265c685dfe37ecf3c22274145839fdb29103ceb597b9"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1422,
+          "sha256": "9568fbc5eb6dbfc98fa63a5bfb583cd4b586936773ee29e9504869512486f658"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrow_Up",
+      "category": "arrows",
+      "label": "↑",
+      "zh": "方向键 上（单键键帽）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 765,
+          "sha256": "90ef78833bdb37202747c14ccff4c3dc430c61070de5e3b599550635c47ab93b"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1430,
+          "sha256": "5bac16523432d035565ae745f73b05940d6816c3f092986dc511c0ef18d4ac26"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrows",
+      "category": "arrows",
+      "label": "方向键组",
+      "zh": "四键簇基础态（四键均半透明，无箭头字形）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 461,
+          "sha256": "153244aeac8ca5d568ccca979d74b3c9d88273524ab5fdde8d677f01d4f50cca"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 951,
+          "sha256": "2688c34d4d1bbd47f5bb9de57ba43e001a58cf9c1254efc1f1ca198877c49914"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrows_All",
+      "category": "arrows",
+      "label": "方向键组·全部",
+      "zh": "四键均高亮（全部按下）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 451,
+          "sha256": "fb8f08115b8941d7520890bb97a11fa28ca6cb8a5d54a9b4e5b541efcd2e3328"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 908,
+          "sha256": "2581489e13ab0b6962cbd1ef776b54c4be6f7c52dfe9f3050be08a7701d30d45"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrows_Down",
+      "category": "arrows",
+      "label": "方向键组·↓",
+      "zh": "仅下键高亮",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 609,
+          "sha256": "dceac09eb509cfad9b0dc657fa071f5da97313af9792f813376ff16da4ad388f"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1269,
+          "sha256": "ecde661dbe9469cb9fc5d0edd5695b84bd27377f9e7da29fa77e1b6b2539b36e"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrows_Left",
+      "category": "arrows",
+      "label": "方向键组·←",
+      "zh": "仅左键高亮",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 618,
+          "sha256": "4ea95a05f705c0b874ac25f1f94590f406f003598aa0a88547dee0c322ff6c2d"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1257,
+          "sha256": "26e5380d8297713c72e87104d676efeae628210d35f151ce31a7b9377acd1621"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrows_Left-Right",
+      "category": "arrows",
+      "label": "方向键组·↔",
+      "zh": "左、右两键高亮",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 624,
+          "sha256": "b47125ed56950d4432534cc418520241db318bf79ae848ab686851b32ca5395e"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1275,
+          "sha256": "fb837c291e612cc1506fd140acdd290335bcc63b12d3d19e7e594805c382c2b3"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrows_Right",
+      "category": "arrows",
+      "label": "方向键组·→",
+      "zh": "仅右键高亮",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 610,
+          "sha256": "075c4f7004e2818ede7143776b271d2be588828695881d2ff760e0d3af6724eb"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1224,
+          "sha256": "4d9783d4e63953565f9942db572bcf98770191134e6c2d59fafc842760dc3d0e"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrows_Up",
+      "category": "arrows",
+      "label": "方向键组·↑",
+      "zh": "仅上键高亮",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 563,
+          "sha256": "2e887fd9eaeab213f1099a1e4f0bd8f4da741fee4466695db88ae1b8d45be440"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1223,
+          "sha256": "bb8d2fdd3ba9770e067b5f402c9e701fadc7b67c2002820f7499d858e164001e"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Arrows_Up-Down",
+      "category": "arrows",
+      "label": "方向键组·↕",
+      "zh": "上、下两键高亮",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 622,
+          "sha256": "88628098e07eeaeaf1e6b229f1d0ec889f12c83d9da9d5e5f471a42842829329"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1321,
+          "sha256": "e9bf1d9f286845607519bbfd12d9ce6a0578e9dd1ae36ced040f84ee9af4290f"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Key_1_Left",
+      "category": "mouse",
+      "label": "左键",
+      "zh": "鼠标左键",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1138,
+          "sha256": "5855dd8c18edcbbefdaeca254a7d99780f8b8fb4fa7c38decb14e51322a98e22"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2088,
+          "sha256": "320a2b9b7a2cc36dadf758967b0561155eeb3341e7477fa363197484dca46119"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Key_2_Right",
+      "category": "mouse",
+      "label": "右键",
+      "zh": "鼠标右键",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1125,
+          "sha256": "3c6ed0df80e2cec80f4417370e7478eeeae36df9e1a0ca3fc17d1bd7f310ed3f"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2095,
+          "sha256": "e4d632c8f56589fc090d160eb8ce78200eb266be2a8eb85b9009364b023121de"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Key_3",
+      "category": "mouse",
+      "label": "中键",
+      "zh": "鼠标中键",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1141,
+          "sha256": "8fff3758b92cacf2db393b44cb46c40e6ada4b5ad034005c91c4050c6bb09c2f"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2095,
+          "sha256": "f6323bceb89432959d9142c0375b929012c8c5337bb9a7738dd407b616fc23df"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Key_4",
+      "category": "mouse",
+      "label": "侧键 4",
+      "zh": "鼠标第 4 键（侧键）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1231,
+          "sha256": "63332520461a12fd036adf3bdb4dab471abdc88b9785826e4cba8bbaf01ff216"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2303,
+          "sha256": "a7aab715c45d00b458ebfcf94b56f0e80c74ac30ec2bb175da554dc764251c30"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Key_5",
+      "category": "mouse",
+      "label": "侧键 5",
+      "zh": "鼠标第 5 键（侧键）",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1230,
+          "sha256": "452a7295d9778455d9107255d37c7aec4cc74b5588db453b2f6c7ddb12fbc95c"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2292,
+          "sha256": "b1b024360dbe7945f1d425900f0708ce35298014c472a4c2a2d3daa9f5a2ee18"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Move",
+      "category": "mouse",
+      "label": "移动",
+      "zh": "鼠标四向移动",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1244,
+          "sha256": "cd8f69c21cc4e45e49dbe3975dc715a4a56a1ab16689368cf44180a7aad02211"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2232,
+          "sha256": "70a11924fb3854fc8a5b57a790c2c98a80c3ba61171d5100cbf5b29b1afc6aa0"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Move_Horizontal",
+      "category": "mouse",
+      "label": "水平移动",
+      "zh": "鼠标水平移动",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1026,
+          "sha256": "2084e8eafe6f40e32affe5baa1533512c5712a43be08f43710972c1761012ab8"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1783,
+          "sha256": "e2db2dcb9420569ceb7abccc700b9e8c75c9dbd45aa91b2cf8be76c997597ff1"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Move_Vertical",
+      "category": "mouse",
+      "label": "垂直移动",
+      "zh": "鼠标垂直移动",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1021,
+          "sha256": "bcac88ba6975d2a00faf2541d9104dbd075a7961ca8bb17bb23751a8fcf6d5aa"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1850,
+          "sha256": "cbe338e800713ec9e7188ddfe261b47c4d8da9ec60e40f66d04490d5e348ad44"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Scroll_Down",
+      "category": "mouse",
+      "label": "滚轮↓",
+      "zh": "滚轮向下",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1190,
+          "sha256": "d2e4730a3b1ca568a9a68d2f38d189a6e6cde4811020da23fc08244365875a1e"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2165,
+          "sha256": "c0618308c9ab5c78d5678123496fc0a843f19ed52d3755c73a9de57ebb949dd1"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Scroll_Up",
+      "category": "mouse",
+      "label": "滚轮↑",
+      "zh": "滚轮向上",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1155,
+          "sha256": "dde6c35a0d936f6de6ad299d498a972b78581b79d05d35c1201442cd2db80972"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2159,
+          "sha256": "9a8e10803a798b58c653503e294366483165752f2049199f07e12f24310abc02"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Scroll_Vertical",
+      "category": "mouse",
+      "label": "滚轮↕",
+      "zh": "滚轮上下滚动",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1189,
+          "sha256": "4692b7243a8ec6f3e8c4fdf7f627c28e85ae8455cfb1a9ed896a64e2299aa45e"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 2206,
+          "sha256": "811f59fdff0e345ab3d6bb9b11631a7ef370e6ae5c1ced0ce2943713303e60dc"
+        }
+      }
+    },
+    {
+      "name": "Keyboard_Icon",
+      "category": "device",
+      "label": "键盘",
+      "zh": "键盘设备图标",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 738,
+          "sha256": "99e7993d023776dcb267ea02dc2886168c758c89e3c24217e9eb156e8c764cbe"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1357,
+          "sha256": "720b8e4aace37ca13fd7646d9cf58280aab4b3514a4ef71f36362314a4c75f73"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Icon",
+      "category": "device",
+      "label": "鼠标",
+      "zh": "鼠标设备图标",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 1015,
+          "sha256": "9fec42e1328991af1bd4dc89ccfa088c9a60d3df5e250acf2cbbdd4d7ab050aa"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1837,
+          "sha256": "0394eb4c1ec2b1aeca2b82c536e3747e296d1875f1cfa0934bd51d4353f467db"
+        }
+      }
+    },
+    {
+      "name": "Mouse_Icon_Small",
+      "category": "device",
+      "label": "鼠标（小）",
+      "zh": "小尺寸鼠标设备图标",
+      "sizes": {
+        "64": {
+          "width": 64,
+          "height": 64,
+          "bytes": 806,
+          "sha256": "4666588320854ee2e8a3454db91163503f5a99d598b05b66aabb8d1c05c88ea1"
+        },
+        "128": {
+          "width": 128,
+          "height": 128,
+          "bytes": 1369,
+          "sha256": "9dad08a273bd1bfb7dc621d8adce89c958c092ea739937961fd3c8c13e2a0ea6"
+        }
+      }
+    }
+  ]
+}

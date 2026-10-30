@@ -62,11 +62,15 @@ function knife(ctx: CanvasRenderingContext2D, s: number): void {
   ctx.strokeStyle = "#c8dde2"; ctx.lineWidth = 0.8 * u; ctx.stroke();
 }
 
-/** 未拿在手上的武器：主武器斜背在背后，副武器挂在右腰。 */
-export function drawStowedWeapons(ctx: CanvasRenderingContext2D, size: number, activeSlot: WeaponSlot): void {
+/**
+ * 未拿在手上的武器：主武器斜背在背后，副武器挂在右腰。
+ * `alpha` 是整体可见度（翻滚时淡出/淡回），默认 1 保持站立不变。
+ */
+export function drawStowedWeapons(ctx: CanvasRenderingContext2D, size: number,
+  activeSlot: WeaponSlot, alpha = 1): void {
   const s = size;
   ctx.save();
-  ctx.globalAlpha = 0.92;
+  ctx.globalAlpha = 0.92 * Math.min(1, Math.max(0, alpha));
   if (activeSlot !== "primary") {
     // 主武器：斜挎在背上，枪身横过身体，两端从头两侧露出。
     ctx.save();
@@ -86,12 +90,16 @@ export function drawStowedWeapons(ctx: CanvasRenderingContext2D, size: number, a
   ctx.restore();
 }
 
-/** 拿在手里的武器；空手时不画。 */
+/**
+ * 拿在手里的武器；空手时不画。
+ * `angle` 是手腕的额外旋转（翻滚时枪随手臂收拢），默认 0 保持站立姿态不变。
+ */
 export function drawHeldWeapon(ctx: CanvasRenderingContext2D, size: number, kind: WeaponKind,
-  slot: WeaponSlot, hand: { x: number; y: number }): void {
+  slot: WeaponSlot, hand: { x: number; y: number }, angle = 0): void {
   if (kind === "empty") return;
   ctx.save();
   ctx.translate(hand.x - size * 0.02, hand.y + size * 0.015);
+  if (angle !== 0) ctx.rotate(angle);
   if (kind === "melee") {
     ctx.rotate(-0.15);
     knife(ctx, size * 0.8);

@@ -18,6 +18,19 @@ export interface GraphicsConfig {
     innerRadius: number; innerFade: number;
   };
   fog: { range: number; feather: number };
+  /** 三层视野遮蔽层的表现参数；不改变玩法规则。 */
+  visibility: VisibilityConfig;
+}
+
+export interface VisibilityConfig {
+  /** 遮蔽层相对世界画布的线性分辨率；0.5 即宽高各一半。 */
+  maskScale: number;
+  /** 探索记忆地形的整体亮度。 */
+  memoryBrightness: number;
+  /** 近身/照明孔洞边缘的柔化世界像素。 */
+  edgeFeather: number;
+  /** 未探索地形轮廓相对未知底色的对比度。 */
+  outlineContrast: number;
 }
 
 export const DEFAULT_GRAPHICS_CONFIG: GraphicsConfig = {
@@ -30,6 +43,7 @@ export const DEFAULT_GRAPHICS_CONFIG: GraphicsConfig = {
     innerRadius: 30, innerFade: 16,
   },
   fog: { range: 400, feather: 120 },
+  visibility: { maskScale: 0.5, memoryBrightness: 0.12, edgeFeather: 20, outlineContrast: 0.06 },
 };
 
 /** 配置是纯 JSON 结构；面板改一个字段时用它做可写快照。 */
@@ -41,10 +55,11 @@ export function cloneGraphicsConfig(config: GraphicsConfig = DEFAULT_GRAPHICS_CO
     playerLight: { ...config.playerLight },
     flashlight: { ...config.flashlight },
     fog: { ...config.fog },
+    visibility: { ...config.visibility },
   };
 }
 
-const GROUPS = ["camera", "ambient", "terrainLight", "playerLight", "flashlight", "fog"] as const;
+const GROUPS = ["camera", "ambient", "terrainLight", "playerLight", "flashlight", "fog", "visibility"] as const;
 const HEX = /^#[0-9a-f]{6}$/i;
 const isObject = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
@@ -122,6 +137,13 @@ export function parseGraphicsConfig(value: unknown): GraphicsConfig {
   rejectUnknown(fog, "fog.", ["range", "feather"]);
   if (fog.range !== undefined) result.fog.range = number(fog.range, "fog.range", 1, 2000);
   if (fog.feather !== undefined) result.fog.feather = number(fog.feather, "fog.feather", 0, 1000);
+
+  const visibility = group(value, "visibility");
+  rejectUnknown(visibility, "visibility.", ["maskScale", "memoryBrightness", "edgeFeather", "outlineContrast"]);
+  if (visibility.maskScale !== undefined) result.visibility.maskScale = number(visibility.maskScale, "visibility.maskScale", 0.25, 1);
+  if (visibility.memoryBrightness !== undefined) result.visibility.memoryBrightness = number(visibility.memoryBrightness, "visibility.memoryBrightness", 0, 1);
+  if (visibility.edgeFeather !== undefined) result.visibility.edgeFeather = number(visibility.edgeFeather, "visibility.edgeFeather", 0, 64);
+  if (visibility.outlineContrast !== undefined) result.visibility.outlineContrast = number(visibility.outlineContrast, "visibility.outlineContrast", 0, 0.5);
 
   return result;
 }

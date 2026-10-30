@@ -9,6 +9,8 @@ import { ParticleSystem } from "../objects/ParticleSystem";
 import { CraterSystem } from "../objects/CraterSystem";
 import { FootprintSystem } from "../objects/FootprintSystem";
 import { RippleSystem } from "../objects/RippleSystem";
+import { BoundaryRippleSystem } from "../objects/BoundaryRippleSystem";
+import { MapBoundaryOverlay } from "../map/MapBoundaryOverlay";
 import { Player, PlayerAimInput } from "../objects/Player";
 import { PlayerConfig } from "../objects/PlayerConfig";
 import { Chicken } from "../objects/Chicken";
@@ -24,6 +26,12 @@ import { LightSource } from "../core/LightSource";
 import { ConeLight } from "../core/ConeLight";
 import { LightingSystem } from "../core/LightingSystem";
 import { VisibilitySystem } from "../core/VisibilitySystem";
+import { PerceptionSystem } from "../vision/PerceptionSystem";
+import { PerceptionRenderer } from "../vision/PerceptionRenderer";
+import { createVisionRules } from "../vision/VisionRules";
+import type {
+  EntityVisibility, PerceptionLight, PerceptionTarget, VisionMode, VisionObserver,
+} from "../vision/VisionTypes";
 import { ModifierManager } from "../core/ModifierManager";
 import {
   AudioConfig, DEFAULT_AUDIO_CONFIG, cloneAudioConfig, parseAudioConfig,
@@ -75,6 +83,18 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 /**
+ * 开发期用 URL 切换视觉模式：`?vision=three-layer`。
+ * 玩法/画质/开发模式分离，模式本身不写进 graphics.json。
+ */
+function resolveVisionMode(): VisionMode {
+  if (typeof window === "undefined") return "legacy";
+  const search = window.location?.search;
+  if (!search) return "legacy";
+  return new URLSearchParams(search).get("vision") === "three-layer"
+    ? "three-layer" : "legacy";
+}
+
+/**
  * 游戏主场景类，负责管理游戏的核心逻辑、渲染和交互
  */
 export class GameScene extends Scene {  private player!: Player;
@@ -95,6 +115,16 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly effectBounds = { x: 0, y: 0, width: 0, height: 0 };
   private configLoader!: ConfigLoader;
   private graphics: GraphicsConfig = DEFAULT_GRAPHICS_CONFIG;
+  /** 视觉玩法模式：legacy 保持旧圆形迷雾；three-layer 启用感知遮蔽。 */
+  readonly visionMode: VisionMode;
+  private readonly visionRules = createVisionRules();
+  private perception: PerceptionSystem | null = null;
+  private perceptionRenderer: PerceptionRenderer | null = null;
+  private perceptionObserver: VisionObserver | null = null;
+  private readonly perceptionLights: PerceptionLight[] = [];
+  private readonly perceptionTargets: PerceptionTarget[] = [];
+  private readonly perceptionIds = new WeakMap<object, string>();
+  private nextPerceptionId = 0;
   private audio: AudioConfig = DEFAULT_AUDIO_CONFIG;
   /** 击发与脚步的一次性音效。 */
   private readonly sfx = new SoundPlayer();
@@ -160,6 +190,8 @@ export class GameScene extends Scene {  private player!: Player;
   private static readonly CROSSHAIR_RELEASE_RATE = 8;
   /** 小鸡死亡后先播放白色气团，延迟这么久再掉出肉块。 */
   private static readonly MEAT_DROP_DELAY = 0.4;
+  /** 每块鸡肉直接恢复的生命值；不再单独计数。 */
+  private static readonly MEAT_HEAL = 5;
   private goldPickups: GoldPickup[] = [];
   private goldDroppedByTile = new Map<number, number>();
   /** 小鸡死亡后掉落的肉块，落地后才可收集。 */
@@ -175,7 +207,11 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly footprintSystem = new FootprintSystem();
   // 水面涟漪装饰：涉水时替代脚印
   private readonly rippleSystem = new RippleSystem();
-  // 拾取飘字：在角色身边蹦出 "金块+N" / "肉块+N"，1 秒后淡出
+  // 地图边界反馈：贴边往里推时在接触点打一圈波纹
+  private readonly boundaryRippleSystem = new BoundaryRippleSystem();
+  // 地图外的毛玻璃与“无法通行”水印
+  private readonly boundaryOverlay = new MapBoundaryOverlay();
+  // 拾取飘字：在角色身边蹦出 "金块+N" / "HP+5"，1 秒后淡出
   private readonly floatingTexts = new FloatingTextSystem();
   // 右下角主武器 HUD：武器图标、武器名、弹匣/膛内/备弹状态
   private readonly weaponHud = new WeaponHud();
@@ -196,9 +232,17 @@ export class GameScene extends Scene {  private player!: Player;
    */
   constructor(mapOptions?: TileMapOptions) {
     super();
+    this.visionMode = resolveVisionMode();
 
     // 100×100 个瓦片，每格 50 像素
     this.map = new TileMap(100, 100, mapOptions);
+    if (this.visionMode === "three-layer") {
+      this.perception = new PerceptionSystem({
+        map: this.map,
+        terrain: this.map,
+        rules: this.visionRules,
+      });
+    }
 
     // 获取设备像素比，默认为1
     const dpr = window.devicePixelRatio || 1;
@@ -253,6 +297,16 @@ export class GameScene extends Scene {  private player!: Player;
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
     const playerCenter = new Vector2(playerCenterX, playerCenterY);
+    if (this.perception) {
+      this.perceptionObserver = {
+        id: "player",
+        x: playerCenterX,
+        y: playerCenterY,
+        facing: this.player.getVisionState().direction,
+        nearSenseRadius: this.visionRules.nearSenseRadius,
+        maxObservationRange: this.visionRules.maxObservationRange,
+      };
+    }
 
     // 脚边一小圈全向微光，配合面朝方向的手电筒锥光；两者都是加法补光，且只照地面。
     const light = this.graphics.playerLight;
@@ -376,7 +430,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.sfx.loop(DRY_STEP_SOUND, this.volume(base), Math.max(0.95, Math.min(2.05, speed / 156)));
   }
 
-  /** 小鸡发声的距离衰减：620 像素内线性降低，再远就听不见。 */
+  /** 小鸡发声的距离衰减：默认 450 像素内线性降低，再远就听不见。 */
   private chickenAttenuation(x: number, y: number): number {
     const dx = x - this.player.x - this.player.getSize() / 2;
     const dy = y - this.player.y - this.player.getSize() / 2;
@@ -384,7 +438,7 @@ export class GameScene extends Scene {  private player!: Player;
   }
 
   /**
-   * 小鸡原地发声：按与玩家的距离线性衰减，620 像素外直接不响。
+   * 小鸡原地发声：按与玩家的距离线性衰减，默认 450 像素外直接不响。
    * 声音在迷雾里也该有方向感，所以远近比音色更重要。
    * @param options 声部数量（鸡叫是整段几秒的录音，需要多留几个声部）等播放方式
    */
@@ -469,6 +523,13 @@ export class GameScene extends Scene {  private player!: Player;
     }
     this.lightingSystem.initialize(this.camera.width, this.camera.height);
     this.visibilitySystem.initialize(this.camera.width, this.camera.height);
+    if (this.visionMode === "three-layer" && this.perception) {
+      if (!this.perceptionRenderer) {
+        this.perceptionRenderer = new PerceptionRenderer(
+          this.map, this.map, this.visionRules, this.graphics.visibility);
+      }
+      this.perceptionRenderer.resize(this.camera.width, this.camera.height, this.graphics.visibility);
+    }
   }
 
   /**
@@ -675,21 +736,22 @@ export class GameScene extends Scene {  private player!: Player;
     this.meatPickups = this.meatPickups.filter(pickup => {
       pickup.update(delta);
       if (!pickup.isCollidingWithShape(body)) return true;
-      this.player.collectMeat();
+      // 每块肉直接回血，不再进入背包或单独计数。
+      this.player.heal(GameScene.MEAT_HEAL);
       collected++;
       this.particleSystem.createExplosion(
         new Vector2(pickup.x + MeatPickup.SIZE / 2, pickup.y + MeatPickup.SIZE / 2),
         8, 50, 3, 0.25, ["#ff9b9b", "#ffd6d6", "#ffffff"]);
       return false;
     });
-    // 与金块同理：一次跨到好几块肉上也只咬一口。
+    // 与金块同理：一次跨到好几块肉上，只播一次音、合并成一条回血飘字。
     if (collected > 0) {
       this.sfx.play(MEAT_PICKUP_SOUND, this.volume(this.audio.pickups.meatVolume));
-      this.showPickupText(`肉块+${collected}`);
+      this.showPickupText(`HP+${GameScene.MEAT_HEAL * collected}`);
     }
   }
 
-  /** 在角色身边蹦出一行拾取提示（例如 "肉块+3"）；左右位置由飘字系统随机散开。 */
+  /** 在角色身边蹦出一行拾取提示（例如 "金块+3"、"HP+5"）；左右位置由飘字系统随机散开。 */
   private showPickupText(text: string): void {
     this.floatingTexts.spawn(text,
       this.player.x + this.player.getSize() / 2,
@@ -836,6 +898,7 @@ export class GameScene extends Scene {  private player!: Player;
   private applyGraphics(config: GraphicsConfig = this.graphics): void {
     const next = parseGraphicsConfig(config);
     this.graphics = next;
+    this.perceptionRenderer?.configure(next.visibility);
     this.applyEnvironmentLight();
 
     const light = next.playerLight;
@@ -1035,6 +1098,10 @@ export class GameScene extends Scene {  private player!: Player;
     this.craterSystem.update(delta);
     this.footprintSystem.update(delta);
     this.rippleSystem.update(delta);
+    // 边界反馈读取原始输入方向：贴墙时速度已被清零，但仍要能判断还在往里推。
+    this.boundaryRippleSystem.update(delta, this.player.getCollider().bounds,
+      this.player.getMoveIntent(input), this.map.width * this.map.tileSize,
+      this.map.height * this.map.tileSize);
     this.floatingTexts.update(delta);
 
     // 更新光照系统
@@ -1095,6 +1162,184 @@ export class GameScene extends Scene {  private player!: Player;
     const spaceDown = input.isKeyDown(" ");
     if (spaceDown && !this.spaceHeld) this.player.requestRoll(input);
     this.spaceHeld = spaceDown;
+    this.updatePerception(delta);
+  }
+
+  /**
+   * 把所有观察者可见性输入同步给感知系统。
+   * 光源本体与照亮区域分开：playerLight 只做近身补光，不揭示细节。
+   */
+  private updatePerception(delta: number): void {
+    const perception = this.perception;
+    const observer = this.perceptionObserver;
+    if (!perception || !observer) return;
+
+    const vision = this.player.getVisionState();
+    observer.x = vision.x;
+    observer.y = vision.y;
+    observer.facing = vision.direction;
+
+    const lights = this.perceptionLights;
+    lights.length = 0;
+    const glowPosition = this.playerLight.getPosition();
+    lights.push({
+      id: "player-glow",
+      x: glowPosition.x, y: glowPosition.y,
+      radius: this.playerLight.getEffectiveRadius(),
+      intensity: this.playerLight.getIntensity(),
+      active: this.playerLight.isLightActive(),
+      revealsDetails: false,
+      kind: "playerGlow",
+    });
+    const flashlightPosition = this.flashlight.getPosition();
+    lights.push({
+      id: "flashlight",
+      x: flashlightPosition.x, y: flashlightPosition.y,
+      radius: this.flashlight.getEffectiveRadius(),
+      direction: this.flashlight.getDirection(),
+      angle: this.flashlight.getAngle(),
+      softness: this.flashlight.getSoftness(),
+      innerRadius: this.flashlight.getInnerRadius(),
+      innerFade: this.flashlight.getInnerFade(),
+      intensity: this.flashlight.getIntensity(),
+      active: this.flashlightOn && this.flashlight.isLightActive(),
+      revealsDetails: true,
+      kind: "flashlight",
+    });
+    for (let i = 0; i < this.torches.length; i++) {
+      const torch = this.torches[i];
+      if (!torch.isLit()) continue;
+      const position = torch.light.getPosition();
+      lights.push({
+        id: `torch-${i}`,
+        x: position.x, y: position.y,
+        radius: torch.light.getEffectiveRadius(),
+        intensity: torch.light.getIntensity(),
+        active: torch.light.isLightActive(),
+        revealsDetails: true,
+        kind: "torch",
+      });
+    }
+
+    const targets = this.perceptionTargets;
+    targets.length = 0;
+    for (const chicken of this.chickens) {
+      if (!chicken.isAlive()) continue;
+      const size = chicken.getSize();
+      targets.push({
+        id: this.getPerceptionId(chicken),
+        category: "enemy",
+        x: chicken.x + size / 2,
+        y: chicken.y + size / 2,
+        bounds: { x: chicken.x, y: chicken.y, width: size, height: size },
+      });
+    }
+    for (const gold of this.goldPickups) {
+      targets.push({
+        id: this.getPerceptionId(gold),
+        category: "loot",
+        x: gold.x + GoldPickup.SIZE / 2,
+        y: gold.y + GoldPickup.SIZE / 2,
+        bounds: { x: gold.x, y: gold.y, width: GoldPickup.SIZE, height: GoldPickup.SIZE },
+      });
+    }
+    for (const meat of this.meatPickups) {
+      targets.push({
+        id: this.getPerceptionId(meat),
+        category: "loot",
+        x: meat.x + MeatPickup.SIZE / 2,
+        y: meat.y + MeatPickup.SIZE / 2,
+        bounds: { x: meat.x, y: meat.y, width: MeatPickup.SIZE, height: MeatPickup.SIZE },
+      });
+    }
+    for (const pickup of this.pickupItems) {
+      const size = pickup.getSize();
+      targets.push({
+        id: this.getPerceptionId(pickup),
+        category: "loot",
+        x: pickup.x + size / 2,
+        y: pickup.y + size / 2,
+        bounds: { x: pickup.x, y: pickup.y, width: size, height: size },
+      });
+    }
+
+    perception.update(delta, [observer], lights, targets);
+  }
+
+  private getPerceptionId(target: object): string {
+    let id = this.perceptionIds.get(target);
+    if (!id) {
+      id = `p${++this.nextPerceptionId}`;
+      this.perceptionIds.set(target, id);
+    }
+    return id;
+  }
+
+  private getEntityVisibility(target: object): EntityVisibility {
+    const perception = this.perception;
+    if (!perception) return "identified";
+    const id = this.perceptionIds.get(target);
+    if (!id) return "hidden";
+    return perception.getView("player", id).level;
+  }
+
+  /**
+   * 剪影直接画在遮蔽层之上：它描述“这里有东西”，不负责揭示材质和颜色。
+   * 用源对象自身 draw 生成轮廓再 source-in 压成暗色，避免每种对象各写一套剪影几何。
+   */
+  private drawPerceptionSilhouettes(ctx: CanvasRenderingContext2D,
+    cameraX: number, cameraY: number): void {
+    if (!this.perception) return;
+    const paint = (bounds: { x: number; y: number; width: number; height: number },
+      drawSource: (sctx: CanvasRenderingContext2D, pad: number) => void): void => {
+      const pad = 8;
+      const width = Math.max(1, Math.ceil(bounds.width + pad * 2));
+      const height = Math.max(1, Math.ceil(bounds.height + pad * 2));
+      if (bounds.x + bounds.width - cameraX < -pad
+        || bounds.y + bounds.height - cameraY < -pad
+        || bounds.x - cameraX > ctx.canvas.width + pad
+        || bounds.y - cameraY > ctx.canvas.height + pad) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const sctx = canvas.getContext("2d");
+      if (!sctx) return;
+      drawSource(sctx, pad);
+      sctx.globalCompositeOperation = "source-in";
+      sctx.fillStyle = "rgba(22, 28, 36, 0.94)";
+      sctx.fillRect(0, 0, width, height);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(canvas, bounds.x - pad - cameraX, bounds.y - pad - cameraY);
+      ctx.restore();
+    };
+
+    for (const chicken of this.chickens) {
+      if (!chicken.isAlive() || this.getEntityVisibility(chicken) !== "silhouette") continue;
+      const size = chicken.getSize();
+      paint({ x: chicken.x, y: chicken.y, width: size, height: size },
+        (sctx, pad) => chicken.draw(sctx, chicken.x - pad, chicken.y - pad));
+    }
+    for (const gold of this.goldPickups) {
+      if (this.getEntityVisibility(gold) !== "silhouette") continue;
+      paint({ x: gold.x, y: gold.y, width: GoldPickup.SIZE, height: GoldPickup.SIZE },
+        (sctx, pad) => gold.draw(sctx, gold.x - pad, gold.y - pad));
+    }
+    for (const meat of this.meatPickups) {
+      if (this.getEntityVisibility(meat) !== "silhouette") continue;
+      paint({ x: meat.x, y: meat.y, width: MeatPickup.SIZE, height: MeatPickup.SIZE },
+        (sctx, pad) => meat.draw(sctx, meat.x - pad, meat.y - pad));
+    }
+    for (const pickup of this.pickupItems) {
+      if (this.getEntityVisibility(pickup) !== "silhouette") continue;
+      const size = pickup.getSize();
+      paint({ x: pickup.x, y: pickup.y, width: size, height: size }, (sctx, pad) => {
+        sctx.save();
+        sctx.translate(-(pickup.x - pad), -(pickup.y - pad));
+        pickup.draw(sctx);
+        sctx.restore();
+      });
+    }
   }
 
   /**
@@ -1145,12 +1390,23 @@ export class GameScene extends Scene {  private player!: Player;
     // 单位层：只有迷雾范围内的单位才绘制，地形不参与裁剪。
     // 迷雾外的单位本来就不可见：先按视野半径剔除，既省绘制也把单位层包围盒压到视野附近。
     const vision = this.player.getVisionState();
+    const threeLayer = this.visionMode === "three-layer"
+      && this.perception !== null && this.perceptionObserver !== null
+      && this.perceptionRenderer !== null;
+    const perception = this.perception;
+    const cullRadius = threeLayer && perception
+      ? perception.getCullingRadius("player")
+      : vision.range + 64;
+    const identified = (target: object): boolean => {
+      if (!threeLayer) return true;
+      return this.getEntityVisibility(target) === "identified";
+    };
     const fogCx = vision.x - cameraOffset.x;
     const fogCy = vision.y - cameraOffset.y;
     const fogRadius = vision.range + 64;
     const visible = (x: number, y: number, pad: number): boolean => {
       const dx = x - vision.x, dy = y - vision.y;
-      const limit = vision.range + pad + 64;
+      const limit = (threeLayer ? cullRadius : vision.range + 64) + pad;
       return dx * dx + dy * dy <= limit * limit;
     };
 
@@ -1171,7 +1427,7 @@ export class GameScene extends Scene {  private player!: Player;
       if (y + height > bottom) bottom = y + height;
     };
     for (const pickup of this.goldPickups) {
-      if (!visible(pickup.x, pickup.y, 48)) continue;
+      if (!visible(pickup.x, pickup.y, 48) || !identified(pickup)) continue;
       const x = pickup.x - cameraOffset.x, y = pickup.y - cameraOffset.y;
       include(x - 40, y - 40, 80, 80);
       if (x - 40 < fxLeft) fxLeft = x - 40;
@@ -1180,15 +1436,15 @@ export class GameScene extends Scene {  private player!: Player;
       if (y + 40 > fxBottom) fxBottom = y + 40;
     }
     for (const meat of this.meatPickups) {
-      if (!visible(meat.x, meat.y, 32)) continue;
+      if (!visible(meat.x, meat.y, 32) || !identified(meat)) continue;
       include(meat.x - cameraOffset.x - 32, meat.y - cameraOffset.y - 32, 64, 64);
     }
     for (const pickup of this.pickupItems) {
-      if (!visible(pickup.x, pickup.y, 88)) continue;
+      if (!visible(pickup.x, pickup.y, 88) || !identified(pickup)) continue;
       include(pickup.x - cameraOffset.x - 80, pickup.y - cameraOffset.y - 80, 160, 160);
     }
     for (const chicken of this.chickens) {
-      if (!visible(chicken.x, chicken.y, 72)) continue;
+      if (!visible(chicken.x, chicken.y, 72) || !identified(chicken)) continue;
       include(chicken.x - cameraOffset.x - 40, chicken.y - cameraOffset.y - 40, 120, 120);
     }
     for (const bullet of bullets) {
@@ -1235,25 +1491,35 @@ export class GameScene extends Scene {  private player!: Player;
       units.setTransform(1, 0, 0, 1, 0, 0);
       // 和地图共用像素边界，地面投影不能覆盖墙壁、矿石的顶面。
       for (const pickup of this.goldPickups) {
-        if (visible(pickup.x, pickup.y, 48)) pickup.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
+        if (visible(pickup.x, pickup.y, 48) && identified(pickup)) {
+          pickup.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
+        }
       }
       for (const chicken of this.chickens) {
-        if (visible(chicken.x, chicken.y, 72)) chicken.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
+        if (visible(chicken.x, chicken.y, 72) && identified(chicken)) {
+          chicken.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
+        }
       }
       for (const pickup of this.meatPickups) {
-        if (visible(pickup.x, pickup.y, 32)) pickup.drawShadow(units, cameraOffset.x, cameraOffset.y);
+        if (visible(pickup.x, pickup.y, 32) && identified(pickup)) {
+          pickup.drawShadow(units, cameraOffset.x, cameraOffset.y);
+        }
       }
       units.restore();
     }
     for (const pickup of this.goldPickups) {
-      if (visible(pickup.x, pickup.y, 48)) pickup.draw(units, cameraOffset.x, cameraOffset.y);
+      if (visible(pickup.x, pickup.y, 48) && identified(pickup)) {
+        pickup.draw(units, cameraOffset.x, cameraOffset.y);
+      }
     }
     for (const pickup of this.meatPickups) {
-      if (visible(pickup.x, pickup.y, 32)) pickup.draw(units, cameraOffset.x, cameraOffset.y);
+      if (visible(pickup.x, pickup.y, 32) && identified(pickup)) {
+        pickup.draw(units, cameraOffset.x, cameraOffset.y);
+      }
     }
     // 绘制道具（在子弹上方，金块下方）
     for (const pickup of this.pickupItems) {
-      if (!visible(pickup.x, pickup.y, 88)) continue;
+      if (!visible(pickup.x, pickup.y, 88) || !identified(pickup)) continue;
       units.save();
       units.translate(-cameraOffset.x, -cameraOffset.y);
       pickup.draw(units);
@@ -1261,7 +1527,9 @@ export class GameScene extends Scene {  private player!: Player;
     }
     // 小鸡在拾取物之上、子弹之下；随后统一做迷雾裁剪，因此迷雾外不可见。
     for (const chicken of this.chickens) {
-      if (visible(chicken.x, chicken.y, 72)) chicken.draw(units, cameraOffset.x, cameraOffset.y);
+      if (visible(chicken.x, chicken.y, 72) && identified(chicken)) {
+        chicken.draw(units, cameraOffset.x, cameraOffset.y);
+      }
     }
     // 所有世界对象共用包含震动的相机偏移
     for (const bullet of bullets) {
@@ -1269,9 +1537,16 @@ export class GameScene extends Scene {  private player!: Player;
       if (visible(position.x, position.y, 40)) bullet.draw(units, cameraOffset.x, cameraOffset.y, this.map);
     }
     this.particleSystem.draw(units, cameraOffset.x, cameraOffset.y);
-    this.prepareFog(cameraOffset.x, cameraOffset.y);
-    if (unitBounds.width > 0 && unitBounds.height > 0) {
-      this.visibilitySystem.apply(units, unitBounds);
+    if (!threeLayer) {
+      this.prepareFog(cameraOffset.x, cameraOffset.y);
+      if (unitBounds.width > 0 && unitBounds.height > 0) {
+        this.visibilitySystem.apply(units, unitBounds);
+        ctx.drawImage(this.unitCanvas,
+          unitBounds.x, unitBounds.y, unitBounds.width, unitBounds.height,
+          unitBounds.x, unitBounds.y, unitBounds.width, unitBounds.height);
+      }
+    } else if (unitBounds.width > 0 && unitBounds.height > 0) {
+      // 三层模式已按感知等级过滤实体，不再使用旧圆形迷雾裁剪整层。
       ctx.drawImage(this.unitCanvas,
         unitBounds.x, unitBounds.y, unitBounds.width, unitBounds.height,
         unitBounds.x, unitBounds.y, unitBounds.width, unitBounds.height);
@@ -1282,19 +1557,28 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 应用光照效果
     this.applyLighting(ctx, cameraOffset.x, cameraOffset.y);
+    // 边界反馈画在光照之后：贴边本身是玩法信号，不能在暗处被乘暗。
+    // 三层模式下它会被感知遮罩压暗，所以移到遮蔽之后绘制。
+    if (!threeLayer) {
+      this.boundaryRippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
+    }
     // 枪口火焰在光照之后绘制：它本身是光源，不能陪场景一起被乘暗。
     this.player.drawMuzzleFlash(ctx, cameraOffset.x, cameraOffset.y);
     // 后处理光效单独一层，和单位共用迷雾遮罩后以 lighter 叠加。
     // 没有发光物体（金块）时整层都省掉：清屏、迷雾裁剪、叠加都是整张画布的开销。
-    if (this.goldPickups.length) {
+    const glowGold = threeLayer
+      ? this.goldPickups.filter(pickup => this.getEntityVisibility(pickup) === "identified")
+      : this.goldPickups;
+    if (glowGold.length) {
       const effects = this.effectContext;
       effects.setTransform(1, 0, 0, 1, 0, 0);
       effects.globalCompositeOperation = "source-over";
       effects.clearRect(0, 0, this.effectCanvas.width, this.effectCanvas.height);
-      this.goldPickups.forEach(pickup => pickup.drawGlow(effects, cameraOffset.x, cameraOffset.y));
-      this.goldPickups.forEach(pickup => pickup.drawSparkles(effects, cameraOffset.x, cameraOffset.y));
+      glowGold.forEach(pickup => pickup.drawGlow(effects, cameraOffset.x, cameraOffset.y));
+      glowGold.forEach(pickup => pickup.drawSparkles(effects, cameraOffset.x, cameraOffset.y));
       if (effectBounds.width > 0 && effectBounds.height > 0) {
-        this.visibilitySystem.apply(effects, effectBounds);
+        // 三层模式的光晕只对已辨识金块绘制，不再走旧迷雾裁剪。
+        if (!threeLayer) this.visibilitySystem.apply(effects, effectBounds);
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.drawImage(this.effectCanvas,
@@ -1302,6 +1586,24 @@ export class GameScene extends Scene {  private player!: Player;
           effectBounds.x, effectBounds.y, effectBounds.width, effectBounds.height);
         ctx.restore();
       }
+    }
+    // 界外毛玻璃压在世界层上、玩家 UI 之下：缩放与相机震动完全一致，且不遮住血条。
+    this.boundaryOverlay.draw(ctx, cameraOffset.x, cameraOffset.y,
+      this.map.width * this.map.tileSize, this.map.height * this.map.tileSize,
+      screenContext.canvas.width / ctx.canvas.width, window.devicePixelRatio || 1);
+    if (threeLayer && perception && this.perceptionObserver && this.perceptionRenderer) {
+      const explored = perception.getExplorationGrid("player");
+      const memory = perception.getTerrainMemory("player");
+      if (explored && memory) {
+        this.perceptionRenderer.render(ctx, cameraOffset.x, cameraOffset.y,
+          ctx.canvas.width, ctx.canvas.height, this.perceptionObserver,
+          this.perceptionLights, explored, memory);
+      }
+      // 剪影在遮蔽之后画：它不依赖光照，表达“近处有东西的轮廓”。
+      this.drawPerceptionSilhouettes(ctx, cameraOffset.x, cameraOffset.y);
+      // 边界反馈是玩法信号，放在遮蔽之后，避免在未探索区域被压黑。
+      this.boundaryRippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y,
+        ctx.canvas.width, ctx.canvas.height);
     }
     this.player.drawUI(ctx, cameraOffset.x, cameraOffset.y);
     screenContext.drawImage(this.worldCanvas, 0, 0, screenContext.canvas.width, screenContext.canvas.height);
@@ -1322,10 +1624,6 @@ export class GameScene extends Scene {  private player!: Player;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillText(`黄金 ${this.player.getGold()}`, 46, 32);
-    ctx.fillStyle = "#e05a5a";
-    ctx.fillRect(24, 50, 12, 12);
-    ctx.fillStyle = "#ffd6d6";
-    ctx.fillText(`肉块 ${this.player.getMeat()}`, 46, 56);
     ctx.restore();
     // 右下角主武器 HUD：单独按 dpr 缩放成逻辑像素，避免继承资源栏的 transform。
     ctx.save();
@@ -1418,6 +1716,11 @@ export class GameScene extends Scene {  private player!: Player;
   private isCrosshairOnTarget(pointer: { clientX: number; clientY: number }): boolean {
     const world = this.screenToWorld(pointer.clientX, pointer.clientY);
     if (!world) return false;
+    // 三层模式：没有辨识到的目标不提供精确准星反馈，避免黑暗中的红准星泄漏位置。
+    if (this.visionMode === "three-layer" && this.perception
+      && !this.perception.canIdentify("player", world.x, world.y)) {
+      return false;
+    }
     return this.chickens.some(chicken =>
       chicken.hitTestSegment(world.x, world.y, world.x, world.y, 0) !== null);
   }

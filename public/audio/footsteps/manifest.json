@@ -1,0 +1,884 @@
+{
+  "name": "footsteps",
+  "version": 1,
+  "generatedAt": "2026-10-30",
+  "source": {
+    "pack": "The Sound Guild — FREE PACK: Footsteps Volume 02",
+    "author": "The Sound Guild",
+    "url": "https://the-sound-guild.kit.com/21f8045c4f",
+    "credit": "P.S: If you can credit me in your project it would be amazing!",
+    "originalFormat": "WAV 44100 Hz 16 Bit"
+  },
+  "format": {
+    "container": "wav",
+    "sampleRate": 44100,
+    "channels": 2,
+    "bitsPerSample": 16
+  },
+  "naming": "public/audio/footsteps/<surface>/<nn>.wav",
+  "kind": "one-shot",
+  "notes": [
+    "全部为单次（one-shot）脚步声，时长 0.217–0.475 秒，不是循环采样。",
+    "现有 dry.wav／water.wav 是整段行走循环，不能由这里的单次采样直接替代。",
+    "源文件峰值 −26.7～−7.4 dBFS（中位 −15.1），RMS −45.9～−28.2 dBFS（中位 −37.4）；现有 dry.wav 为 0／−30.8 dBFS，接入时需按峰值补偿约 7–27 dB。",
+    "文件按表面分组，编号沿用源文件的两位序号；每个表面内随机取一条即可避免重复感。"
+  ],
+  "surfaces": [
+    {
+      "id": "boots",
+      "label": "皮靴",
+      "hint": "硬质皮靴踩硬地，适合石板、室内地面",
+      "path": "public/audio/footsteps/boots",
+      "count": 7,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Boots_01.wav",
+          "duration": 0.254,
+          "peakDbfs": -13.7,
+          "rmsDbfs": -30.6
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Boots_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -18.3,
+          "rmsDbfs": -32.7
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Boots_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -12.3,
+          "rmsDbfs": -30.8
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Boots_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -14.2,
+          "rmsDbfs": -34.8
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Boots_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -13.8,
+          "rmsDbfs": -31.1
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Boots_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -13.6,
+          "rmsDbfs": -33.8
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Boots_07.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.1,
+          "rmsDbfs": -32.4
+        }
+      ]
+    },
+    {
+      "id": "deep",
+      "label": "厚重脚步",
+      "hint": "低沉厚重的脚步，适合体型大或负重的角色",
+      "path": "public/audio/footsteps/deep",
+      "count": 7,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Deep_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -12.1,
+          "rmsDbfs": -29.4
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Deep_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -14.4,
+          "rmsDbfs": -30.6
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Deep_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -12.9,
+          "rmsDbfs": -29.6
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Deep_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.2,
+          "rmsDbfs": -32.5
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Deep_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -12.9,
+          "rmsDbfs": -30.0
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Deep_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -13.9,
+          "rmsDbfs": -30.8
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Deep_07.wav",
+          "duration": 0.25,
+          "peakDbfs": -13.1,
+          "rmsDbfs": -29.4
+        }
+      ]
+    },
+    {
+      "id": "grass",
+      "label": "草地",
+      "hint": "草地，适合户外植被地面",
+      "path": "public/audio/footsteps/grass",
+      "count": 7,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Foostep_Grass_01.wav",
+          "duration": 0.256,
+          "peakDbfs": -22.6,
+          "rmsDbfs": -42.8
+        },
+        {
+          "file": "02.wav",
+          "source": "Foostep_Grass_02.wav",
+          "duration": 0.264,
+          "peakDbfs": -21.4,
+          "rmsDbfs": -43.5
+        },
+        {
+          "file": "03.wav",
+          "source": "Foostep_Grass_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -21.4,
+          "rmsDbfs": -42.5
+        },
+        {
+          "file": "04.wav",
+          "source": "Foostep_Grass_04.wav",
+          "duration": 0.234,
+          "peakDbfs": -21.7,
+          "rmsDbfs": -42.9
+        },
+        {
+          "file": "05.wav",
+          "source": "Foostep_Grass_05.wav",
+          "duration": 0.217,
+          "peakDbfs": -16.1,
+          "rmsDbfs": -42.1
+        },
+        {
+          "file": "06.wav",
+          "source": "Foostep_Grass_06.wav",
+          "duration": 0.276,
+          "peakDbfs": -21.5,
+          "rmsDbfs": -44.5
+        },
+        {
+          "file": "07.wav",
+          "source": "Foostep_Grass_07.wav",
+          "duration": 0.273,
+          "peakDbfs": -23.0,
+          "rmsDbfs": -43.7
+        }
+      ]
+    },
+    {
+      "id": "grass-alt",
+      "label": "草地（备选录音）",
+      "hint": "草地备选录音，与 grass 混用增加变化",
+      "path": "public/audio/footsteps/grass-alt",
+      "count": 7,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Grass_Alternative_01.wav",
+          "duration": 0.248,
+          "peakDbfs": -17.3,
+          "rmsDbfs": -39.8
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Grass_Alternative_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -17.7,
+          "rmsDbfs": -39.9
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Grass_Alternative_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -17.3,
+          "rmsDbfs": -40.0
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Grass_Alternative_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -16.9,
+          "rmsDbfs": -39.3
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Grass_Alternative_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -17.7,
+          "rmsDbfs": -39.1
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Grass_Alternative_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.4,
+          "rmsDbfs": -39.4
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Grass_Alternative_07.wav",
+          "duration": 0.25,
+          "peakDbfs": -17.1,
+          "rmsDbfs": -39.7
+        }
+      ]
+    },
+    {
+      "id": "heel",
+      "label": "高跟鞋",
+      "hint": "高跟鞋，适合女性角色或硬地走廊",
+      "path": "public/audio/footsteps/heel",
+      "count": 6,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Heel_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -8.9,
+          "rmsDbfs": -29.5
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Heel_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -7.8,
+          "rmsDbfs": -28.4
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Heel_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -10.6,
+          "rmsDbfs": -30.1
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Heel_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -7.7,
+          "rmsDbfs": -28.4
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Heel_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -8.6,
+          "rmsDbfs": -28.8
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Heel_06.wav",
+          "duration": 0.248,
+          "peakDbfs": -9.4,
+          "rmsDbfs": -29.1
+        }
+      ]
+    },
+    {
+      "id": "metal",
+      "label": "金属地面",
+      "hint": "金属地面，适合铁板、矿道、通风管",
+      "path": "public/audio/footsteps/metal",
+      "count": 7,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Metal_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.4,
+          "rmsDbfs": -39.3
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Metal_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -19.2,
+          "rmsDbfs": -42.1
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Metal_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -13.6,
+          "rmsDbfs": -38.0
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Metal_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -16.6,
+          "rmsDbfs": -40.2
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Metal_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.7,
+          "rmsDbfs": -38.3
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Metal_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.2,
+          "rmsDbfs": -40.1
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Metal_07.wav",
+          "duration": 0.25,
+          "peakDbfs": -16.1,
+          "rmsDbfs": -37.5
+        }
+      ]
+    },
+    {
+      "id": "mud",
+      "label": "泥地",
+      "hint": "泥地，适合潮湿或雨后的地面",
+      "path": "public/audio/footsteps/mud",
+      "count": 7,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Mud_01.wav",
+          "duration": 0.461,
+          "peakDbfs": -23.4,
+          "rmsDbfs": -43.3
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Mud_02.wav",
+          "duration": 0.458,
+          "peakDbfs": -24.4,
+          "rmsDbfs": -43.7
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Mud_03.wav",
+          "duration": 0.408,
+          "peakDbfs": -24.3,
+          "rmsDbfs": -44.2
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Mud_04.wav",
+          "duration": 0.475,
+          "peakDbfs": -22.9,
+          "rmsDbfs": -44.6
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Mud_05.wav",
+          "duration": 0.433,
+          "peakDbfs": -24.1,
+          "rmsDbfs": -45.9
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Mud_06.wav",
+          "duration": 0.474,
+          "peakDbfs": -26.7,
+          "rmsDbfs": -44.9
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Mud_07.wav",
+          "duration": 0.41,
+          "peakDbfs": -21.0,
+          "rmsDbfs": -43.8
+        }
+      ]
+    },
+    {
+      "id": "naked-feet-deep",
+      "label": "赤脚（厚重）",
+      "hint": "赤脚，适合不穿鞋的角色",
+      "path": "public/audio/footsteps/naked-feet-deep",
+      "count": 6,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Naked_Feet_Deep_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -10.9,
+          "rmsDbfs": -28.2
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Naked_Feet_Deep_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -18.6,
+          "rmsDbfs": -33.5
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Naked_Feet_Deep_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -21.4,
+          "rmsDbfs": -36.0
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Naked_Feet_Deep_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.1,
+          "rmsDbfs": -31.2
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Naked_Feet_Deep_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -18.2,
+          "rmsDbfs": -34.7
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Naked_Feet_Deep_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -14.2,
+          "rmsDbfs": -29.3
+        }
+      ]
+    },
+    {
+      "id": "sand",
+      "label": "沙地",
+      "hint": "沙地，适合沙滩与沙漠",
+      "path": "public/audio/footsteps/sand",
+      "count": 8,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Sand_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -19.9,
+          "rmsDbfs": -40.5
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Sand_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -18.0,
+          "rmsDbfs": -37.5
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Sand_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -18.9,
+          "rmsDbfs": -40.7
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Sand_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -19.6,
+          "rmsDbfs": -40.0
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Sand_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -18.8,
+          "rmsDbfs": -40.2
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Sand_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -19.5,
+          "rmsDbfs": -40.2
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Sand_07.wav",
+          "duration": 0.25,
+          "peakDbfs": -18.8,
+          "rmsDbfs": -39.1
+        },
+        {
+          "file": "08.wav",
+          "source": "Footstep_Sand_08.wav",
+          "duration": 0.25,
+          "peakDbfs": -17.9,
+          "rmsDbfs": -41.4
+        }
+      ]
+    },
+    {
+      "id": "sandals",
+      "label": "凉鞋",
+      "hint": "凉鞋，适合夏季或沙地场景",
+      "path": "public/audio/footsteps/sandals",
+      "count": 8,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Sandals_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -14.1,
+          "rmsDbfs": -34.3
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Sandals_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -10.2,
+          "rmsDbfs": -33.9
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Sandals_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -13.0,
+          "rmsDbfs": -36.8
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Sandals_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -9.0,
+          "rmsDbfs": -31.9
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Sandals_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -12.5,
+          "rmsDbfs": -35.4
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Sandals_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -7.4,
+          "rmsDbfs": -30.3
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Sandals_07.wav",
+          "duration": 0.25,
+          "peakDbfs": -11.9,
+          "rmsDbfs": -35.0
+        },
+        {
+          "file": "08.wav",
+          "source": "Footstep_Sandals_08.wav",
+          "duration": 0.25,
+          "peakDbfs": -7.7,
+          "rmsDbfs": -29.2
+        }
+      ]
+    },
+    {
+      "id": "shoe",
+      "label": "皮鞋",
+      "hint": "皮鞋，适合城镇街道",
+      "path": "public/audio/footsteps/shoe",
+      "count": 5,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Shoe_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -9.9,
+          "rmsDbfs": -32.6
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Shoe_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -11.4,
+          "rmsDbfs": -33.3
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Shoe_03.wav",
+          "duration": 0.251,
+          "peakDbfs": -12.1,
+          "rmsDbfs": -36.7
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Shoe_04.wav",
+          "duration": 0.251,
+          "peakDbfs": -12.3,
+          "rmsDbfs": -35.4
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Shoe_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -14.2,
+          "rmsDbfs": -37.2
+        }
+      ]
+    },
+    {
+      "id": "shoe-street",
+      "label": "皮鞋·街道",
+      "hint": "皮鞋踩街道，带户外环境感",
+      "path": "public/audio/footsteps/shoe-street",
+      "count": 9,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Shoe_On_Street_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.7,
+          "rmsDbfs": -37.4
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Shoe_On_Street_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -14.7,
+          "rmsDbfs": -35.8
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Shoe_On_Street_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.8,
+          "rmsDbfs": -38.7
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Shoe_On_Street_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.3,
+          "rmsDbfs": -37.6
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Shoe_On_Street_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -16.1,
+          "rmsDbfs": -37.4
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Shoe_On_Street_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.1,
+          "rmsDbfs": -38.5
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Shoe_On_Street_07.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.0,
+          "rmsDbfs": -37.3
+        },
+        {
+          "file": "08.wav",
+          "source": "Footstep_Shoe_On_Street_08.wav",
+          "duration": 0.25,
+          "peakDbfs": -17.0,
+          "rmsDbfs": -38.2
+        },
+        {
+          "file": "09.wav",
+          "source": "Footstep_Shoe_On_Street_09.wav",
+          "duration": 0.25,
+          "peakDbfs": -12.4,
+          "rmsDbfs": -36.5
+        }
+      ]
+    },
+    {
+      "id": "sneakers",
+      "label": "运动鞋",
+      "hint": "运动鞋，适合现代场景",
+      "path": "public/audio/footsteps/sneakers",
+      "count": 8,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Sneakers_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -11.8,
+          "rmsDbfs": -38.2
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Sneakers_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -11.9,
+          "rmsDbfs": -37.6
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Sneakers_03.wav",
+          "duration": 0.249,
+          "peakDbfs": -13.4,
+          "rmsDbfs": -39.7
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Sneakers_04.wav",
+          "duration": 0.241,
+          "peakDbfs": -18.4,
+          "rmsDbfs": -40.1
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Sneakers_05.wav",
+          "duration": 0.25,
+          "peakDbfs": -13.2,
+          "rmsDbfs": -39.8
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Sneakers_06.wav",
+          "duration": 0.25,
+          "peakDbfs": -13.3,
+          "rmsDbfs": -41.0
+        },
+        {
+          "file": "07.wav",
+          "source": "Footstep_Sneakers_07.wav",
+          "duration": 0.25,
+          "peakDbfs": -11.9,
+          "rmsDbfs": -38.3
+        },
+        {
+          "file": "08.wav",
+          "source": "Footstep_Sneakers_08.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.2,
+          "rmsDbfs": -38.8
+        }
+      ]
+    },
+    {
+      "id": "soft-surface",
+      "label": "柔软表面",
+      "hint": "柔软表面，适合地毯一类的室内地面",
+      "path": "public/audio/footsteps/soft-surface",
+      "count": 6,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Soft_Surface_01.wav",
+          "duration": 0.25,
+          "peakDbfs": -9.7,
+          "rmsDbfs": -36.0
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Soft_Surface_02.wav",
+          "duration": 0.25,
+          "peakDbfs": -16.5,
+          "rmsDbfs": -43.1
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Soft_Surface_03.wav",
+          "duration": 0.25,
+          "peakDbfs": -9.2,
+          "rmsDbfs": -34.6
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Soft_Surface_04.wav",
+          "duration": 0.25,
+          "peakDbfs": -15.1,
+          "rmsDbfs": -39.5
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Soft_Surface_05.wav",
+          "duration": 0.248,
+          "peakDbfs": -10.9,
+          "rmsDbfs": -38.5
+        },
+        {
+          "file": "06.wav",
+          "source": "Footstep_Soft_Surface_06.wav",
+          "duration": 0.248,
+          "peakDbfs": -13.3,
+          "rmsDbfs": -36.2
+        }
+      ]
+    },
+    {
+      "id": "wood",
+      "label": "木地板",
+      "hint": "木地板，适合木屋与栈道",
+      "path": "public/audio/footsteps/wood",
+      "count": 5,
+      "files": [
+        {
+          "file": "01.wav",
+          "source": "Footstep_Wood_01.wav",
+          "duration": 0.249,
+          "peakDbfs": -9.7,
+          "rmsDbfs": -32.7
+        },
+        {
+          "file": "02.wav",
+          "source": "Footstep_Wood_02.wav",
+          "duration": 0.26,
+          "peakDbfs": -13.2,
+          "rmsDbfs": -36.0
+        },
+        {
+          "file": "03.wav",
+          "source": "Footstep_Wood_03.wav",
+          "duration": 0.234,
+          "peakDbfs": -12.0,
+          "rmsDbfs": -34.5
+        },
+        {
+          "file": "04.wav",
+          "source": "Footstep_Wood_04.wav",
+          "duration": 0.247,
+          "peakDbfs": -11.7,
+          "rmsDbfs": -33.2
+        },
+        {
+          "file": "05.wav",
+          "source": "Footstep_Wood_05.wav",
+          "duration": 0.245,
+          "peakDbfs": -11.2,
+          "rmsDbfs": -33.4
+        }
+      ]
+    }
+  ]
+}

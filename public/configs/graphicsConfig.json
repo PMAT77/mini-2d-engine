@@ -30,5 +30,11 @@
   "fog": {
     "range": 400,
     "feather": 120
+  },
+  "visibility": {
+    "maskScale": 0.5,
+    "memoryBrightness": 0.12,
+    "edgeFeather": 20,
+    "outlineContrast": 0.06
   }
 }

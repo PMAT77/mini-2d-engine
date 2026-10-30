@@ -8,7 +8,7 @@
     "preview": "vite preview",
     "test": "node scripts/test.mjs",
     "typecheck": "tsc --noEmit",
-    "test:browser": "node tests/lighting.browser.mjs && node tests/torch.browser.mjs && node tests/terrain-light.browser.mjs && node tests/collision.browser.mjs && node tests/movement.browser.mjs && node tests/camera.browser.mjs && node tests/shooting.browser.mjs && node tests/weapon-hud.browser.mjs && node tests/visibility.browser.mjs && node tests/mining.browser.mjs && node tests/water.browser.mjs && node tests/debug.browser.mjs && node tests/rounded-terrain.browser.mjs",
+    "test:browser": "node tests/lighting.browser.mjs && node tests/torch.browser.mjs && node tests/terrain-light.browser.mjs && node tests/collision.browser.mjs && node tests/movement.browser.mjs && node tests/boundary.browser.mjs && node tests/camera.browser.mjs && node tests/shooting.browser.mjs && node tests/weapon-hud.browser.mjs && node tests/visibility.browser.mjs && node tests/mining.browser.mjs && node tests/water.browser.mjs && node tests/debug.browser.mjs && node tests/rounded-terrain.browser.mjs",
     "test:weapon-hud-browser": "node tests/weapon-hud.browser.mjs",
     "test:visibility-browser": "node tests/visibility.browser.mjs",
     "test:rounded-terrain-browser": "node tests/rounded-terrain.browser.mjs",
@@ -19,6 +19,7 @@
     "test:terrain-light-browser": "node tests/terrain-light.browser.mjs",
     "test:mining-browser": "node tests/mining.browser.mjs",
     "test:movement-browser": "node tests/movement.browser.mjs",
+    "test:boundary-browser": "node tests/boundary.browser.mjs",
     "test:collision-browser": "node tests/collision.browser.mjs",
     "test:lighting-performance": "node tests/lighting.performance.mjs"
   },

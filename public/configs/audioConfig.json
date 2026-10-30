@@ -19,8 +19,8 @@
   },
   "chicken": {
     "stepVolume": 0.25,
-    "cluckVolume": 0.45,
-    "range": 620,
+    "cluckVolume": 0.25,
+    "range": 450,
     "minAttenuation": 0.08
   }
 }

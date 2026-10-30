@@ -26,7 +26,7 @@ const finite = (v: unknown): v is number => typeof v === "number" && Number.isFi
 function onSegment(a: Point, b: Point, p: Point): boolean {
   return Math.abs(cross(a, b, p)) < EPS && p.x >= Math.min(a.x, b.x) - EPS && p.x <= Math.max(a.x, b.x) + EPS && p.y >= Math.min(a.y, b.y) - EPS && p.y <= Math.max(a.y, b.y) + EPS;
 }
-function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
+export function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
   return (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) || onSegment(a, b, c) || onSegment(a, b, d) || onSegment(c, d, a) || onSegment(c, d, b);
 }
 

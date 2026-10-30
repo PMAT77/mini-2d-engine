@@ -7,7 +7,7 @@ export type ConfigDomain = "player" | "graphics" | "audio";
 
 export type SectionId =
   | "life" | "combat" | "ballistics" | "movement" | "stamina" | "roll" | "ammo" | "waterDrag" | "body" | "ui"
-  | "camera" | "ambient" | "playerLight" | "flashlight" | "fog"
+  | "camera" | "ambient" | "playerLight" | "flashlight" | "fog" | "visibility"
   | "master" | "weapon" | "footsteps" | "pickups" | "chicken";
 
 export interface ConfigControl {
@@ -52,6 +52,7 @@ export const DEBUG_SECTIONS: { id: SectionId; tab: DebugTabId; title: string; no
   { id: "playerLight", tab: "visual", title: "角色微光", note: "只照地面，不影响地形顶面" },
   { id: "flashlight", tab: "visual", title: "锥形手电筒", note: "G 键开关；默认张角 120°" },
   { id: "fog", tab: "visual", title: "战争迷雾", note: "只影响单位的可见范围；地形始终可见" },
+  { id: "visibility", tab: "visual", title: "三层视野遮蔽", note: "只影响三层模式的遮蔽表现；legacy 模式不生效" },
   { id: "master", tab: "audio", title: "总音量" },
   { id: "weapon", tab: "audio", title: "武器" },
   { id: "footsteps", tab: "audio", title: "脚步" },
@@ -165,6 +166,10 @@ export const CONFIG_CONTROLS: ConfigControl[] = [
   graphicsNumber("flashlight", "innerFade", "flashlight", "内圈过渡", "px", 1, 1, { max: 200 }),
   graphicsNumber("fog", "range", "fog", "迷雾半径", "px", 100, 10, { max: 1600 }),
   graphicsNumber("fog", "feather", "fog", "迷雾过渡", "px", 10, 10, { max: 1000 }),
+  graphicsNumber("visibility", "maskScale", "visibility", "遮蔽分辨率", "倍", 0.25, 0.05, { max: 1 }),
+  graphicsNumber("visibility", "memoryBrightness", "visibility", "记忆亮度", "", 0, 0.01, { max: 1 }),
+  graphicsNumber("visibility", "edgeFeather", "visibility", "边缘柔化", "px", 0, 1, { max: 64 }),
+  graphicsNumber("visibility", "outlineContrast", "visibility", "轮廓对比度", "", 0, 0.005, { max: 0.5 }),
 
   // 音效
   audioNumber("", "master", "master", "总音量", 0, 0.05, { max: 1 }),

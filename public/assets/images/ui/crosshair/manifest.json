@@ -1,0 +1,386 @@
+{
+  "name": "crosshair-pack",
+  "version": "1.0.0",
+  "kind": "ui-icon",
+  "generatedAt": "2026-10-30",
+  "source": {
+    "pack": "CrosshairFreePack",
+    "archive": "crosshairfreepack.zip",
+    "author": null,
+    "url": null,
+    "license": "unknown",
+    "licenseStatus": "unverified",
+    "licenseNote": "压缩包与解压目录内均无 README、LICENSE 或作者信息，压缩包注释为空，文件也没有 Zone.Identifier 下载来源记录。收录的是本地素材整理副本，公开发布前必须确认授权。",
+    "originalFormat": "PNG RGBA, 256x256"
+  },
+  "format": {
+    "container": "png",
+    "colorType": "RGBA",
+    "bitDepth": 8,
+    "width": 256,
+    "height": 256,
+    "background": "transparent",
+    "palette": [
+      "#FFFFFF",
+      "#000000"
+    ],
+    "appearance": "白色不透明填充，加半透明黑色描边与投影；深色背景上偏白，浅色背景上呈灰色轮廓"
+  },
+  "naming": "public/assets/images/ui/crosshair/<type>-<nn>.png",
+  "url": "/assets/images/ui/crosshair/<type>-<nn>.png",
+  "total": 20,
+  "categories": [
+    {
+      "id": "crosshairs",
+      "label": "准星",
+      "count": 9,
+      "description": "9 种准星，覆盖不同武器与瞄具风格"
+    },
+    {
+      "id": "hitmarkers",
+      "label": "命中提示",
+      "count": 4,
+      "description": "4 种命中反馈，适合短时缩放或淡出"
+    },
+    {
+      "id": "kill-icons",
+      "label": "击杀图标",
+      "count": 3,
+      "description": "3 种击杀反馈，适合 HUD 中央弹出"
+    },
+    {
+      "id": "armor",
+      "label": "护甲与防护",
+      "count": 4,
+      "description": "背心、头盔、爆头与盾牌指示"
+    }
+  ],
+  "icons": [
+    {
+      "file": "crosshair-01.png",
+      "source": "T_CH001.png",
+      "category": "crosshairs",
+      "label": "四臂圆头准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        0,
+        0,
+        255,
+        255
+      ],
+      "bytes": 14598,
+      "sha256": "810b2cefa7085e9f3e0ae2107f08a1c47838830ff1c1c7bf6be012d1d4864110"
+    },
+    {
+      "file": "crosshair-02.png",
+      "source": "T_CH002.png",
+      "category": "crosshairs",
+      "label": "圆环刻度准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        3,
+        7,
+        248,
+        249
+      ],
+      "bytes": 30839,
+      "sha256": "c9adeef9b5159520233cfe491f379c120332d54fd9692bf14969df2e05df97a4"
+    },
+    {
+      "file": "crosshair-03.png",
+      "source": "T_CH003.png",
+      "category": "crosshairs",
+      "label": "双侧括弧准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        101,
+        251,
+        158
+      ],
+      "bytes": 7282,
+      "sha256": "161bccf130544fafed12ecd54e205e77f369b524486e4475f5cb1ab5efee765e"
+    },
+    {
+      "file": "crosshair-04.png",
+      "source": "T_CH004.png",
+      "category": "crosshairs",
+      "label": "三点式准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        87,
+        251,
+        219
+      ],
+      "bytes": 5505,
+      "sha256": "c54334856c69e1443978ae151235a51a3390f82961ea693d78b925c8e5cd85b1"
+    },
+    {
+      "file": "crosshair-05.png",
+      "source": "T_CH005.png",
+      "category": "crosshairs",
+      "label": "菱形四箭头准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        6,
+        251,
+        250
+      ],
+      "bytes": 20467,
+      "sha256": "a885a1ae55a87339267803a4961f20797d2a6255118f8cb22a8ab404112f40c3"
+    },
+    {
+      "file": "crosshair-06.png",
+      "source": "T_CH006.png",
+      "category": "crosshairs",
+      "label": "单箭头准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        65,
+        250,
+        190
+      ],
+      "bytes": 15608,
+      "sha256": "fbe54132e8313b740160c4b7f5b193aa7c330982d63e8ba1f501961c1115670c"
+    },
+    {
+      "file": "crosshair-07.png",
+      "source": "T_CH007.png",
+      "category": "crosshairs",
+      "label": "环形三角准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        6,
+        251,
+        245
+      ],
+      "bytes": 20940,
+      "sha256": "94d1a802ec917fda53f18cbea931f47bcc231bae6d90006332d7f6ff09b03fc9"
+    },
+    {
+      "file": "crosshair-08.png",
+      "source": "T_CH008.png",
+      "category": "crosshairs",
+      "label": "大括弧点准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        42,
+        251,
+        215
+      ],
+      "bytes": 18637,
+      "sha256": "4a8ae655b6c950ded84f9ed747c94de5e593097c6197840b8bba8d78938b7f2c"
+    },
+    {
+      "file": "crosshair-09.png",
+      "source": "T_CH009.png",
+      "category": "crosshairs",
+      "label": "箭头组合准星",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        81,
+        251,
+        204
+      ],
+      "bytes": 14466,
+      "sha256": "7d1783e1a9e6162185a93bc2a7bf09aa6ae9dc045a91582491d6db04bdbcaa90"
+    },
+    {
+      "file": "hitmarker-01.png",
+      "source": "T_HM_001.png",
+      "category": "hitmarkers",
+      "label": "三向三角命中提示",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        15,
+        251,
+        236
+      ],
+      "bytes": 16388,
+      "sha256": "9cf71d1e89b8600b28c9007b27c278dce9cf076e3bf50d07ac5c6c2bc4eee556"
+    },
+    {
+      "file": "hitmarker-02.png",
+      "source": "T_HM_002.png",
+      "category": "hitmarkers",
+      "label": "X 形命中提示",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        6,
+        250,
+        250
+      ],
+      "bytes": 21513,
+      "sha256": "d15293cc57fcb422b6f3790967479f6213b97372bd638e5f3371aa696f3bfc32"
+    },
+    {
+      "file": "hitmarker-03.png",
+      "source": "T_HM_003.png",
+      "category": "hitmarkers",
+      "label": "双横线命中提示",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        6,
+        113,
+        250,
+        140
+      ],
+      "bytes": 5396,
+      "sha256": "10227c5c77843338f7291df9e67bbc759ac15f7e1cd5d5669db176dff1dc3fa5"
+    },
+    {
+      "file": "hitmarker-04.png",
+      "source": "T_HM_004.png",
+      "category": "hitmarkers",
+      "label": "双竖线命中提示",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        118,
+        6,
+        138,
+        250
+      ],
+      "bytes": 6527,
+      "sha256": "d4bec1bebec95ae3cc457a5038470518ccf2bb0e806175338afcaa2233bf7d80"
+    },
+    {
+      "file": "kill-icon-01.png",
+      "source": "T_KI_001.png",
+      "category": "kill-icons",
+      "label": "正面骷髅",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        22,
+        0,
+        235,
+        255
+      ],
+      "bytes": 28957,
+      "sha256": "1f37e6687c4deb39bbb12b1e1b4412db0de6983faf4e6925e8cac2c9f0eb7042"
+    },
+    {
+      "file": "kill-icon-02.png",
+      "source": "T_KI_002.png",
+      "category": "kill-icons",
+      "label": "骷髅与交叉骨",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        0,
+        35,
+        255,
+        221
+      ],
+      "bytes": 33795,
+      "sha256": "d1079474719f4f36b370138c586b6b0594b82cf020ffbbc3dbf45e9ab8984d63"
+    },
+    {
+      "file": "kill-icon-03.png",
+      "source": "T_KI_003.png",
+      "category": "kill-icons",
+      "label": "圆骷髅",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        0,
+        3,
+        255,
+        253
+      ],
+      "bytes": 29559,
+      "sha256": "7398e061fe0d4d31ba475ae925d09992e07c08feb3c4a892af40d5b26be305e2"
+    },
+    {
+      "file": "armor-01.png",
+      "source": "T_AH001.png",
+      "category": "armor",
+      "label": "战术背心",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        26,
+        3,
+        230,
+        253
+      ],
+      "bytes": 24089,
+      "sha256": "c4e623aa3d0564d544539d801fcbf24f4b8dd5f2898381c9105f1f162b17cf62"
+    },
+    {
+      "file": "armor-02.png",
+      "source": "T_AH002.png",
+      "category": "armor",
+      "label": "防弹头盔",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        0,
+        0,
+        255,
+        255
+      ],
+      "bytes": 17995,
+      "sha256": "1ba6ee7fc9a1602d63379240f5887e3cacb920edff0f63f9bddd16fc791849df"
+    },
+    {
+      "file": "armor-03.png",
+      "source": "T_AH003.png",
+      "category": "armor",
+      "label": "头盔与脑部",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        12,
+        0,
+        243,
+        255
+      ],
+      "bytes": 37893,
+      "sha256": "b99a06f7a51fba5463038ca1c1ffa55a94a6340ccfed29482a90f3a9606fa5ae"
+    },
+    {
+      "file": "armor-04.png",
+      "source": "T_AH004.png",
+      "category": "armor",
+      "label": "盾牌",
+      "width": 256,
+      "height": 256,
+      "alphaBbox": [
+        20,
+        0,
+        238,
+        255
+      ],
+      "bytes": 31366,
+      "sha256": "e0e3da93491fc9e4e9b20bf53b22bb853067dc84f39d7ac0de9afd5771d0ccc8"
+    }
+  ],
+  "notes": [
+    "20 张全部为 256x256 RGBA，透明背景。",
+    "图形贴边情况不一，alphaBbox 记录每张的不透明范围；缩放到 HUD 时建议按 bbox 居中并留 2–4 px 边距。",
+    "图形不含色彩信息，只有白色填充与半透明黑描边，适合深色场景。",
+    "许可未确认，见 SOURCE.md。"
+  ]
+}

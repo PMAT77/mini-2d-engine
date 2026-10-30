@@ -33,14 +33,14 @@ test('pickup text scatters to both sides above the player and keeps a small tilt
   assert.deepEqual(sides, [-1, 1]);
 
   const far = new FloatingTextSystem(() => 1);
-  far.spawn('肉块+2', 200, 300);
+  far.spawn('HP+5', 200, 300);
   const [view] = far.getTexts();
   near(Math.hypot(view.x - 200, view.y - 300), FLOATING_TEXT_MAX_RADIUS, 1e-9);
 });
 
 test('text stays solid for one second, then fades out over 0.4s and expires', () => {
   const system = new FloatingTextSystem(() => 0.5);
-  system.spawn('肉块+1', 300, 300);
+  system.spawn('HP+5', 300, 300);
 
   system.update(FLOATING_TEXT_HOLD_SECONDS);
   assert.equal(system.getTexts().length, 1);
