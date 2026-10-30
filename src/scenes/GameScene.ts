@@ -45,7 +45,7 @@ import { PickupItem, PickupType } from "../objects/PickupItem";
 import { GoldPickup } from "../objects/GoldPickup";
 import { MeatPickup } from "../objects/MeatPickup";
 import type { BulletEntityHit } from "../objects/Bullet";
-import type { BulletImpact } from "../combat/CombatTypes";
+import type { BulletImpact, DeathFinished } from "../combat/CombatTypes";
 import { Torch } from "../objects/Torch";
 import { seededRandom } from "../map/WaterTerrain";
 import { ColliderShape, DEFAULT_SHAPE, compileShape, rectangleCollider, transformCollider } from "../physics/Collider";
@@ -231,8 +231,8 @@ export class GameScene extends Scene {  private player!: Player;
   private static readonly CROSSHAIR_GAP_AIMED = 2;
   private static readonly CROSSHAIR_TIGHTEN_RATE = 5;
   private static readonly CROSSHAIR_RELEASE_RATE = 8;
-  /** 小鸡死亡后先播放白色气团，延迟这么久再掉出肉块。 */
-  private static readonly MEAT_DROP_DELAY = 0.4;
+  /** 尸体消失后先播放白色气团，延迟这么久再掉出肉块。 */
+  private static readonly SMOKE_TO_MEAT_DELAY = 0.12;
   /** 每块鸡肉直接恢复的生命值；不再单独计数。 */
   private static readonly MEAT_HEAL = 5;
   private goldPickups: GoldPickup[] = [];
@@ -737,8 +737,8 @@ export class GameScene extends Scene {  private player!: Player;
   /**
    * 小鸡受击：把真实命中交给目标结算，本方法只负责命中反馈与死亡当帧的音频收尾。
    *
-   * 致命命中不再立刻把鸡从数组里删掉；尸体用独立击退速度继续滑行，
-   * 滑行结束（或达到最长可见时间）后由 flushChickenDeaths 统一移除。
+   * 致命命中不生成白烟、不掉肉、也不立刻删鸡：这些表现全部等到尸体滑行结束、
+   * 场景消费一次性 DeathFinished 之后，在最终落点统一执行。
    */
   private damageChicken(chicken: Chicken, impact: BulletImpact): void {
     const result = chicken.receiveHit(impact, this.map);
@@ -748,19 +748,39 @@ export class GameScene extends Scene {  private player!: Player;
         ["#ffffff", "#f2f2f2", "#dedede"]);
       return;
     }
-    const center = new Vector2(chicken.x + chicken.getSize() / 2, chicken.y + chicken.getSize() / 2);
-    // 慢速大颗粒形成白色气团，再补一圈快速白点。
-    this.particleSystem.createExplosion(center, 28, 70, 7, 0.9,
-      ["#ffffff", "#f7f7f7", "#e8e8e8"]);
-    this.particleSystem.createExplosion(center, 8, 150, 4, 0.32, ["#ffffff"]);
-    this.pendingMeatDrops.push({ x: center.x, y: center.y, timer: GameScene.MEAT_DROP_DELAY });
     // 死掉的小鸡不会再叫，几秒长的录音要当场掐断，而不是由逐帧音量更新下一帧再发现。
     this.stopChickenClucks(chicken);
   }
 
-  /** 收集一次性死亡完成事件并移除已经收尾的尸体。 */
+  /**
+   * 消费一次性死亡完成事件：在尸体最终位置生成白烟、排队肉块，然后移除尸体。
+   * 白烟、肉块与数组移除都只发生在这里，避免和「致命命中」混在同一帧。
+   */
   private flushChickenDeaths(): void {
-    this.chickens = this.chickens.filter(chicken => !chicken.consumeDeathFinished());
+    const survivors: Chicken[] = [];
+    for (const chicken of this.chickens) {
+      const finished = chicken.consumeDeathFinished();
+      if (!finished) {
+        survivors.push(chicken);
+        continue;
+      }
+      this.resolveDeathPresentation(finished);
+    }
+    this.chickens = survivors;
+  }
+
+  /** 尸体滑行完成后的统一表现：白烟跟随最终落点，肉块在烟散后开始下落。 */
+  private resolveDeathPresentation(finished: DeathFinished): void {
+    const center = new Vector2(finished.x, finished.y);
+    // 慢速大颗粒形成白色气团，再补一圈快速白点。
+    this.particleSystem.createExplosion(center, 28, 70, 7, 0.9,
+      ["#ffffff", "#f7f7f7", "#e8e8e8"]);
+    this.particleSystem.createExplosion(center, 8, 150, 4, 0.32, ["#ffffff"]);
+    this.pendingMeatDrops.push({
+      x: finished.x,
+      y: finished.y,
+      timer: GameScene.SMOKE_TO_MEAT_DELAY,
+    });
   }
 
   private updateMeatDrops(delta: number): void {
@@ -1269,7 +1289,7 @@ export class GameScene extends Scene {  private player!: Player;
     const targets = this.perceptionTargets;
     targets.length = 0;
     for (const chicken of this.chickens) {
-      if (!chicken.isAlive()) continue;
+      if (!chicken.isPerceptionTarget()) continue;
       const size = chicken.getSize();
       targets.push({
         id: this.getPerceptionId(chicken),
@@ -1417,7 +1437,7 @@ export class GameScene extends Scene {  private player!: Player;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     for (const chicken of this.chickens) {
-      if (!chicken.isAlive()) continue;
+      if (!chicken.isRenderable()) continue;
       const size = chicken.getSize();
       paint({ x: chicken.x, y: chicken.y, width: size, height: size },
         silhouetteWeight(chicken),
