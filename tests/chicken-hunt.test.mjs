@@ -76,9 +76,14 @@ test('shooting a chicken kills it, drops meat after the puff, and collects it', 
   scene.player.shootAt({ x: cx, y: cy }, 1000, scene.map);
   assert.equal(scene.player.getBullets().length, 1);
 
-  for (let frame = 0; frame < 30; frame++) scene.update(1 / 60, idle);
-  assert.equal(scene.chickens.length, 0, 'lethal bullet removes the chicken');
+  for (let frame = 0; frame < 12; frame++) scene.update(1 / 60, idle);
+  assert.equal(scene.chickens.length, 1, 'the corpse is still sliding after the lethal hit');
+  assert.equal(scene.chickens[0].getLifeState(), 'dying');
+  assert.equal(scene.chickens[0].isDamageable(), false);
   assert.equal(scene.player.getHealth(), 50, 'killing a chicken does not heal by itself');
+
+  for (let frame = 0; frame < 24; frame++) scene.update(1 / 60, idle);
+  assert.equal(scene.chickens.length, 0, 'the corpse is removed after the death slide');
 
   for (let frame = 0; frame < 60; frame++) scene.update(1 / 60, idle);
   assert.equal(scene.meatPickups.length, 1, 'meat drops after the death puff');

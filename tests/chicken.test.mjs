@@ -121,6 +121,16 @@ test('chickens die to a single default hit and expose a swept hit test', () => {
   assert.equal(target.hitTestSegment(cx, cy, cx + 10, cy, 5), 0, 'starting inside hits immediately');
   target.takeDamage(1000);
   assert.equal(target.hitTestSegment(cx - 100, cy, cx + 100, cy, 5), null, 'dead chickens are not hittable');
+  assert.equal(target.getLifeState(), 'dying');
+  assert.equal(target.isPerceptionTarget(), true, 'corpses stay perceivable while they slide');
+  const map = dryMap();
+  for (let frame = 0; frame < 12; frame++) target.update(1 / 60, idleInput, map);
+  assert.equal(target.getLifeState(), 'removed');
+  const finished = target.consumeDeathFinished();
+  assert.ok(finished, 'death completion is reported once');
+  assert.ok(Math.abs(finished.x - (target.x + Chicken.SIZE / 2)) < 1e-9);
+  assert.ok(Math.abs(finished.y - (target.y + Chicken.SIZE / 2)) < 1e-9);
+  assert.equal(target.consumeDeathFinished(), null);
 });
 
 test('the chicken shadow is cast away from the light and remains culled off screen', () => {
@@ -153,8 +163,16 @@ test('the chicken shadow is cast away from the light and remains culled off scre
   assert.equal(calls.length, count, 'off-screen shadow is culled');
   const dead = new Chicken(500, 300, seededRandom(3));
   dead.takeDamage(1000);
+  const beforeDyingShadow = calls.length;
   dead.drawShadow(ctx, 0, 0, { x: 0, y: 0 });
-  assert.equal(calls.length, count, 'dead chickens cast no shadow');
+  assert.ok(calls.length > beforeDyingShadow, 'dying corpses keep their ground shadow');
+
+  const map = dryMap();
+  for (let frame = 0; frame < 12; frame++) dead.update(1 / 60, idleInput, map);
+  assert.equal(dead.getLifeState(), 'removed');
+  const afterRemoval = calls.length;
+  dead.drawShadow(ctx, 0, 0, { x: 0, y: 0 });
+  assert.equal(calls.length, afterRemoval, 'removed corpses cast no shadow');
 });
 
 test('drawing culls off-screen chickens and paints finite low-poly facets', () => {
@@ -186,4 +204,17 @@ test('drawing culls off-screen chickens and paints finite low-poly facets', () =
   assert.ok(calls.filter(call => call === 'fill').length >= 12, 'body, head and features are filled');
   assert.equal(calls.filter(call => call === 'save').length, calls.filter(call => call === 'restore').length);
   assert.ok(coordinates.length > 0 && coordinates.every(Number.isFinite));
+
+  const dying = new Chicken(500, 300, seededRandom(2));
+  dying.takeDamage(1000);
+  const fillsBeforeDying = calls.filter(call => call === 'fill').length;
+  dying.draw(ctx, 0, 0);
+  assert.ok(calls.filter(call => call === 'fill').length > fillsBeforeDying, 'dying corpses are still painted');
+
+  const map = dryMap();
+  for (let frame = 0; frame < 12; frame++) dying.update(1 / 60, idleInput, map);
+  assert.equal(dying.getLifeState(), 'removed');
+  const beforeRemoved = calls.length;
+  dying.draw(ctx, 0, 0);
+  assert.equal(calls.length, beforeRemoved, 'removed chickens are no longer painted');
 });

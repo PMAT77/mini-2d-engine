@@ -2,6 +2,10 @@ import { Input } from "../core/Input";
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { circleCollider, Point } from "../physics/Collider";
+import type { BulletImpact, DeathFinished, HitReactionPose, HitResult, LifeState } from "../combat/CombatTypes";
+import { KnockbackMotion } from "../combat/KnockbackMotion";
+import type { KnockbackWorld } from "../combat/KnockbackMotion";
+import { CHICKEN_KNOCKBACK_PROFILE } from "../combat/KnockbackProfiles";
 import { Entities } from "./Entities";
 
 /** 小鸡色板：硬边平涂，保持低多边形的块面感。 */
@@ -26,7 +30,9 @@ const SILHOUETTE_COLOR = "#ffffff";
  * 俯瞰视角的低多边形小鸡。
  *
  * 只在地图的干燥可行走地面上自由游荡；物理、贴墙滑动和地图边界全部复用 Entities。
- * 被子弹命中即死（一击必杀），由场景负责白气团和肉块掉落。
+ * 真实命中由 receiveHit 结算：致命后进入 dying，用独立的 KnockbackMotion 继续滑行，
+ * 滑行结束或达到最长可见时间才进入 removed 并发出一次死亡完成事件。世界坐标、碰撞体
+ * 与死亡结算都不依赖绘制姿态，未来 2D Rig 只需替换 getHitReactionPose 的消费者。
  */
 export class Chicken extends Entities {
   /** 身体直径（世界像素）。造型会略微超出碰撞圆，但不会回写尺寸。 */
@@ -56,7 +62,17 @@ export class Chicken extends Entities {
   private timer = 0;
   private age = 0;
   private health = Chicken.MAX_HEALTH;
-  private alive = true;
+  private lifeState: LifeState = "alive";
+  /** 致命命中后的存活时间，用于最短可见/最长收尾。 */
+  private deathAge = 0;
+  /** 一次性死亡完成事件；被场景消费后清空。 */
+  private deathFinished: DeathFinished | null = null;
+  private readonly knockbackProfile = CHICKEN_KNOCKBACK_PROFILE;
+  private knockback?: KnockbackMotion;
+  /** 受击姿态的本地时间与基准强度；只影响绘制，不参与世界结算。 */
+  private hitAge = 0;
+  private hitIntensity = 0;
+  private hitLeanSign = 0;
   private stepDistance = 0;
   private onStepCallback?: (x: number, y: number) => void;
   private onCluckCallback?: (x: number, y: number) => void;
@@ -78,7 +94,26 @@ export class Chicken extends Entities {
   }
 
   isAlive(): boolean {
-    return this.alive;
+    return this.lifeState === "alive";
+  }
+
+  getLifeState(): LifeState {
+    return this.lifeState;
+  }
+
+  /** 只有活着且未被致命命中时才接受伤害。 */
+  isDamageable(): boolean {
+    return this.lifeState === "alive";
+  }
+
+  /** 尸体在 removed 之前仍参与绘制（含影子与剪影）。 */
+  isRenderable(): boolean {
+    return this.lifeState !== "removed";
+  }
+
+  /** 尸体仍留在感知目标里，直到 removed。 */
+  isPerceptionTarget(): boolean {
+    return this.lifeState !== "removed";
   }
 
   getHealth(): number {
@@ -89,17 +124,84 @@ export class Chicken extends Entities {
     return Chicken.MAX_HEALTH;
   }
 
+  /** 当前独立击退速度，像素/秒；没有击退时为 0。 */
+  getKnockbackSpeed(): number {
+    return this.knockback?.getSpeed() ?? 0;
+  }
+
   /**
-   * 受到子弹伤害。返回本次伤害是否击杀；已死亡时不再响应。
-   * 死亡后由场景负责生成白色气团并移除实体。
+   * 结算一次真实命中。返回 ignored / damaged / killed。
+   *
+   * 致命命中只切换生命周期，不删除实体：尸体继续用独立击退速度滑行，
+   * 由 update 在滑行结束或达到最长可见时间后进入 removed，并通过
+   * consumeDeathFinished() 发出唯一一次死亡完成事件。击退参数只来自目标配置
+   * 与本次命中数据，命中点位置与准星位置都不参与强度计算。
    */
+  receiveHit(impact: BulletImpact, world?: KnockbackWorld): HitResult {
+    if (this.lifeState !== "alive") return "ignored";
+    const damage = impact?.damage;
+    if (!Number.isFinite(damage) || damage <= 0) return "ignored";
+    this.health = Math.max(0, this.health - damage);
+    const lethal = this.health <= 0;
+    this.hitAge = 0;
+    this.hitLeanSign = this.computeLeanSign(impact.direction);
+    if (lethal) {
+      this.lifeState = "dying";
+      this.deathAge = 0;
+      this.walking = false;
+      this.stepDistance = 0;
+      // 普通移动速度立即清零；击退是另一份独立速度，不受这里影响。
+      this.velocity.set(0, 0);
+    }
+    const appliedSpeed = this.ensureKnockback(world)?.addImpact(impact, lethal) ?? 0;
+    const impulse = Number.isFinite(impact.impulse) ? Math.max(0, impact.impulse) : 0;
+    const reference = Math.max(1, this.knockbackProfile.maxSpeed);
+    // 有位移时由击退速度决定姿态；免疫或零冲量时仍保留一次轻微受击姿态。
+    this.hitIntensity = Math.min(1, Math.max(
+      appliedSpeed / reference,
+      impulse / (reference * 1.55),
+    ));
+    return lethal ? "killed" : "damaged";
+  }
+
+  /** 兼容旧调用：无方向、无冲量的脚本伤害，不产生滑行。 */
   takeDamage(amount: number): boolean {
-    if (!this.alive || !Number.isFinite(amount) || amount <= 0) return false;
-    this.health = Math.max(0, this.health - amount);
-    if (this.health > 0) return false;
-    this.alive = false;
-    this.velocity.set(0, 0);
-    return true;
+    if (this.lifeState !== "alive" || !Number.isFinite(amount) || amount <= 0) return false;
+    return this.receiveHit({
+      damage: amount,
+      point: { x: this.x + this.size / 2, y: this.y + this.size / 2 },
+      direction: { x: 0, y: 0 },
+      impulse: 0,
+      impactSpeed: 0,
+      initialSpeed: 0,
+      traveledDistance: 0,
+      source: "script",
+    }) === "killed";
+  }
+
+  /** 取走一次性死亡完成事件；只有第一次返回非空。 */
+  consumeDeathFinished(): DeathFinished | null {
+    const finished = this.deathFinished;
+    this.deathFinished = null;
+    return finished;
+  }
+
+  /**
+   * 只读受击姿态，供当前 Canvas 绘制层使用。
+   *
+   * 它不写回 currentRotation，也不改变碰撞体；未来 Rig 只需读取同样的字段。
+   */
+  getHitReactionPose(): HitReactionPose {
+    const dying = this.lifeState === "dying";
+    const decay = Math.exp(-6 * this.hitAge);
+    const intensity = this.lifeState === "removed" ? 0 : Math.min(1, this.hitIntensity * (dying ? Math.max(0.35, decay) : decay));
+    return {
+      intensity,
+      localLeanRadians: this.hitLeanSign * intensity * 0.35,
+      squash: intensity * 0.16,
+      ageSeconds: this.hitAge,
+      dying,
+    };
   }
 
   /**
@@ -107,7 +209,7 @@ export class Chicken extends Entities {
    * @param radius 子弹半径；命中半径为本体半径与子弹半径之和。
    */
   hitTestSegment(x0: number, y0: number, x1: number, y1: number, radius: number): number | null {
-    if (!this.alive) return null;
+    if (this.lifeState !== "alive") return null;
     const cx = this.x + this.size / 2, cy = this.y + this.size / 2;
     const dx = x1 - x0, dy = y1 - y0;
     const fx = x0 - cx, fy = y0 - cy;
@@ -159,15 +261,77 @@ export class Chicken extends Entities {
   }
 
   update(delta: number, input: Input, map?: TileMap): void {
-    if (!this.alive || !map || !Number.isFinite(delta) || delta < 0) return;
+    if (this.lifeState === "removed" || !Number.isFinite(delta) || delta < 0) return;
+    this.hitAge += delta;
+    // 死亡后不再跑 AI、不再叫、不再报脚步；只推进独立的击退滑行。
+    if (this.lifeState === "dying") {
+      this.updateDying(delta, map);
+      return;
+    }
+    if (!map) return;
     const startX = this.x, startY = this.y;
     this.age += delta;
     this.timer -= delta;
     if (this.timer <= 0) this.decide(map);
     super.update(delta, input, map);
     this.emitSteps(startX, startY);
+    // 非致命命中的滑行与普通移动叠加，但速度状态完全独立。
+    this.knockback?.update(delta);
     // 撞到墙或矿石后不要一直顶着，尽快换一个方向。
     if (this.walking && this.getCollisionContacts().length > 0) this.timer = Math.min(this.timer, 0.12);
+  }
+
+  /**
+   * 死亡滑行：继续按独立击退速度移动，满足「已停稳且达到最短可见时间」或
+   * 「达到最长可见时间」时进入 removed，并留下一次性死亡完成事件。
+   */
+  private updateDying(delta: number, map?: TileMap): void {
+    this.deathAge += delta;
+    if (map) this.knockback?.update(delta);
+    const resting = !this.knockback || !this.knockback.isActive();
+    const profile = this.knockbackProfile;
+    if (this.deathAge >= profile.maxDeathSeconds ||
+      (resting && this.deathAge >= profile.minDeathSeconds)) {
+      this.finishDeath();
+    }
+  }
+
+  private finishDeath(): void {
+    if (this.lifeState === "removed") return;
+    this.lifeState = "removed";
+    this.walking = false;
+    this.stepDistance = 0;
+    this.velocity.set(0, 0);
+    this.knockback?.stop();
+    this.deathFinished = Object.freeze({
+      x: this.x + this.size / 2,
+      y: this.y + this.size / 2,
+      elapsedSeconds: this.deathAge,
+    });
+  }
+
+  /** 击退运动器按需创建；没有地图能力时无法滑行，只保留受击姿态。 */
+  private ensureKnockback(world?: KnockbackWorld): KnockbackMotion | null {
+    if (world && !this.knockback) {
+      this.knockback = new KnockbackMotion(this, world, this.knockbackProfile);
+    }
+    return this.knockback ?? null;
+  }
+
+  /**
+   * 命中方向在身体本地坐标系里的左右/前后符号，只用于绘制倾斜。
+   * currentRotation 是朝向角，本地 +x 为前方、+y 为右侧。
+   */
+  private computeLeanSign(direction: { x: number; y: number }): number {
+    const length = Math.hypot(direction.x, direction.y);
+    if (!Number.isFinite(length) || length <= 1e-9) return 0;
+    const facing = this.currentRotation - Math.PI;
+    const cos = Math.cos(-facing), sin = Math.sin(-facing);
+    const localX = direction.x * cos - direction.y * sin;
+    const localY = direction.x * sin + direction.y * cos;
+    // 从侧后方命中时被推得向前倒；纯正面/背面命中改用左右偏移决定倒向。
+    if (Math.abs(localY) > 1e-3) return localY > 0 ? -1 : 1;
+    return localX < 0 ? 1 : -1;
   }
 
   /** 脚步声回调：每走约 13px 报一次世界坐标，音量与远近由场景决定。 */
@@ -246,26 +410,33 @@ export class Chicken extends Entities {
    * 多边形的坐标以身体尺寸为单位，不随呼吸或动画改变碰撞体。
    */
   draw(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
-    if (!this.alive) return;
+    if (this.lifeState === "removed") return;
     const x = this.x + this.size / 2 - offsetX;
     const y = this.y + this.size / 2 - offsetY;
     if (x < -60 || y < -60 || x > ctx.canvas.width + 60 || y > ctx.canvas.height + 60) return;
 
     const s = this.size;
-    const speedRatio = Math.min(1, this.velocity.length() / Math.max(1, this.maxSpeed));
-    const bob = Math.sin(this.age * 14) * 0.6 * speedRatio;
-    const squash = Math.sin(this.age * 28) * 0.02 * speedRatio;
+    const alive = this.lifeState === "alive";
+    const speedRatio = alive ? Math.min(1, this.velocity.length() / Math.max(1, this.maxSpeed)) : 0;
+    const bob = alive ? Math.sin(this.age * 14) * 0.6 * speedRatio : 0;
+    const ambientSquash = alive ? Math.sin(this.age * 28) * 0.02 * speedRatio : 0;
     const cycle = (this.age + this.peckPhase) % Chicken.PECK_SECONDS;
-    const peck = !this.walking && this.velocity.length() < 5 && cycle < 0.32
+    const peck = alive && !this.walking && this.velocity.length() < 5 && cycle < 0.32
       ? Math.sin((cycle / 0.32) * Math.PI)
       : 0;
+    const pose = this.getHitReactionPose();
 
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(this.currentRotation - Math.PI);
+    // 受击/死亡姿态只影响局部绘制：不写 currentRotation，也不改碰撞体。
+    if (pose.intensity > 0) {
+      ctx.rotate(pose.localLeanRadians);
+      ctx.scale(1 + pose.squash, 1 - pose.squash);
+    }
 
     ctx.translate(0, bob);
-    ctx.scale(1 + squash, 1 - squash);
+    ctx.scale(1 + ambientSquash, 1 - ambientSquash);
 
     // 尾羽先画，身体会盖住根部，只露出后面的三片羽毛。
     this.shape(ctx, [[-0.30, -0.10], [-0.72, -0.30], [-0.54, -0.04]], TAIL_MID);
@@ -326,25 +497,31 @@ export class Chicken extends Entities {
    * 只是纯渲染替代，不改变物理与碰撞。颜色由调用方 source-in 统一压成冷灰。
    */
   drawSilhouette(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
-    if (!this.alive) return;
+    if (this.lifeState === "removed") return;
     const x = this.x + this.size / 2 - offsetX;
     const y = this.y + this.size / 2 - offsetY;
     if (x < -60 || y < -60 || x > ctx.canvas.width + 60 || y > ctx.canvas.height + 60) return;
 
     const s = this.size;
-    const speedRatio = Math.min(1, this.velocity.length() / Math.max(1, this.maxSpeed));
-    const bob = Math.sin(this.age * 14) * 0.6 * speedRatio;
-    const squash = Math.sin(this.age * 28) * 0.02 * speedRatio;
+    const alive = this.lifeState === "alive";
+    const speedRatio = alive ? Math.min(1, this.velocity.length() / Math.max(1, this.maxSpeed)) : 0;
+    const bob = alive ? Math.sin(this.age * 14) * 0.6 * speedRatio : 0;
+    const ambientSquash = alive ? Math.sin(this.age * 28) * 0.02 * speedRatio : 0;
     const cycle = (this.age + this.peckPhase) % Chicken.PECK_SECONDS;
-    const peck = !this.walking && this.velocity.length() < 5 && cycle < 0.32
+    const peck = alive && !this.walking && this.velocity.length() < 5 && cycle < 0.32
       ? Math.sin((cycle / 0.32) * Math.PI)
       : 0;
+    const pose = this.getHitReactionPose();
 
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(this.currentRotation - Math.PI);
+    if (pose.intensity > 0) {
+      ctx.rotate(pose.localLeanRadians);
+      ctx.scale(1 + pose.squash, 1 - pose.squash);
+    }
     ctx.translate(0, bob);
-    ctx.scale(1 + squash, 1 - squash);
+    ctx.scale(1 + ambientSquash, 1 - ambientSquash);
 
     // 尾部合成一个楔形：保留朝向与体量，去掉三片羽毛的锯齿细节。
     this.shape(ctx, [[-0.30, -0.12], [-0.80, 0.02], [-0.30, 0.26]], SILHOUETTE_COLOR);
@@ -375,7 +552,7 @@ export class Chicken extends Entities {
    * 影子沿远离光源的方向拉长；没有光源时退回脚下一小块接触阴影。
    */
   drawShadow(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0, light?: Point): void {
-    if (!this.alive) return;
+    if (this.lifeState === "removed") return;
     const x = this.x + this.size / 2 - offsetX;
     const y = this.y + this.size / 2 - offsetY;
     if (x < -60 || y < -60 || x > ctx.canvas.width + 60 || y > ctx.canvas.height + 60) return;

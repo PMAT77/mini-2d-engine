@@ -687,7 +687,7 @@ export class GameScene extends Scene {  private player!: Player;
       x: target.x,
       y: target.y,
       // 伤害与命中点都取真实命中快照；准星在鸡身后不会改变任何一项。
-      apply: (impact: BulletImpact) => this.damageChicken(target.chicken, impact.damage, impact.point.x, impact.point.y),
+      apply: (impact: BulletImpact) => this.damageChicken(target.chicken, impact),
     };
   }
 
@@ -734,11 +734,17 @@ export class GameScene extends Scene {  private player!: Player;
     this.particleSystem.createExplosion(center, 8, 130, 3, 0.35, ["#ffffff", "#f2f2f2"]);
   }
 
-  /** 小鸡受击：非致命时冒一小团白羽；致命时白色气团、延迟掉肉并移除小鸡。 */
-  private damageChicken(chicken: Chicken, damage: number, hitX: number, hitY: number): void {
-    const killed = chicken.takeDamage(damage);
-    if (!killed) {
-      this.particleSystem.createExplosion(new Vector2(hitX, hitY), 6, 55, 3, 0.22,
+  /**
+   * 小鸡受击：把真实命中交给目标结算，本方法只负责命中反馈与死亡当帧的音频收尾。
+   *
+   * 致命命中不再立刻把鸡从数组里删掉；尸体用独立击退速度继续滑行，
+   * 滑行结束（或达到最长可见时间）后由 flushChickenDeaths 统一移除。
+   */
+  private damageChicken(chicken: Chicken, impact: BulletImpact): void {
+    const result = chicken.receiveHit(impact, this.map);
+    if (result === "ignored") return;
+    if (result === "damaged") {
+      this.particleSystem.createExplosion(new Vector2(impact.point.x, impact.point.y), 6, 55, 3, 0.22,
         ["#ffffff", "#f2f2f2", "#dedede"]);
       return;
     }
@@ -750,7 +756,11 @@ export class GameScene extends Scene {  private player!: Player;
     this.pendingMeatDrops.push({ x: center.x, y: center.y, timer: GameScene.MEAT_DROP_DELAY });
     // 死掉的小鸡不会再叫，几秒长的录音要当场掐断，而不是由逐帧音量更新下一帧再发现。
     this.stopChickenClucks(chicken);
-    this.chickens = this.chickens.filter(other => other !== chicken);
+  }
+
+  /** 收集一次性死亡完成事件并移除已经收尾的尸体。 */
+  private flushChickenDeaths(): void {
+    this.chickens = this.chickens.filter(chicken => !chicken.consumeDeathFinished());
   }
 
   private updateMeatDrops(delta: number): void {
@@ -1123,6 +1133,8 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 小鸡只在干地自由游荡，不读取玩家输入。
     this.chickens.forEach(chicken => chicken.update(delta, input, this.map));
+    // 尸体滑行结束的事件在本帧所有小鸡更新完之后统一消费。
+    this.flushChickenDeaths();
     // 鸡叫是几秒钟的整段录音：玩家这几秒里的走动要立刻反映到音量上。
     this.updateCluckVolumes();
 

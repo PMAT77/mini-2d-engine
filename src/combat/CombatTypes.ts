@@ -68,6 +68,21 @@ export type LifeState = 'alive' | 'dying' | 'removed';
 export type HitResult = 'ignored' | 'damaged' | 'killed';
 
 /**
+ * 死亡滑行完成事件。
+ *
+ * 由目标自身在进入 `removed` 的那一帧产生一次，携带最终世界坐标；
+ * 白烟、肉块与尸体移除都由场景消费该事件后执行，目标不再自己决定表现时序。
+ */
+export interface DeathFinished {
+  /** 最终世界坐标（目标中心）。 */
+  readonly x: number;
+  /** 最终世界坐标（目标中心）。 */
+  readonly y: number;
+  /** 从致命命中到滑行结束的时间，秒。 */
+  readonly elapsedSeconds: number;
+}
+
+/**
  * 只读受击姿态，供当前 Canvas 绘制层消费。
  *
  * 它不参与世界坐标、碰撞体或死亡结算；未来 Rig 实现同样只读这些量。
