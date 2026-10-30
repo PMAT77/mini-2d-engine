@@ -15,7 +15,7 @@ import type { VisionState } from "../core/VisibilitySystem";
 import type { FootstepEvent } from "./FootprintSystem";
 import type { ReloadMode, WeaponKind, WeaponSlot, WeaponView } from "./Weapon";
 import { drawHeldWeapon, drawMuzzleFlame, drawStowedWeapons } from "./WeaponVisuals";
-import { getRollPose, rollStowedAlpha, rollVisualAngle, ROLL_REST_POSE } from "./RollPose";
+import { getRollPose, interpolateRollPose, rollEntryBlend, rollExitBlend, rollStowedAlpha, rollVisualAngle, ROLL_REST_POSE } from "./RollPose";
 import type { RollPose } from "./RollPose";
 
 interface WeaponState {
@@ -78,6 +78,38 @@ const RUN_SWAY_HAND_LAG = 0.5;
 const RUN_SWAY_HEAD_SCALE = 0.5;
 /** 站立姿态的肘点在肩手连线上的位置：两段胶囊拼起来与旧版整根胶囊重合。 */
 const NORMAL_ELBOW_T = 0.6;
+/** 跑步摇摆权重的平滑速率（1/秒）：翻滚结束切回普通姿态时，摇摆不会一帧跳变。 */
+const RUN_SWAY_WEIGHT_RATE = 12;
+/** 翻滚速度包络：前 12% 加速、12–45% 保持、45–100% 减速。 */
+const ROLL_ACCEL_END = 0.12;
+const ROLL_DECEL_START = 0.45;
+
+/** 速度包络 v/v0（u 为翻滚进度）。三段的积分面积恰好是 0.665。 */
+function rollSpeedRatio(u: number): number {
+  const p = Math.min(1, Math.max(0, u));
+  if (p <= ROLL_ACCEL_END) {
+    const t = ROLL_ACCEL_END > 0 ? p / ROLL_ACCEL_END : 1;
+    return t * t * (3 - 2 * t);
+  }
+  if (p <= ROLL_DECEL_START) return 1;
+  const t = (p - ROLL_DECEL_START) / (1 - ROLL_DECEL_START);
+  return 1 - t * t * (3 - 2 * t);
+}
+
+/** ∫0^u v/v0 dp：解析累计距离，避免逐帧累加速度带来的帧率依赖。 */
+function rollEnvelopeArea(u: number): number {
+  const p = Math.min(1, Math.max(0, u));
+  if (p <= 0) return 0;
+  if (p <= ROLL_ACCEL_END) {
+    const t = ROLL_ACCEL_END > 0 ? p / ROLL_ACCEL_END : 1;
+    return ROLL_ACCEL_END * (t * t * t - t * t * t * t / 2);
+  }
+  const accel = ROLL_ACCEL_END / 2;
+  if (p <= ROLL_DECEL_START) return accel + (p - ROLL_ACCEL_END);
+  const t = (p - ROLL_DECEL_START) / (1 - ROLL_DECEL_START);
+  const fall = (1 - ROLL_DECEL_START) * (t - t * t * t + t * t * t * t / 2);
+  return accel + (ROLL_DECEL_START - ROLL_ACCEL_END) + fall;
+}
 
 export interface PlayerAimInput {
   target: { x: number; y: number };
@@ -91,6 +123,24 @@ export interface PlayerDebugValues {
   magazineAmmo?: number;
   chambered?: boolean;
   reloadProgress?: number;
+}
+
+/**
+ * 当前帧真正交给 drawBody 的姿态与变换。
+ * 正常站立与翻滚共用同一份结构，测试可以直接采样它来验证
+ * 抬枪/换枪/奔跑/翻滚之间的渲染连续性。
+ */
+export interface PlayerRenderState {
+  pose: RollPose;
+  /** 整个身体的朝向（已包含翻滚方向权重） */
+  angle: number;
+  /** 视觉呼吸缩放；翻滚中会在入场/收尾两端与站立值连续过渡 */
+  scale: number;
+  /** 斜挎武器的可见度；正常站姿为 1 */
+  stowedAlpha: number;
+  /** 物理翻滚进度；0 表示未在翻滚 */
+  progress: number;
+  rolling: boolean;
 }
 
 /**
@@ -156,9 +206,6 @@ export class Player extends Entities {
   getRollCooldownRemaining(): number { return this.rollCooldownLeft; }
   /** 身体是否接触水体（任何水深，含岸边的一点重叠）；脚印湿度与涉水音效共用。 */
   isInWater(): boolean { return this.terrainWaterCoverage.fraction > 1e-6; }
-  /** 刚出水的湿身计时中：脚步仍是湿身的踩踏声，干地的循环脚步该让位。 */
-  isFootWet(): boolean { return this.footstepWetTimer > 0; }
-
   getHealth(): number { return this.health; }
   getMaxHealth(): number { return this.maxHealth; }
   takeDamage(amount: number): void {
@@ -392,23 +439,27 @@ export class Player extends Entities {
 
   private updateMovement(delta: number, input: Input, map?: TileMap): void {
     this.rollCooldownLeft = Math.max(0, this.rollCooldownLeft - delta);
+    let remaining = delta;
     if (this.rollTimeLeft > 0) {
       // 翻滚期间跳过疾跑与体力恢复：体力只在起滚时扣一次。
       this.sprinting = false;
       this.trailDistance = 0;
       this.sprintTime = 0;
-      const step = Math.min(delta, this.rollTimeLeft);
+      const step = Math.min(remaining, this.rollTimeLeft);
       const elapsed = this.roll.duration - this.rollTimeLeft;
       const distance = this.getRollDistance(elapsed + step) - this.getRollDistance(elapsed);
       this.rollSpeed = step > 0 ? distance / step : 0;
       this.rollActive = true;
       super.update(step, input, map);
       this.rollActive = false;
+      remaining -= step;
       this.rollTimeLeft = Math.max(0, this.rollTimeLeft - step);
       if (this.rollTimeLeft < 1e-9) this.rollTimeLeft = 0;
       this.emitRollDust();
-      return;
+      // 翻滚在本帧中结束：余下的时间继续普通移动，长帧不会把输入吞掉。
+      if (this.rollTimeLeft > 0) return;
     }
+    if (remaining <= 1e-9) return;
     const shift = input.isKeyDown("Shift");
     const moving = this.getMoveDirection(input).length() > 0;
     if (!shift && this.exhausted) this.releasedAfterExhaustion = true;
@@ -416,7 +467,7 @@ export class Player extends Entities {
     this.sprinting = shift && moving && !this.exhausted && this.stamina > 0;
 
     // Split the movement when stamina runs out, so low FPS never grants free sprint time.
-    const sprintDelta = this.sprinting ? Math.min(delta, this.stamina / this.sprint.drainPerSecond) : 0;
+    const sprintDelta = this.sprinting ? Math.min(remaining, this.stamina / this.sprint.drainPerSecond) : 0;
     let consumed = false;
     if (sprintDelta > 0) {
       const x = this.x, y = this.y;
@@ -436,10 +487,10 @@ export class Player extends Entities {
       this.sprinting = consumed && !this.exhausted;
     }
 
-    const remaining = delta - sprintDelta;
-    if (remaining > 1e-9 || sprintDelta === 0) {
+    const moveRemaining = remaining - sprintDelta;
+    if (moveRemaining > 1e-9 || sprintDelta === 0) {
       this.sprinting = false;
-      super.update(remaining, input, map);
+      super.update(moveRemaining, input, map);
     }
     if (!this.sprinting) { this.trailDistance = 0; this.sprintTime = 0; }
     if (this.exhausted) {
@@ -447,7 +498,7 @@ export class Player extends Entities {
       if (this.velocity.length() > speed) this.velocity.scale(speed / this.velocity.length());
     }
 
-    const restDelta = consumed ? remaining : delta;
+    const restDelta = consumed ? moveRemaining : remaining;
     const regenDelta = Math.max(0, restDelta - this.staminaRegenDelay);
     this.staminaRegenDelay = Math.max(0, this.staminaRegenDelay - restDelta);
     this.stamina = Math.min(this.sprint.maxStamina, this.stamina + regenDelta * this.sprint.regenPerSecond);
@@ -566,7 +617,7 @@ export class Player extends Entities {
     if (distance > this.size * 4) { this.footstepDistance = 0; return; }
 
     const angle = Math.atan2(dy, dx);
-    // 水中与刚出水的脚步声不同：前者是涉水，后者是湿身后的踩踏。
+    // 水中与刚出水的脚印不同：前者是涉水涟漪，后者是湿脚印。
     const inWater = this.terrainWaterCoverage.fraction > 1e-6;
     // 深水（索引 2）已经不可快速通过，视为完全湿透；超深水不可进入，仅作上限保护。
     const wetness = this.footstepWetTimer > 0

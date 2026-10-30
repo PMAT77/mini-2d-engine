@@ -6,7 +6,6 @@
     "reloadVolume": 0.5
   },
   "footsteps": {
-    "wetVolume": 0.5,
     "waterVolume": 0.45,
     "dryVolume": 0.45
   },

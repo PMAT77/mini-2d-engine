@@ -118,7 +118,6 @@
 | weapon | secondaryVolume | 0.6 | 副武器格洛克手枪开火 |
 | weapon | primaryVolume | 0.55 | 主武器冲锋枪开火 |
 | weapon | reloadVolume | 0.5 | 换弹与装填 |
-| footsteps | wetVolume | 0.5 | 湿脚印脚步 |
 | footsteps | waterVolume | 0.45 | 涉水循环 |
 | footsteps | dryVolume | 0.45 | 干地脚步循环 |
 | pickups | goldVolume | 0.4 | 黄金拾取 |

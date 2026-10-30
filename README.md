@@ -62,8 +62,8 @@ npm run preview
 - `src/status`：待机、移动和射击状态。
 - `src/ui`：右下角武器 HUD、手电开关胶囊与角色属性调试面板。
 - `public/configs`：角色／画面／音效三份配置及配置说明。
-- `public/audio`：按用途分目录，`footsteps`（干地／湿身／涉水脚步，以及 15 种表面的单次脚步素材库）、`pickups`（金块／肉块）、`flashlight`（开关）、`chicken`（脚步与三段叫声）、`weapons`（枪械音效库）。目录与 `audioConfig.json` 的音效分组一一对应，文件名只写用途、不重复分类名。
-- `public/audio/footsteps`：脚步素材库，15 种表面（皮靴、草地、泥地、沙地、木地板、金属、赤脚等）共 103 段单次采样，按表面分子目录、目录内用两位编号；清单见 [manifest.json](public/audio/footsteps/manifest.json)，来源与署名见 [SOURCE.md](public/audio/footsteps/SOURCE.md)。这套采样是单次触发用的，当前运行时仍只用 `dry`／`water`／`wet` 三段循环与湿身单步。
+- `public/audio`：按用途分目录，`footsteps`（干地／涉水脚步，以及 15 种表面的单次脚步素材库）、`pickups`（金块／肉块）、`flashlight`（开关）、`chicken`（脚步与三段叫声）、`weapons`（枪械音效库）。目录与 `audioConfig.json` 的音效分组一一对应，文件名只写用途、不重复分类名。
+- `public/audio/footsteps`：脚步素材库，15 种表面（皮靴、草地、泥地、沙地、木地板、金属、赤脚等）共 103 段单次采样，按表面分子目录、目录内用两位编号；清单见 [manifest.json](public/audio/footsteps/manifest.json)，来源与署名见 [SOURCE.md](public/audio/footsteps/SOURCE.md)。这套采样是单次触发用的；当前运行时用 `dry`／`water` 两段循环，出水后直接恢复干地脚步。
 - `public/audio/weapons`：现代手枪音效库，含 25 段开火、8 组换弹与 12 段户外枪声尾音；当前开火声取自其中的 Type1（格洛克）与 Type5（冲锋枪），换弹声取自 Type_1（格洛克）与 Type_5（冲锋枪）。
 - `public/assets/images`：界面图形。`ui/keyboard-mouse` 是键鼠图标库，124 个图标各含 64／128 两档，共 248 个 PNG，按用途分 12 类；清单见 [manifest.json](public/assets/images/ui/keyboard-mouse/manifest.json)，来源、CC BY-ND 4.0 署名与接入说明见 [SOURCE.md](public/assets/images/ui/keyboard-mouse/SOURCE.md)。当前 HUD 仍用文字提示，尚未接入图标。
 - `public/assets/images/ui/crosshair`：准星与命中反馈图标库，20 个 256×256 PNG，含准星 9、命中提示 4、击杀图标 3、护甲与防护 4；清单见 [manifest.json](public/assets/images/ui/crosshair/manifest.json)，来源、许可状态与接入说明见 [SOURCE.md](public/assets/images/ui/crosshair/SOURCE.md)。素材包未附许可文件，发布前需确认授权；当前运行时未加载这些图片。

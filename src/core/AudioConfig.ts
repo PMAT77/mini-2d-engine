@@ -2,7 +2,7 @@
 export interface AudioConfig {
   master: number;
   weapon: { secondaryVolume: number; primaryVolume: number; reloadVolume: number };
-  footsteps: { wetVolume: number; waterVolume: number; dryVolume: number };
+  footsteps: { waterVolume: number; dryVolume: number };
   pickups: { goldVolume: number; meatVolume: number };
   flashlight: { switchVolume: number };
   chicken: { stepVolume: number; cluckVolume: number; range: number; minAttenuation: number };
@@ -11,7 +11,7 @@ export interface AudioConfig {
 export const DEFAULT_AUDIO_CONFIG: AudioConfig = {
   master: 1,
   weapon: { secondaryVolume: 0.6, primaryVolume: 0.55, reloadVolume: 0.5 },
-  footsteps: { wetVolume: 0.5, waterVolume: 0.45, dryVolume: 0.45 },
+  footsteps: { waterVolume: 0.45, dryVolume: 0.45 },
   pickups: { goldVolume: 0.4, meatVolume: 0.5 },
   flashlight: { switchVolume: 0.5 },
   chicken: { stepVolume: 0.25, cluckVolume: 0.25, range: 450, minAttenuation: 0.08 },
@@ -69,8 +69,7 @@ export function parseAudioConfig(value: unknown): AudioConfig {
   if (weapon.reloadVolume !== undefined) result.weapon.reloadVolume = volume(weapon.reloadVolume, "weapon.reloadVolume");
 
   const footsteps = group(value, "footsteps");
-  rejectUnknown(footsteps, "footsteps.", ["wetVolume", "waterVolume", "dryVolume"]);
-  if (footsteps.wetVolume !== undefined) result.footsteps.wetVolume = volume(footsteps.wetVolume, "footsteps.wetVolume");
+  rejectUnknown(footsteps, "footsteps.", ["waterVolume", "dryVolume"]);
   if (footsteps.waterVolume !== undefined) result.footsteps.waterVolume = volume(footsteps.waterVolume, "footsteps.waterVolume");
   if (footsteps.dryVolume !== undefined) result.footsteps.dryVolume = volume(footsteps.dryVolume, "footsteps.dryVolume");
 
