@@ -45,6 +45,7 @@ import { PickupItem, PickupType } from "../objects/PickupItem";
 import { GoldPickup } from "../objects/GoldPickup";
 import { MeatPickup } from "../objects/MeatPickup";
 import type { BulletEntityHit } from "../objects/Bullet";
+import type { BulletImpact } from "../combat/CombatTypes";
 import { Torch } from "../objects/Torch";
 import { seededRandom } from "../map/WaterTerrain";
 import { ColliderShape, DEFAULT_SHAPE, compileShape, rectangleCollider, transformCollider } from "../physics/Collider";
@@ -685,7 +686,8 @@ export class GameScene extends Scene {  private player!: Player;
       fraction: target.fraction,
       x: target.x,
       y: target.y,
-      apply: () => this.damageChicken(target.chicken, damage, target.x, target.y),
+      // 伤害与命中点都取真实命中快照；准星在鸡身后不会改变任何一项。
+      apply: (impact: BulletImpact) => this.damageChicken(target.chicken, impact.damage, impact.point.x, impact.point.y),
     };
   }
 

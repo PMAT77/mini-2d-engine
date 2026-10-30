@@ -62,16 +62,18 @@
 | bulletWaterDrag | ultraDeep | 3.2 | 极深水中每秒扣除的发射速度比例，可为 0 |
 | shooting | magazineSize | 6 | 副武器格洛克手枪的弹匣容量，不含膛内那一发；必须是正整数，开局弹匣与膛内都装满 |
 | shooting | reloadDuration | 1.4 | 副武器格洛克手枪的换弹时长，秒；换弹结束时补满弹匣与膛内那一发 |
+| shooting | knockbackImpulse | 280 | 副武器命中单位时施加的击退冲量，可为 0（不击退）；实际位移还取决于目标质量与抗性 |
 | primaryShooting | damage | 16 | 主武器冲锋枪的基础子弹攻击力，与伤害道具增益叠加 |
 | primaryShooting | fireRate | 0.075 | 主武器冲锋枪每发之间的间隔，秒/发，越小射速越高 |
 | primaryShooting | bulletSpeed | 2800 | 主武器冲锋枪的子弹速度，像素/秒 |
 | primaryShooting | magazineSize | 30 | 主武器冲锋枪的弹匣容量，不含膛内那一发；必须是正整数 |
 | primaryShooting | reloadDuration | 2 | 主武器冲锋枪的换弹时长，秒 |
+| primaryShooting | knockbackImpulse | 200 | 主武器冲锋枪命中单位时施加的击退冲量，可为 0（不击退） |
 | ui | fadeSpeed | 5 | 换弹进度圆环的淡入淡出速度 |
 
 除表中标明可为 0 的字段外，数值必须是大于 0 的有限数。旋转策略只能是 `cw`、`ccw` 或 `auto`；散布角必须小于 45 度；最大散布不得小于基础散布；弹匣容量必须是整数。
 
-`shooting` 中的 damage、fireRate、bulletSpeed、magazineSize、reloadDuration 对应副武器格洛克手枪；`primaryShooting` 的五项同名字段对应主武器冲锋枪。子弹散布、射程、后坐力等参数由 `shooting` 共享。
+`shooting` 中的 damage、fireRate、bulletSpeed、magazineSize、reloadDuration、knockbackImpulse 对应副武器格洛克手枪；`primaryShooting` 的六项同名字段对应主武器冲锋枪。子弹散布、射程、后坐力等参数由 `shooting` 共享。`knockbackImpulse` 在开火瞬间快照进子弹，命中后实际施加的位移只由这次真实命中、武器冲量与目标自身的质量／抗性／上限决定，与准星落在目标身上还是目标后方无关。
 
 ## 画面配置
 

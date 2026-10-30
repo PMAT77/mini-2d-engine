@@ -5,6 +5,7 @@ import { circleCollider } from "../physics/Collider";
 import type { ShapeCastHit } from "../physics/Motion";
 import { TileTypeId } from "../map/TileType";
 import { BulletWaterDrag, DEFAULT_BULLET_WATER_DRAG, DEFAULT_BALLISTICS } from "./PlayerConfig";
+import type { BulletImpact } from "../combat/CombatTypes";
 
 const WATER_DRAG_KEYS: Partial<Record<TileTypeId, keyof BulletWaterDrag>> = {
   [TileTypeId.SHALLOW_WATER]: 'shallow',
@@ -23,7 +24,8 @@ export interface BulletEntityHit {
   /** 世界坐标下的接触点，供命中特效定位。 */
   x: number;
   y: number;
-  apply: () => void;
+  /** 命中结算；参数是本次真实命中生成的不可变快照。旧的无参回调仍然兼容。 */
+  apply: (impact: BulletImpact) => void;
 }
 
 /**
@@ -72,6 +74,12 @@ export class Bullet {
 
   /** 子弹造成的伤害值 */
   private damage: number;
+
+  /** 开火时从武器快照的击退冲量；0 表示这次命中不产生击退。 */
+  private impactImpulse = 0;
+
+  /** 从枪口到当前的累计飞行距离，按实际线段长度累加。 */
+  private traveledDistance = 0;
 
   /** 粒子系统引用 */
   private particleSystem?: ParticleSystem;
@@ -201,7 +209,10 @@ export class Bullet {
       this.pos.x += movement.x * entityHit.fraction;
       this.pos.y += movement.y * entityHit.fraction;
       this.isDestroyed = true;
-      entityHit.apply();
+      // 只按真正飞过的那一段累计距离；命中点之后的线段从未发生。
+      const hitFraction = Math.max(0, Math.min(1, entityHit.fraction));
+      this.traveledDistance += distance * hitFraction;
+      entityHit.apply(this.createImpact(this.traveledDistance));
       return;
     }
 
@@ -209,6 +220,7 @@ export class Bullet {
     if (terrainHit && map) {
       this.pos.x += movement.x * terrainHit.fraction;
       this.pos.y += movement.y * terrainHit.fraction;
+      this.traveledDistance += distance * Math.max(0, Math.min(1, terrainHit.fraction));
       this.hitTerrain(terrainHit, map);
       return;
     }
@@ -231,8 +243,32 @@ export class Bullet {
     this.trailY = startY;
     this.pos.x = newX;
     this.pos.y = newY;
+    this.traveledDistance += distance;
     this.remainingDistance = Math.max(0, this.remainingDistance - distance);
     if (this.remainingDistance <= 1e-8) this.annihilate(map);
+  }
+
+  /**
+   * 用命中瞬间的真实状态构造一次不可变命中快照。
+   *
+   * 方向取真实速度方向而不是开火方向；水中减速后 `impactSpeed` 会低于
+   * `initialSpeed`，由击退层换算速度比例，这里不做任何人为调整。
+   */
+  private createImpact(traveledDistance: number): BulletImpact {
+    const speed = this.velocity.length();
+    const direction = speed > 1e-9
+      ? Object.freeze({ x: this.velocity.x / speed, y: this.velocity.y / speed })
+      : Object.freeze({ x: 0, y: 0 });
+    return Object.freeze({
+      damage: this.damage,
+      point: Object.freeze({ x: this.pos.x + this.size / 2, y: this.pos.y + this.size / 2 }),
+      direction,
+      impulse: this.impactImpulse,
+      impactSpeed: speed,
+      initialSpeed: this.initialSpeed,
+      traveledDistance,
+      source: 'bullet' as const,
+    });
   }
 
   /**
@@ -310,6 +346,18 @@ export class Bullet {
   /** 注入/移除场景的单位命中查询；由玩家在发射时转发。 */
   setEntityHitTest(test?: BulletEntityHitTest): void {
     this.entityHitTest = test;
+  }
+
+  /**
+   * 设置这颗子弹的击退冲量；由玩家在发射时从当前武器快照写入。
+   * 冲量必须是非负有限数，0 表示命中不产生位移，但仍会照常结算伤害。
+   */
+  setImpactProfile(profile: { impulse: number }): void {
+    const impulse = profile?.impulse;
+    if (typeof impulse !== 'number' || !Number.isFinite(impulse) || impulse < 0) {
+      throw new Error('击退冲量必须是非负有限数值');
+    }
+    this.impactImpulse = impulse;
   }
 
   /** 冻结开火瞬间的准星落点，命中查询据此判断这一枪是否瞄准了目标。 */

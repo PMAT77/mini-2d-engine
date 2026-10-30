@@ -25,6 +25,8 @@ interface WeaponState {
   damage: number;
   fireRate: number;
   bulletSpeed: number;
+  /** 命中单位时施加的击退冲量；0 表示这把枪不产生击退。 */
+  knockbackImpulse: number;
   magazineSize: number;
   magazineAmmo: number;
   chambered: boolean;
@@ -251,7 +253,7 @@ export class Player extends Entities {
   private readonly weapons: Record<WeaponSlot, WeaponState> = {
     primary: {
       slot: "primary", name: "冲锋枪", kind: "firearm",
-      damage: 16, fireRate: 0.075, bulletSpeed: 2800,
+      damage: 16, fireRate: 0.075, bulletSpeed: 2800, knockbackImpulse: 200,
       magazineSize: 30, magazineAmmo: 30, chambered: true, reserveAmmo: null,
       reloadDuration: 2, reloadRemaining: 0, isReloading: false, reloadMode: null, reloadTotal: 0, reloadBase: 0,
       sound: "/audio/weapons/Fire/05_Pistol_Type5_Fire.wav", shotStartAt: 0.02,
@@ -259,7 +261,7 @@ export class Player extends Entities {
     },
     secondary: {
       slot: "secondary", name: "格洛克手枪", kind: "firearm",
-      damage: 10, fireRate: 0.2, bulletSpeed: 2600,
+      damage: 10, fireRate: 0.2, bulletSpeed: 2600, knockbackImpulse: 280,
       magazineSize: 6, magazineAmmo: 6, chambered: true, reserveAmmo: null,
       reloadDuration: 1.4, reloadRemaining: 0, isReloading: false, reloadMode: null, reloadTotal: 0, reloadBase: 0,
       sound: "/audio/weapons/Fire/01_Pistol_Type1_Fire.wav", shotStartAt: 0.009,
@@ -267,7 +269,7 @@ export class Player extends Entities {
     },
     melee: {
       slot: "melee", name: "空手", kind: "empty",
-      damage: 0, fireRate: 0.2, bulletSpeed: 0,
+      damage: 0, fireRate: 0.2, bulletSpeed: 0, knockbackImpulse: 0,
       magazineSize: 0, magazineAmmo: 0, chambered: false, reserveAmmo: null,
       reloadDuration: 0, reloadRemaining: 0, isReloading: false, reloadMode: null, reloadTotal: 0, reloadBase: 0,
       sound: "", shotStartAt: 0, reloadSound: "", reloadRate: 1,
@@ -797,6 +799,7 @@ export class Player extends Entities {
     if (config.damage !== undefined) weapon.damage = config.damage;
     if (config.fireRate !== undefined) weapon.fireRate = config.fireRate;
     if (config.bulletSpeed !== undefined) weapon.bulletSpeed = config.bulletSpeed;
+    if (config.knockbackImpulse !== undefined) weapon.knockbackImpulse = config.knockbackImpulse;
     if (config.magazineSize !== undefined) {
       weapon.magazineSize = config.magazineSize;
       weapon.magazineAmmo = Math.min(weapon.magazineAmmo, weapon.magazineSize);
@@ -910,10 +913,10 @@ export class Player extends Entities {
       },
       shooting: { ...this.ballistics, damage: this.weapons.secondary.damage, fireRate: this.weapons.secondary.fireRate,
         bulletSpeed: this.weapons.secondary.bulletSpeed, magazineSize: this.weapons.secondary.magazineSize,
-        reloadDuration: this.weapons.secondary.reloadDuration },
+        reloadDuration: this.weapons.secondary.reloadDuration, knockbackImpulse: this.weapons.secondary.knockbackImpulse },
       primaryShooting: { damage: this.weapons.primary.damage, fireRate: this.weapons.primary.fireRate,
         bulletSpeed: this.weapons.primary.bulletSpeed, magazineSize: this.weapons.primary.magazineSize,
-        reloadDuration: this.weapons.primary.reloadDuration },
+        reloadDuration: this.weapons.primary.reloadDuration, knockbackImpulse: this.weapons.primary.knockbackImpulse },
       ui: { fadeSpeed: this.fadeSpeed },
     };
   }
@@ -1183,6 +1186,8 @@ export class Player extends Entities {
     const bullet = new Bullet(bulletPos, bulletVel, this.getModifiedValue(damage, "damage"),
       this.particleSystem, this.terrainWaterCoverage.fraction > 1e-6, this.bulletWaterDrag, travelDistance,
       this.onBulletLandedCallback);
+    // 冲量在开火瞬间快照；之后切枪或改配置都不影响已发射的子弹。
+    bullet.setImpactProfile({ impulse: this.weapon.knockbackImpulse });
     if (this.bulletEntityHitTest) bullet.setEntityHitTest(this.bulletEntityHitTest);
     // 冻结原始准星落点：后坐力散布只改弹道，不应改变“这一枪有没有瞄准火把”的判定。
     bullet.setAimTarget(target);

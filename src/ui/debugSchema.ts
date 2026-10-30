@@ -91,6 +91,7 @@ export const CONFIG_CONTROLS: ConfigControl[] = [
   playerNumber("activeFirearm", "damage", "combat", "基础攻击力", "", 0.01, 1, { max: 1000 }),
   playerNumber("activeFirearm", "fireRate", "combat", "射速", "发/秒", 0.01, 0.1, { reciprocal: true, max: 5 }),
   playerNumber("activeFirearm", "bulletSpeed", "combat", "子弹速度", "px/s", 0.01, 10, { max: 10000 }),
+  playerNumber("activeFirearm", "knockbackImpulse", "combat", "命中击退冲量", "", 0, 10, { max: 5000 }),
   playerNumber("shooting", "maxRange", "combat", "最大射程", "px", 1, 50, { max: 5000 }),
   playerNumber("shooting", "spreadHorizontal", "ballistics", "基础水平半角", "度", 0, 0.1, { max: 44 }),
   playerNumber("shooting", "spreadVertical", "ballistics", "基础垂直半角", "度", 0, 0.1, { max: 44 }),

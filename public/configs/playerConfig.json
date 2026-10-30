@@ -46,6 +46,7 @@
     "bulletSpeed": 2600,
     "magazineSize": 6,
     "reloadDuration": 1.4,
+    "knockbackImpulse": 280,
     "maxRange": 1000,
     "spreadHorizontal": 0.6,
     "spreadVertical": 0.4,
@@ -60,7 +61,8 @@
     "fireRate": 0.075,
     "bulletSpeed": 2800,
     "magazineSize": 30,
-    "reloadDuration": 2.0
+    "reloadDuration": 2.0,
+    "knockbackImpulse": 200
   },
   "bulletWaterDrag": {
     "shallow": 0.4,

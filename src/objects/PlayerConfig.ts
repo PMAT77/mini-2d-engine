@@ -25,6 +25,8 @@ export interface WeaponShootingConfig {
   magazineSize?: number;
   /** 换弹时长（秒）。 */
   reloadDuration?: number;
+  /** 命中单位时施加的击退冲量；0 表示无击退，必须是有限非负数。 */
+  knockbackImpulse?: number;
 }
 
 export interface PlayerConfig {
@@ -85,9 +87,9 @@ export const PLAYER_CONFIG_GROUPS: Record<string, readonly string[]> = {
   sprint: Object.keys(DEFAULT_SPRINT),
   roll: Object.keys(DEFAULT_ROLL),
   animation: ["breathingAmplitude", "breathingSpeed", "runSwayAmplitude", "runSwaySpeed"],
-  shooting: ["damage", "fireRate", "bulletSpeed", "magazineSize", "reloadDuration",
+  shooting: ["damage", "fireRate", "bulletSpeed", "magazineSize", "reloadDuration", "knockbackImpulse",
     "aimContinuityWindow", "aimTurnDuration", ...Object.keys(DEFAULT_BALLISTICS)],
-  primaryShooting: ["damage", "fireRate", "bulletSpeed", "magazineSize", "reloadDuration"],
+  primaryShooting: ["damage", "fireRate", "bulletSpeed", "magazineSize", "reloadDuration", "knockbackImpulse"],
   ui: ["fadeSpeed"],
   bulletWaterDrag: Object.keys(DEFAULT_BULLET_WATER_DRAG),
 };
@@ -105,7 +107,7 @@ export function parsePlayerConfig(value: unknown): PlayerConfig {
       if (key === "rotationStrategy") {
         if (!["cw", "ccw", "auto"].includes(field as string)) throw new Error("rotationStrategy 必须是 cw、ccw 或 auto");
       } else {
-        const allowZero = group === "bulletWaterDrag" || ["maxSpeed", "breathingAmplitude", "breathingSpeed", "runSwayAmplitude", "runSwaySpeed", "nonlinearFactor", "startSpeedRatio", "startupDuration", "turnDamping", "stopDuration", "rampDuration", "regenDelay", "aimTurnDuration", "cooldown", "staminaCost", "spreadHorizontal", "spreadVertical", "maxSpreadHorizontal", "maxSpreadVertical", "recoilPerShot", "recoilRecoveryDelay"].includes(key);
+        const allowZero = group === "bulletWaterDrag" || ["maxSpeed", "knockbackImpulse", "breathingAmplitude", "breathingSpeed", "runSwayAmplitude", "runSwaySpeed", "nonlinearFactor", "startSpeedRatio", "startupDuration", "turnDamping", "stopDuration", "rampDuration", "regenDelay", "aimTurnDuration", "cooldown", "staminaCost", "spreadHorizontal", "spreadVertical", "maxSpreadHorizontal", "maxSpreadVertical", "recoilPerShot", "recoilRecoveryDelay"].includes(key);
         if (typeof field !== "number" || !Number.isFinite(field) || (allowZero ? field < 0 : field <= 0)) {
           throw new Error(`无效配置值: ${group}.${key} 必须是${allowZero ? "非负" : "正"}有限数值`);
         }
