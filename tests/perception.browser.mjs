@@ -16,12 +16,17 @@ try {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/@vite/client', route => route.fulfill({ contentType: 'application/javascript', body: 'export {};' }));
-    await page.goto(`${base}/?vision=three-layer`);
+    await page.goto(`${base}/`);
     await page.evaluate(async () => { window.visionGame = (await import('/src/main.ts')).game; });
     await page.keyboard.down('Enter');
     await page.waitForSelector('[data-player-debug]');
     await page.keyboard.up('Enter');
     await page.evaluate(() => { window.requestAnimationFrame = () => 0; });
+    assert.equal(
+      await page.evaluate(() => window.visionGame.sceneManager.getCurrentScene().visionMode),
+      'three-layer',
+      'the root URL must boot the default three-layer vision',
+    );
 
     const setup = await page.evaluate(async () => {
       const { TileMap } = await import('/src/map/TileMap.ts');

@@ -5,6 +5,9 @@ import { join } from 'node:path';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const browser = await chromium.launch({ headless: true, ...(process.env.BROWSER_EXECUTABLE ? { executablePath: process.env.BROWSER_EXECUTABLE } : {}) });
+// 鼠标/射击/准星回归用显式 legacy 模式：三层视野下准星只在目标被有效辨识后才收紧，
+// 这里验证的是鼠标输入、弹道与准星绘制管线本身，不重复感知分级。
+const base = (process.env.TEST_BASE_URL || 'http://127.0.0.1:5173').replace(/\/$/, '');
 const output = process.env.SCREENSHOT_DIR || '.review'; mkdirSync(output, { recursive: true });
 const results = [];
 const near = (a, b, tolerance = 1e-3) => assert.ok(Math.abs(a - b) < tolerance, a + ' != ' + b);
@@ -13,7 +16,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 1100, height: 800 }, deviceScaleFactor: dpr });
     const page = await context.newPage(), errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    await page.goto(process.env.TEST_BASE_URL || 'http://127.0.0.1:5173/');
+    await page.goto(`${base}/?vision=legacy`);
     await page.evaluate(async () => { window.shootingGame = (await import('/src/main.ts')).game; });
     assert.equal(await page.locator('canvas').evaluate(c => c.dispatchEvent(new MouseEvent('contextmenu', { cancelable: true }))), true);
     await page.keyboard.down('Enter');

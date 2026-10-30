@@ -82,19 +82,42 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 /**
- * 开发期用 URL 切换视觉模式：`?vision=three-layer`。
- * 玩法/画质/开发模式分离，模式本身不写进 graphics.json。
+ * 是否开发构建。
+ *
+ * 首选 `__DEV__`：生产构建会被替换成 `false`，开发服务器由 Vite 注入同名全局。
+ * 部分浏览器测试会把 `/@vite/client` 打桩（避免 HMR 连接），此时 Vite 注入全局的
+ * 时机被跳过，因此用入口脚本路径兜底：开发服务器加载 `/src/main.ts`，生产构建加载
+ * 带哈希的 `/assets/*.js`。
  */
-function resolveVisionMode(): VisionMode {
-  if (typeof window === "undefined") return "legacy";
-  const search = window.location?.search;
-  if (!search) return "legacy";
-  return new URLSearchParams(search).get("vision") === "three-layer"
-    ? "three-layer" : "legacy";
+function isDevelopmentBuild(): boolean {
+  if (typeof __DEV__ !== "undefined") return __DEV__ === true;
+  if (typeof document === "undefined") return false;
+  return Boolean(document.querySelector('script[type="module"][src*="/src/main.ts"]'));
 }
 
-/** 开发期图层隔离：`?vision=three-layer&visionDebug=outline`，缺省或非法值不启用。 */
+/**
+ * 视觉模式解析。
+ *
+ * 正式规则：三层感知是唯一受支持的玩法视野。生产构建永远返回 three-layer，
+ * 不允许玩家用 URL 恢复“地形全可见”的 legacy 模式来绕过探索与黑暗规则。
+ * 开发构建保留 legacy 作为回归与对照路径：只有显式 `?vision=legacy` 才启用，
+ * 其余（无参数、`?vision=three-layer`、未知值）一律三层。
+ *
+ * 玩法模式不写进 graphicsConfig.json，也不受 F2 画质面板影响。
+ */
+function resolveVisionMode(): VisionMode {
+  if (!isDevelopmentBuild()) return "three-layer";
+  if (typeof window === "undefined") return "three-layer";
+  const value = new URLSearchParams(window.location?.search ?? "").get("vision");
+  return value === "legacy" ? "legacy" : "three-layer";
+}
+
+/**
+ * 图层隔离调试层：`?visionDebug=outline` 等。
+ * 只在开发构建生效——生产构建下 `world` 会暴露未探索地图，必须关闭。
+ */
 function resolveVisionDebugLayer(): VisionDebugLayer | null {
+  if (!isDevelopmentBuild()) return null;
   if (typeof window === "undefined") return null;
   const value = new URLSearchParams(window.location?.search ?? "").get("visionDebug");
   switch (value) {
@@ -134,7 +157,8 @@ export class GameScene extends Scene {  private player!: Player;
   /** 视觉玩法模式：legacy 保持旧圆形迷雾；three-layer 启用感知遮蔽。 */
   readonly visionMode: VisionMode;
   /** 开发期图层隔离（`?visionDebug=`）；null 表示正常合成。 */
-  private readonly visionDebugLayer: VisionDebugLayer | null;
+  /** 调试层暴露给浏览器测试读取；生产构建恒为 null。 */
+  readonly visionDebugLayer: VisionDebugLayer | null;
   private readonly visionRules = createVisionRules();
   private perception: PerceptionSystem | null = null;
   private perceptionRenderer: PerceptionRenderer | null = null;
@@ -524,7 +548,10 @@ export class GameScene extends Scene {  private player!: Player;
       canvas.height = this.camera.height;
     }
     this.lightingSystem.initialize(this.camera.width, this.camera.height);
-    this.visibilitySystem.initialize(this.camera.width, this.camera.height);
+    // 旧迷雾只在 legacy 模式真正绘制时才有必要分配遮罩画布。
+    if (this.visionMode === "legacy") {
+      this.visibilitySystem.initialize(this.camera.width, this.camera.height);
+    }
     if (this.visionMode === "three-layer" && this.perception) {
       if (!this.perceptionRenderer) {
         this.perceptionRenderer = new PerceptionRenderer(
@@ -1027,6 +1054,8 @@ export class GameScene extends Scene {  private player!: Player;
         initialPlayer: this.initialPlayerConfig,
         initialGraphics: this.initialGraphics,
         initialAudio: this.initialAudio,
+        // 三层视野不读 fog.range/fog.feather，留着这两根滑杆只会误导调参。
+        hiddenSections: this.visionMode === "three-layer" ? ["fog"] : [],
       });
       window.addEventListener('resize', this.resizeListener);
       if (typeof document !== 'undefined') document.addEventListener('keydown', this.cursorKeyListener);

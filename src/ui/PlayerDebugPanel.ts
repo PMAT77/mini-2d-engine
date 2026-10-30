@@ -41,6 +41,8 @@ export interface PlayerDebugPanelOptions {
   initialPlayer?: PlayerConfig;
   initialGraphics?: GraphicsConfig;
   initialAudio?: AudioConfig;
+  /** 当前视野模式不读取的分组（例如三层模式下的 fog），构建时直接跳过。 */
+  hiddenSections?: SectionId[];
 }
 
 /** A scene-owned DOM overlay. No timers or keyboard listeners survive disposal. */
@@ -51,6 +53,7 @@ export class PlayerDebugPanel {
   private readonly initialPlayer: PlayerConfig;
   private readonly initialGraphics: GraphicsConfig;
   private readonly initialAudio: AudioConfig;
+  private readonly hiddenSections: Set<SectionId>;
 
   private root = document.createElement('div');
   private toggle = document.createElement('button');
@@ -86,6 +89,7 @@ export class PlayerDebugPanel {
     this.initialPlayer = options.initialPlayer ?? this.player.getConfigSnapshot();
     this.initialGraphics = cloneGraphicsConfig(options.initialGraphics ?? options.getGraphics());
     this.initialAudio = cloneAudioConfig(options.initialAudio ?? options.getAudio());
+    this.hiddenSections = new Set(options.hiddenSections ?? []);
     this.snapshot = this.player.getConfigSnapshot();
 
     this.root.className = 'player-debug';
@@ -161,7 +165,10 @@ export class PlayerDebugPanel {
     this.modal.append(this.panel);
     this.overlay.append(this.modal);
 
-    for (const section of DEBUG_SECTIONS) this.buildSection(section.id, section.title, section.note);
+    for (const section of DEBUG_SECTIONS) {
+      if (this.hiddenSections.has(section.id)) continue;
+      this.buildSection(section.id, section.title, section.note);
+    }
 
     const footer = document.createElement('footer');
     const note = document.createElement('small');

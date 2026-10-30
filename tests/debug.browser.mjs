@@ -13,7 +13,9 @@ try {
     const context = await browser.newContext({ viewport: { width: 1100, height: 800 }, deviceScaleFactor: dpr });
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(process.env.TEST_BASE_URL || 'http://127.0.0.1:5173/');
+    // F2 面板的 fog 分组只在 legacy 模式存在；默认三层模式会隐藏它（见 vision-mode 测试）。
+    const baseUrl = (process.env.TEST_BASE_URL || 'http://127.0.0.1:5173').replace(/\/$/, '');
+    await page.goto(`${baseUrl}/?vision=legacy`);
     await page.evaluate(async () => {
       const entry = document.querySelector('script[type="module"][src*="/src/main.ts"]');
       window.debugGame = (await import(entry.src)).game;

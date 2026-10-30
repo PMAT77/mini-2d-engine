@@ -29,7 +29,8 @@ try {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/@vite/client', route => route.fulfill({ contentType: 'application/javascript', body: 'export {};' }));
-    await page.goto(`${base}/${testCase.mode === 'three-layer' ? '?vision=three-layer' : ''}`);
+    // 默认就是 three-layer；legacy 用例必须显式带参数，否则两个模式会被测成同一个。
+    await page.goto(testCase.mode === 'legacy' ? `${base}/?vision=legacy` : `${base}/`);
     await page.evaluate(async () => { window.perfGame = (await import('/src/main.ts')).game; });
     await page.keyboard.down('Enter');
     await page.waitForFunction(() => window.perfGame.sceneManager.getCurrentScene()?.loaded === true);

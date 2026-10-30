@@ -13,7 +13,8 @@ try {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/@vite/client', route => route.fulfill({ contentType: 'application/javascript', body: 'export {};' }));
-    await page.goto(base);
+    // 默认视野已切到 three-layer；这条用例只覆盖 legacy 圆形迷雾，必须显式指定。
+    await page.goto(`${base}/?vision=legacy`);
     await page.evaluate(async () => { window.visionGame = (await import('/src/main.ts')).game; });
     await page.keyboard.down('Enter');
     await page.waitForSelector('[data-player-debug]'); await page.keyboard.up('Enter');
