@@ -2,8 +2,9 @@ import { createVisionRules, type VisionRules } from './VisionRules';
 import { ExplorationGrid } from './ExplorationGrid';
 import { TerrainMemory } from './TerrainMemory';
 import { anySampleVisible, distanceBetween, hasLineOfSight } from './SightGeometry';
-import { canIdentifyPoint, canIdentifyTarget } from './IlluminationProbe';
+import { canIdentifyPoint, illuminationStrengthAt } from './IlluminationProbe';
 import type {
+  EntityVisibility,
   PerceptionLight,
   PerceptionTarget,
   PerceptionView,
@@ -20,7 +21,8 @@ export interface PerceptionSystemOptions {
 }
 
 interface TrackedView extends PerceptionView {
-  timer: number;
+  /** 上一帧是否满足辨识照明，用于滞回阈值。 */
+  lit: boolean;
 }
 
 interface DiscoveryState {
@@ -92,8 +94,8 @@ export class PerceptionSystem {
 
   getView(observerId: string, targetId: string): PerceptionView {
     const view = this.states.get(observerId)?.views.get(targetId);
-    if (!view) return { level: 'hidden', alpha: 0 };
-    return { level: view.level, alpha: view.alpha };
+    if (!view) return { level: 'hidden', alpha: 0, silhouette: 0 };
+    return { level: view.level, alpha: view.alpha, silhouette: view.silhouette };
   }
 
   /** 点查询：给准星/将来交互用；目标查询优先用 getView。 */
@@ -171,29 +173,56 @@ export class PerceptionSystem {
     previous: TrackedView | undefined
   ): TrackedView {
     const observer = state.observer;
+    // 硬遮挡（完全被墙挡住）立即清零，视觉权重不允许穿墙。
+    if (!anySampleVisible(this.map, observer, target)) {
+      return { level: 'hidden', alpha: 0, silhouette: 0, lit: false };
+    }
+
     const distance = distanceBetween(observer.x, observer.y, target.x, target.y);
     const inRange = distance <= observer.maxObservationRange;
-    const near = distance <= observer.nearSenseRadius && anySampleVisible(this.map, observer, target);
     const centerLos = hasLineOfSight(this.map, observer.x, observer.y, target.x, target.y);
-    const illuminated = inRange && centerLos && canIdentifyTarget(this.map, observer, target, this.lights, this.rules);
+    const near = distance <= observer.nearSenseRadius;
 
-    if (illuminated) {
-      if (previous?.level === 'identified') return { level: 'identified', alpha: 1, timer: 0 };
-      const timer = (previous?.level === 'silhouette' ? previous.timer : 0) + dt;
-      if (timer >= this.rules.identifyDwellSeconds) return { level: 'identified', alpha: 1, timer: 0 };
-      return { level: 'silhouette', alpha: 1, timer };
-    }
+    // 滞回：已经点亮时使用更低的退出阈值，手电柔边附近不会在阈值上下反复翻转。
+    const wasLit = previous?.lit ?? false;
+    const threshold = this.rules.identifyLightThreshold *
+      (wasLit ? this.rules.identifyLightHysteresis : 1);
+    const strength = illuminationStrengthAt(this.map, target.x, target.y, this.lights, this.rules);
+    const lit = inRange && centerLos &&
+      (this.rules.ambientIdentifies || strength >= threshold);
 
-    // 硬遮挡/离开范围：立即失去；只有“仍在 LOS 内但光照丢失”才淡出。
-    if (previous?.level === 'identified' && centerLos && inRange) {
-      if (this.rules.identifyFadeSeconds > 0) {
-        const alpha = Math.max(0, previous.alpha - dt / this.rules.identifyFadeSeconds);
-        if (alpha > 0) return { level: 'identified', alpha, timer: 0 };
-      }
-    }
+    return this.blendView(previous, near, lit, dt);
+  }
 
-    if (near) return { level: 'silhouette', alpha: 1, timer: 0 };
-    return { level: 'hidden', alpha: 0, timer: 0 };
+  /**
+   * 双权重交叉淡化：alpha 是完整形象权重（detail），silhouette 是近身剪影权重。
+   * 两者都由 dt 驱动，不同帧率下过渡时长一致，不再出现“先消失、再跳出灰色剪影”。
+   */
+  private blendView(
+    previous: TrackedView | undefined,
+    near: boolean,
+    lit: boolean,
+    dt: number
+  ): TrackedView {
+    const dwell = this.rules.identifyDwellSeconds;
+    const fade = this.rules.identifyFadeSeconds;
+    const detailStep = lit ? (dwell > 0 ? dt / dwell : 1) : (fade > 0 ? dt / fade : 1);
+    const silhouetteStep = fade > 0 ? dt / fade : 1;
+
+    let detail = previous?.alpha ?? 0;
+    detail = lit ? Math.min(1, detail + detailStep) : Math.max(0, detail - detailStep);
+
+    let silhouette = previous?.silhouette ?? 0;
+    // 只有近身、且没有被有效照明时才需要剪影；否则与彩色形象交叉淡出。
+    if (near && !lit) silhouette = Math.min(1, silhouette + silhouetteStep);
+    else silhouette = Math.max(0, silhouette - silhouetteStep);
+
+    const fullyIdentified = detail >= 1 - 1e-6;
+    const wasIdentified = previous?.level === 'identified' && detail > 0.002;
+    const level: EntityVisibility = fullyIdentified || wasIdentified
+      ? 'identified'
+      : (silhouette > 0.002 || detail > 0.002 ? 'silhouette' : 'hidden');
+    return { level, alpha: detail, silhouette, lit };
   }
 
   private isPointCurrentlyObserved(state: ObserverState, x: number, y: number): boolean {
@@ -226,12 +255,20 @@ export class PerceptionSystem {
   /**
    * 只标记当前确实能感知到的 25px 格：近身或有效照明 + 观察者 LOS。
    * 一次只扫近身矩形 + 各光源影响矩形，再用 Set 去重；探索完成后成本自然下降。
+   *
+   * 阻挡瓦片不使用“相邻即已观察”的启发式：中心点位于实心多边形内部，对中心做
+   * LOS 永远会被墙挡住，所以这里只收集与可视格相邻的阻挡瓦片，交给
+   * captureObservedWalls() 对瓦片外露面做采样验证。
    */
   private markVisibleCells(state: ObserverState): void {
     const observer = state.observer;
     const grid = state.grid;
     const cell = grid.cellSize;
+    const tileSize = this.terrain.tileSize;
+    const tileWidth = this.terrain.width;
+    const tileHeight = this.terrain.height;
     const candidates = new Set<number>();
+    const wallTiles = new Set<number>();
 
     const collect = (minX: number, minY: number, maxX: number, maxY: number): void => {
       const startCol = Math.max(0, Math.floor(minX / cell));
@@ -282,9 +319,6 @@ export class PerceptionSystem {
       if (!grid.isExploredCell(col, row)) grid.markCell(col, row);
       state.memory.captureWorld(cx, cy);
 
-      // 墙体/矿石的中心点位于实心多边形内部，直接对中心做 LOS 会永远得到“被墙挡住”。
-      // 因此只要一个可视格紧邻占用格，就把占用格也记为已观察并捕获快照：
-      // 这既留下墙体记忆，也让未知轮廓在真正走到墙边后被擦掉。
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           if (dx === 0 && dy === 0) continue;
@@ -294,10 +328,74 @@ export class PerceptionSystem {
           const nx = (ncol + 0.5) * cell;
           const ny = (nrow + 0.5) * cell;
           if (!this.map.blocksLightAt(nx, ny)) continue;
-          if (!grid.isExploredCell(ncol, nrow)) grid.markCell(ncol, nrow);
-          state.memory.captureWorld(nx, ny);
+          const tileCol = Math.floor(nx / tileSize);
+          const tileRow = Math.floor(ny / tileSize);
+          if (tileCol < 0 || tileRow < 0 || tileCol >= tileWidth || tileRow >= tileHeight) continue;
+          wallTiles.add(tileRow * tileWidth + tileCol);
         }
       }
+    }
+
+    if (wallTiles.size > 0) this.captureObservedWalls(state, wallTiles);
+  }
+
+  /**
+   * 阻挡瓦片只有在“外露表面确实被看见”时才写入记忆。
+   *
+   * 每条外露边向外偏移 2px 取三个采样点（25%/50%/75%），要求观察者 LOS，
+   * 并满足近身感知或有效照明。这样：
+   * - 墙体记忆来自真实可见的墙面，而不是“有相邻可视格”这一几何近似；
+   * - 被另一堵墙挡住的内侧面不会被提前记录；
+   * - 探索格只在采样点所在单元打点，25px 网格不会支配实时渲染画面。
+   */
+  private captureObservedWalls(state: ObserverState, tiles: ReadonlySet<number>): void {
+    const observer = state.observer;
+    const grid = state.grid;
+    const memory = state.memory;
+    const size = this.terrain.tileSize;
+    const width = this.terrain.width;
+    const height = this.terrain.height;
+    const maxDistance = Math.max(observer.nearSenseRadius, observer.maxObservationRange);
+    const offset = 2;
+    const fractions = [0.25, 0.5, 0.75] as const;
+
+    const blockingNeighbour = (col: number, row: number): boolean => {
+      if (col < 0 || row < 0 || col >= width || row >= height) return false;
+      return this.map.blocksLightAt((col + 0.5) * size, (row + 0.5) * size);
+    };
+
+    for (const index of tiles) {
+      const col = index % width;
+      const row = Math.floor(index / width);
+      const minX = col * size;
+      const minY = row * size;
+      const faces: Array<readonly [number, number, number, number]> = [];
+      if (!blockingNeighbour(col, row - 1)) faces.push([minX + size / 2, minY, 0, -1]);
+      if (!blockingNeighbour(col, row + 1)) faces.push([minX + size / 2, minY + size, 0, 1]);
+      if (!blockingNeighbour(col - 1, row)) faces.push([minX, minY + size / 2, -1, 0]);
+      if (!blockingNeighbour(col + 1, row)) faces.push([minX + size, minY + size / 2, 1, 0]);
+      if (faces.length === 0) continue;
+
+      let captured = false;
+      for (const [faceX, faceY, outX, outY] of faces) {
+        // 沿墙面切线方向取点；法线方向向外偏移 2px，避开实心多边形边缘。
+        const alongX = outY === 0 ? 1 : 0;
+        const alongY = outX === 0 ? 1 : 0;
+        for (const fraction of fractions) {
+          const sampleX = faceX + alongX * (fraction - 0.5) * size + outX * offset;
+          const sampleY = faceY + alongY * (fraction - 0.5) * size + outY * offset;
+          const distance = distanceBetween(observer.x, observer.y, sampleX, sampleY);
+          if (distance > maxDistance) continue;
+          if (!hasLineOfSight(this.map, observer.x, observer.y, sampleX, sampleY)) continue;
+          const near = distance <= observer.nearSenseRadius;
+          if (!near && !canIdentifyPoint(this.map, observer, sampleX, sampleY, this.lights, this.rules)) {
+            continue;
+          }
+          captured = true;
+          grid.markCell(Math.floor(sampleX / grid.cellSize), Math.floor(sampleY / grid.cellSize));
+        }
+      }
+      if (captured) memory.capture(col, row);
     }
   }
 }

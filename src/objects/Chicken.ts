@@ -19,6 +19,8 @@ const TAIL_LIGHT = "#A97135";
 const TAIL_MID = "#8A5A2B";
 const TAIL_DARK = "#6A4220";
 const EYE = "#241C14";
+/** 剪影轮廓的占位色：实际颜色由 GameScene 的 source-in 冷灰覆盖。 */
+const SILHOUETTE_COLOR = "#ffffff";
 
 /**
  * 俯瞰视角的低多边形小鸡。
@@ -313,6 +315,58 @@ export class Chicken extends Entities {
     ctx.fill();
 
     ctx.restore();
+    ctx.restore();
+  }
+
+  /**
+   * 近身剪影专用轮廓：保留身体主体、头部、鸡冠与尾部朝向，
+   * 但不画眼睛、喙、翅膀分区等身份细节。
+   *
+   * 与 draw() 共用同一套姿态/呼吸/啄食变换，位置与运动轨迹完全一致；
+   * 只是纯渲染替代，不改变物理与碰撞。颜色由调用方 source-in 统一压成冷灰。
+   */
+  drawSilhouette(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
+    if (!this.alive) return;
+    const x = this.x + this.size / 2 - offsetX;
+    const y = this.y + this.size / 2 - offsetY;
+    if (x < -60 || y < -60 || x > ctx.canvas.width + 60 || y > ctx.canvas.height + 60) return;
+
+    const s = this.size;
+    const speedRatio = Math.min(1, this.velocity.length() / Math.max(1, this.maxSpeed));
+    const bob = Math.sin(this.age * 14) * 0.6 * speedRatio;
+    const squash = Math.sin(this.age * 28) * 0.02 * speedRatio;
+    const cycle = (this.age + this.peckPhase) % Chicken.PECK_SECONDS;
+    const peck = !this.walking && this.velocity.length() < 5 && cycle < 0.32
+      ? Math.sin((cycle / 0.32) * Math.PI)
+      : 0;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(this.currentRotation - Math.PI);
+    ctx.translate(0, bob);
+    ctx.scale(1 + squash, 1 - squash);
+
+    // 尾部合成一个楔形：保留朝向与体量，去掉三片羽毛的锯齿细节。
+    this.shape(ctx, [[-0.30, -0.12], [-0.80, 0.02], [-0.30, 0.26]], SILHOUETTE_COLOR);
+    // 身体一块实心轮廓，和头部并集后就是可读的主体形状。
+    this.shape(ctx, [
+      [0.46, -0.02], [0.34, -0.26], [0.04, -0.34], [-0.30, -0.26],
+      [-0.44, -0.06], [-0.34, 0.18], [0.02, 0.32], [0.34, 0.22],
+    ], SILHOUETTE_COLOR);
+
+    ctx.save();
+    ctx.translate(peck * s * 0.14, peck * s * 0.05);
+    this.shape(ctx, [
+      [0.24, -0.16], [0.38, -0.24], [0.54, -0.14], [0.60, 0.00],
+      [0.46, 0.17], [0.30, 0.13], [0.22, 0.00],
+    ], SILHOUETTE_COLOR);
+    // 鸡冠合并成一条锯齿顶边，保留“有头冠”的体量但不逐根复刻。
+    this.shape(ctx, [
+      [0.27, -0.14], [0.33, -0.32], [0.39, -0.16],
+      [0.45, -0.33], [0.52, -0.14], [0.57, -0.25], [0.61, -0.05],
+    ], SILHOUETTE_COLOR);
+    ctx.restore();
+
     ctx.restore();
   }
 

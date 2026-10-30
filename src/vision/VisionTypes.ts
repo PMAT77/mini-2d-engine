@@ -10,6 +10,12 @@ export type TerrainRecall = 'unknown' | 'remembered' | 'observed';
 /** legacy 保留旧圆形迷雾；three-layer 走感知合成。 */
 export type VisionMode = 'legacy' | 'three-layer';
 
+/**
+ * 三层视野的临时图层隔离视图，只用于诊断合成链，不改变正常渲染。
+ * world 看原始地图与光照；其余各层只画对应素材。
+ */
+export type VisionDebugLayer = 'world' | 'outline' | 'memory' | 'near' | 'light' | 'grid';
+
 export type PerceptionTargetCategory = 'player' | 'enemy' | 'loot' | 'light' | 'effect';
 
 export type PerceptionLightKind = 'playerGlow' | 'flashlight' | 'torch' | 'facility' | 'teammate';
@@ -60,8 +66,13 @@ export interface PerceptionTarget {
 
 export interface PerceptionView {
   level: EntityVisibility;
-  /** 1 表示完全显示；光照丢失时用于 identified 的淡出。 */
+  /** 完整形象的权重（detail）：1 表示完全显示；光照丢失时按 dt 平滑变化。 */
   alpha: number;
+  /**
+   * 近身剪影权重：与 alpha 互补地交叉淡化。
+   * 硬遮挡/离开近身与光照时按 dt 衰减，避免“整张图突然消失又重新出现”。
+   */
+  silhouette: number;
 }
 
 /** TileMap 提供给纯逻辑 LOS 的最小只读接口，避免逻辑层 import 整个地图/DOM。 */

@@ -30,7 +30,8 @@ import { PerceptionSystem } from "../vision/PerceptionSystem";
 import { PerceptionRenderer } from "../vision/PerceptionRenderer";
 import { createVisionRules } from "../vision/VisionRules";
 import type {
-  EntityVisibility, PerceptionLight, PerceptionTarget, PerceptionView, VisionMode, VisionObserver,
+  EntityVisibility, PerceptionLight, PerceptionTarget, PerceptionView, VisionDebugLayer,
+  VisionMode, VisionObserver,
 } from "../vision/VisionTypes";
 import { ModifierManager } from "../core/ModifierManager";
 import {
@@ -92,6 +93,23 @@ function resolveVisionMode(): VisionMode {
     ? "three-layer" : "legacy";
 }
 
+/** 开发期图层隔离：`?vision=three-layer&visionDebug=outline`，缺省或非法值不启用。 */
+function resolveVisionDebugLayer(): VisionDebugLayer | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location?.search ?? "").get("visionDebug");
+  switch (value) {
+    case "world":
+    case "outline":
+    case "memory":
+    case "near":
+    case "light":
+    case "grid":
+      return value;
+    default:
+      return null;
+  }
+}
+
 /**
  * 游戏主场景类，负责管理游戏的核心逻辑、渲染和交互
  */
@@ -115,6 +133,8 @@ export class GameScene extends Scene {  private player!: Player;
   private graphics: GraphicsConfig = DEFAULT_GRAPHICS_CONFIG;
   /** 视觉玩法模式：legacy 保持旧圆形迷雾；three-layer 启用感知遮蔽。 */
   readonly visionMode: VisionMode;
+  /** 开发期图层隔离（`?visionDebug=`）；null 表示正常合成。 */
+  private readonly visionDebugLayer: VisionDebugLayer | null;
   private readonly visionRules = createVisionRules();
   private perception: PerceptionSystem | null = null;
   private perceptionRenderer: PerceptionRenderer | null = null;
@@ -231,6 +251,7 @@ export class GameScene extends Scene {  private player!: Player;
   constructor(mapOptions?: TileMapOptions) {
     super();
     this.visionMode = resolveVisionMode();
+    this.visionDebugLayer = resolveVisionDebugLayer();
 
     // 100×100 个瓦片，每格 50 像素
     this.map = new TileMap(100, 100, mapOptions);
@@ -510,6 +531,7 @@ export class GameScene extends Scene {  private player!: Player;
           this.map, this.map, this.visionRules, this.graphics.visibility);
       }
       this.perceptionRenderer.resize(this.camera.width, this.camera.height, this.graphics.visibility);
+      this.perceptionRenderer.setDebugLayer(this.visionDebugLayer);
     }
   }
 
@@ -1257,9 +1279,9 @@ export class GameScene extends Scene {  private player!: Player;
 
   private getPerceptionView(target: object): PerceptionView {
     const perception = this.perception;
-    if (!perception) return { level: "identified", alpha: 1 };
+    if (!perception) return { level: "identified", alpha: 1, silhouette: 0 };
     const id = this.perceptionIds.get(target);
-    if (!id) return { level: "hidden", alpha: 0 };
+    if (!id) return { level: "hidden", alpha: 0, silhouette: 0 };
     return perception.getView("player", id);
   }
 
@@ -1273,18 +1295,48 @@ export class GameScene extends Scene {  private player!: Player;
     return Math.max(0, Math.min(1, this.getPerceptionView(target).alpha));
   }
 
+  /** 近身剪影权重；与完整形象权重互补，用于交叉淡化。 */
+  private getEntitySilhouette(target: object): number {
+    if (this.visionMode !== "three-layer") return 0;
+    return Math.max(0, Math.min(1, this.getPerceptionView(target).silhouette));
+  }
+
   /**
-   * 剪影在遮蔽层之前绘制：遮蔽层会把墙后部分盖住，只有近身/照明的孔洞能露出它。
-   * 这比在遮蔽之后整块画轮廓更符合“部分身体露出时不能看见完整剪影”。
+   * 实体绘制用的不透明度：只要还存在剪影权重，彩色形象就保持不透明画在灰色之下，
+   * 由剪影权重从 1 到 0 揭开彩色；否则按 detail 渐隐。这样灰色与彩色的可见比例
+   * 严格互补（s + (1-s)），不会出现“彩色先淡掉、灰色再冒出来”的中空阶段。
+   */
+  private getEntityDrawAlpha(target: object): number {
+    if (this.visionMode !== "three-layer") return 1;
+    const view = this.getPerceptionView(target);
+    if (view.silhouette > 0.002) return 1;
+    return Math.max(0, Math.min(1, view.alpha));
+  }
+
+  /** 实体在当前帧是否需要绘制：完整形象/剪影任一侧有非零权重都要画，保证过渡连续。 */
+  private isEntityDrawn(target: object): boolean {
+    if (this.visionMode !== "three-layer") return true;
+    const view = this.getPerceptionView(target);
+    return view.alpha > 0.002 || view.silhouette > 0.002;
+  }
+
+  /**
+   * 近身剪影：灰色权重 = silhouette，彩色在它下方保持不透明，二者可见比例互补。
    *
-   * 轮廓仍来自对象自身 draw，再 source-in 压成低饱和冷灰；画布按最大目标尺寸复用，
-   * 不再每帧为每只鸡/每块战利品创建新 canvas。
+   * 完整形象权重升高时剪影自然让位，不会再出现“彩色先消失、灰色再跳出”的突变。
+   * 剪影画在光照之后、遮蔽层之前：环境光 multiply 会把普通绘制压暗，而近身剪影
+   * 恰恰主要出现在暗处，必须保持可读性。
+   *
+   * 整层按地面轮廓裁剪：鸡只画合并后的主体轮廓，部分身体被墙挡住时不会把完整
+   * 剪影画到墙顶。轮廓来自对象自身的姿态/动画，物理与碰撞完全不受影响。
    */
   private drawPerceptionSilhouettes(ctx: CanvasRenderingContext2D,
     cameraX: number, cameraY: number): void {
     if (!this.perception) return;
     const paint = (bounds: { x: number; y: number; width: number; height: number },
+      weight: number,
       drawSource: (sctx: CanvasRenderingContext2D, pad: number) => void): void => {
+      if (weight <= 0.002) return;
       const pad = 8;
       const width = Math.max(1, Math.ceil(bounds.width + pad * 2));
       const height = Math.max(1, Math.ceil(bounds.height + pad * 2));
@@ -1300,42 +1352,56 @@ export class GameScene extends Scene {  private player!: Player;
       sctx.globalAlpha = 1;
       sctx.clearRect(0, 0, canvas.width, canvas.height);
       drawSource(sctx, pad);
+      // 低饱和冷灰蓝：可读，但不像高亮描边；source-in 同时抹掉内部细节。
       sctx.globalCompositeOperation = "source-in";
-      sctx.fillStyle = "rgba(138, 154, 172, 0.92)";
+      sctx.fillStyle = "rgba(126, 140, 160, 0.92)";
       sctx.fillRect(0, 0, width, height);
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = weight;
       ctx.drawImage(canvas, 0, 0, width, height,
         bounds.x - pad - cameraX, bounds.y - pad - cameraY, width, height);
       ctx.restore();
     };
+    const silhouetteWeight = (target: object): number => this.getEntitySilhouette(target);
+
+    // 地面轮廓裁剪：落在墙体/矿石顶面的剪影像素会被裁掉，避免“部分露出”变成整只画在墙上。
+    // 轮廓路径是世界坐标，先平移再建立裁剪区，随后恢复屏幕坐标绘制。
+    const ground = this.map.getGroundContour(cameraX, cameraY, ctx.canvas.width, ctx.canvas.height);
+    ctx.save();
+    ctx.translate(-cameraX, -cameraY);
+    ctx.clip(ground, "evenodd");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     for (const chicken of this.chickens) {
-      if (!chicken.isAlive() || this.getEntityVisibility(chicken) !== "silhouette") continue;
+      if (!chicken.isAlive()) continue;
       const size = chicken.getSize();
       paint({ x: chicken.x, y: chicken.y, width: size, height: size },
-        (sctx, pad) => chicken.draw(sctx, chicken.x - pad, chicken.y - pad));
+        silhouetteWeight(chicken),
+        (sctx, pad) => chicken.drawSilhouette(sctx, chicken.x - pad, chicken.y - pad));
     }
     for (const gold of this.goldPickups) {
-      if (this.getEntityVisibility(gold) !== "silhouette") continue;
       paint({ x: gold.x, y: gold.y, width: GoldPickup.SIZE, height: GoldPickup.SIZE },
+        silhouetteWeight(gold),
         (sctx, pad) => gold.draw(sctx, gold.x - pad, gold.y - pad));
     }
     for (const meat of this.meatPickups) {
-      if (this.getEntityVisibility(meat) !== "silhouette") continue;
       paint({ x: meat.x, y: meat.y, width: MeatPickup.SIZE, height: MeatPickup.SIZE },
+        silhouetteWeight(meat),
         (sctx, pad) => meat.draw(sctx, meat.x - pad, meat.y - pad));
     }
     for (const pickup of this.pickupItems) {
-      if (this.getEntityVisibility(pickup) !== "silhouette") continue;
       const size = pickup.getSize();
-      paint({ x: pickup.x, y: pickup.y, width: size, height: size }, (sctx, pad) => {
-        sctx.save();
-        sctx.translate(-(pickup.x - pad), -(pickup.y - pad));
-        pickup.draw(sctx);
-        sctx.restore();
-      });
+      paint({ x: pickup.x, y: pickup.y, width: size, height: size },
+        silhouetteWeight(pickup), (sctx, pad) => {
+          sctx.save();
+          sctx.translate(-(pickup.x - pad), -(pickup.y - pad));
+          pickup.draw(sctx);
+          sctx.restore();
+        });
     }
+
+    ctx.restore();
   }
 
   private getSilhouetteScratch(width: number, height: number): HTMLCanvasElement {
@@ -1404,9 +1470,11 @@ export class GameScene extends Scene {  private player!: Player;
     const cullRadius = threeLayer && perception
       ? perception.getCullingRadius("player")
       : vision.range + 64;
-    const identified = (target: object): boolean => {
+    // 只要完整形象或剪影任一侧还有权重，就仍然参与单位层绘制：
+    // 交叉淡化中间帧的彩色形象必须按 detail 权重继续画，不能按三态硬切。
+    const drawn = (target: object): boolean => {
       if (!threeLayer) return true;
-      return this.getEntityVisibility(target) === "identified";
+      return this.isEntityDrawn(target);
     };
     const fogCx = vision.x - cameraOffset.x;
     const fogCy = vision.y - cameraOffset.y;
@@ -1434,7 +1502,7 @@ export class GameScene extends Scene {  private player!: Player;
       if (y + height > bottom) bottom = y + height;
     };
     for (const pickup of this.goldPickups) {
-      if (!visible(pickup.x, pickup.y, 48) || !identified(pickup)) continue;
+      if (!visible(pickup.x, pickup.y, 48) || !drawn(pickup)) continue;
       const x = pickup.x - cameraOffset.x, y = pickup.y - cameraOffset.y;
       include(x - 40, y - 40, 80, 80);
       if (x - 40 < fxLeft) fxLeft = x - 40;
@@ -1443,15 +1511,15 @@ export class GameScene extends Scene {  private player!: Player;
       if (y + 40 > fxBottom) fxBottom = y + 40;
     }
     for (const meat of this.meatPickups) {
-      if (!visible(meat.x, meat.y, 32) || !identified(meat)) continue;
+      if (!visible(meat.x, meat.y, 32) || !drawn(meat)) continue;
       include(meat.x - cameraOffset.x - 32, meat.y - cameraOffset.y - 32, 64, 64);
     }
     for (const pickup of this.pickupItems) {
-      if (!visible(pickup.x, pickup.y, 88) || !identified(pickup)) continue;
+      if (!visible(pickup.x, pickup.y, 88) || !drawn(pickup)) continue;
       include(pickup.x - cameraOffset.x - 80, pickup.y - cameraOffset.y - 80, 160, 160);
     }
     for (const chicken of this.chickens) {
-      if (!visible(chicken.x, chicken.y, 72) || !identified(chicken)) continue;
+      if (!visible(chicken.x, chicken.y, 72) || !drawn(chicken)) continue;
       include(chicken.x - cameraOffset.x - 40, chicken.y - cameraOffset.y - 40, 120, 120);
     }
     for (const bullet of bullets) {
@@ -1498,19 +1566,19 @@ export class GameScene extends Scene {  private player!: Player;
       units.setTransform(1, 0, 0, 1, 0, 0);
       // 和地图共用像素边界，地面投影不能覆盖墙壁、矿石的顶面。
       for (const pickup of this.goldPickups) {
-        if (visible(pickup.x, pickup.y, 48) && identified(pickup)) {
+        if (visible(pickup.x, pickup.y, 48) && drawn(pickup)) {
           units.globalAlpha = this.getEntityAlpha(pickup);
           pickup.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
         }
       }
       for (const chicken of this.chickens) {
-        if (visible(chicken.x, chicken.y, 72) && identified(chicken)) {
+        if (visible(chicken.x, chicken.y, 72) && drawn(chicken)) {
           units.globalAlpha = this.getEntityAlpha(chicken);
           chicken.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
         }
       }
       for (const pickup of this.meatPickups) {
-        if (visible(pickup.x, pickup.y, 32) && identified(pickup)) {
+        if (visible(pickup.x, pickup.y, 32) && drawn(pickup)) {
           units.globalAlpha = this.getEntityAlpha(pickup);
           pickup.drawShadow(units, cameraOffset.x, cameraOffset.y);
         }
@@ -1518,22 +1586,36 @@ export class GameScene extends Scene {  private player!: Player;
       units.globalAlpha = 1;
       units.restore();
     }
+    // 近身剪影用不透明彩色垫底、灰色叠加来保证互补比例；此时彩色本体也必须和
+    // 灰色一样受地面轮廓裁剪，否则被墙挡住的部分会以暖色压在墙顶上。
+    const clipSilhouetteBodies = threeLayer && (
+      this.chickens.some(c => this.getEntitySilhouette(c) > 0.002) ||
+      this.goldPickups.some(p => this.getEntitySilhouette(p) > 0.002) ||
+      this.meatPickups.some(p => this.getEntitySilhouette(p) > 0.002) ||
+      this.pickupItems.some(p => this.getEntitySilhouette(p) > 0.002)
+    );
+    if (clipSilhouetteBodies) {
+      units.save();
+      units.translate(-cameraOffset.x, -cameraOffset.y);
+      units.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), "evenodd");
+      units.setTransform(1, 0, 0, 1, 0, 0);
+    }
     for (const pickup of this.goldPickups) {
-      if (visible(pickup.x, pickup.y, 48) && identified(pickup)) {
-        units.globalAlpha = this.getEntityAlpha(pickup);
+      if (visible(pickup.x, pickup.y, 48) && drawn(pickup)) {
+        units.globalAlpha = this.getEntityDrawAlpha(pickup);
         pickup.draw(units, cameraOffset.x, cameraOffset.y);
       }
     }
     for (const pickup of this.meatPickups) {
-      if (visible(pickup.x, pickup.y, 32) && identified(pickup)) {
-        units.globalAlpha = this.getEntityAlpha(pickup);
+      if (visible(pickup.x, pickup.y, 32) && drawn(pickup)) {
+        units.globalAlpha = this.getEntityDrawAlpha(pickup);
         pickup.draw(units, cameraOffset.x, cameraOffset.y);
       }
     }
     // 绘制道具（在子弹上方，金块下方）
     for (const pickup of this.pickupItems) {
-      if (!visible(pickup.x, pickup.y, 88) || !identified(pickup)) continue;
-      units.globalAlpha = this.getEntityAlpha(pickup);
+      if (!visible(pickup.x, pickup.y, 88) || !drawn(pickup)) continue;
+      units.globalAlpha = this.getEntityDrawAlpha(pickup);
       units.save();
       units.translate(-cameraOffset.x, -cameraOffset.y);
       pickup.draw(units);
@@ -1541,12 +1623,13 @@ export class GameScene extends Scene {  private player!: Player;
     }
     // 小鸡在拾取物之上、子弹之下；随后统一做迷雾裁剪，因此迷雾外不可见。
     for (const chicken of this.chickens) {
-      if (visible(chicken.x, chicken.y, 72) && identified(chicken)) {
-        units.globalAlpha = this.getEntityAlpha(chicken);
+      if (visible(chicken.x, chicken.y, 72) && drawn(chicken)) {
+        units.globalAlpha = this.getEntityDrawAlpha(chicken);
         chicken.draw(units, cameraOffset.x, cameraOffset.y);
       }
     }
     units.globalAlpha = 1;
+    if (clipSilhouetteBodies) units.restore();
     // 所有世界对象共用包含震动的相机偏移
     for (const bullet of bullets) {
       const position = bullet.getPosition();
@@ -1587,7 +1670,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 后处理光效单独一层，和单位共用迷雾遮罩后以 lighter 叠加。
     // 没有发光物体（金块）时整层都省掉：清屏、迷雾裁剪、叠加都是整张画布的开销。
     const glowGold = threeLayer
-      ? this.goldPickups.filter(pickup => this.getEntityVisibility(pickup) === "identified")
+      ? this.goldPickups.filter(pickup => this.getEntityAlpha(pickup) > 0.002)
       : this.goldPickups;
     if (glowGold.length) {
       const effects = this.effectContext;

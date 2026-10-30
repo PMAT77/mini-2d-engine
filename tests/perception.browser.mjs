@@ -136,7 +136,8 @@ try {
       const bird = new Chicken(t.px + 62, t.py - 11, () => 0.5);
       scene.chickens = [bird];
       scene.flashlight.setActive(false);
-      t.update(0.2);
+      // 0.3s 让近身剪影权重到满，采样“剪影本体”的冷灰色，而不是过渡中间帧。
+      t.update(0.3);
       t.draw();
       const silhouette = t.pixel(t.px + 62 + 11, t.py);
       const view = t.view(bird);
@@ -156,13 +157,21 @@ try {
       scene.map.tileHp[15][21] = 100;
       t.update(0.2);
       t.draw();
-      return {
-        visibility: t.visibility(scene.chickens[0]),
-        pixel: t.pixel(t.px + 62 + 11, t.py),
-      };
+      const withChicken = t.pixel(t.px + 62 + 11, t.py);
+      const view = t.view(scene.chickens[0]);
+      scene.chickens = [];
+      t.draw();
+      const withoutChicken = t.pixel(t.px + 62 + 11, t.py);
+      return { view, withChicken, withoutChicken };
     });
-    assert.equal(blocked.visibility, 'hidden');
-    assert.ok(blocked.pixel[2] < 30 && blocked.pixel[2] - blocked.pixel[0] < 10,
+    assert.equal(blocked.view.level, 'hidden');
+    assert.equal(blocked.view.silhouette, 0);
+    // 采样点落在墙顶，因此用“移除鸡前后的像素差”判断是否泄漏剪影，
+    // 而不是依赖旧实现的绝对亮度阈值（墙体亮度已随统一轮廓改变）。
+    const leaked = Math.abs(blocked.withChicken[0] - blocked.withoutChicken[0])
+      + Math.abs(blocked.withChicken[1] - blocked.withoutChicken[1])
+      + Math.abs(blocked.withChicken[2] - blocked.withoutChicken[2]);
+    assert.ok(leaked <= 3,
       `a chicken behind a wall must not leak a silhouette, got ${JSON.stringify(blocked)}`);
 
     // 4. 手电锥形软边：中心亮、锥内边缘更暗、锥外接近黑暗。

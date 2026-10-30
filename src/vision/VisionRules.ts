@@ -9,6 +9,8 @@ export interface VisionRules {
   nearSenseRadius: number;
   maxObservationRange: number;
   identifyLightThreshold: number;
+  /** 退出辨识时的光照阈值系数（滞回），避免柔边附近反复闪烁。 */
+  identifyLightHysteresis: number;
   identifyDwellSeconds: number;
   identifyFadeSeconds: number;
   nearRevealAlpha: number;
@@ -28,6 +30,7 @@ export const DEFAULT_VISION_RULES: Readonly<VisionRules> = Object.freeze({
   nearSenseRadius: 100,
   maxObservationRange: 450,
   identifyLightThreshold: 0.3,
+  identifyLightHysteresis: 0.8,
   identifyDwellSeconds: 0.12,
   identifyFadeSeconds: 0.25,
   nearRevealAlpha: 0.55,
@@ -50,6 +53,9 @@ export function createVisionRules(overrides: Partial<VisionRules> = {}): VisionR
   if (!positive(rules.maxObservationRange)) throw new Error('最大观察范围必须是正有限数值');
   if (!Number.isFinite(rules.identifyLightThreshold) || rules.identifyLightThreshold < 0 || rules.identifyLightThreshold > 1) {
     throw new Error('辨识光照阈值必须在 0–1 内');
+  }
+  if (!Number.isFinite(rules.identifyLightHysteresis) || rules.identifyLightHysteresis <= 0 || rules.identifyLightHysteresis > 1) {
+    throw new Error('辨识光照滞回系数必须在 0–1 内');
   }
   if (!nonNegative(rules.identifyDwellSeconds)) throw new Error('辨识确认时间必须是非负有限数值');
   if (!nonNegative(rules.identifyFadeSeconds)) throw new Error('辨识淡出时间必须是非负有限数值');

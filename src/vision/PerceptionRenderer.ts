@@ -5,8 +5,8 @@ import { TILE_TYPES, TileTypeId } from "../map/TileType";
 import type { TileMap } from "../map/TileMap";
 import type { ExplorationGrid } from "./ExplorationGrid";
 import { MEMORY_TILE_ORDER, type TerrainMemory } from "./TerrainMemory";
-import { TerrainOutlineCache } from "./TerrainOutlineCache";
-import type { PerceptionLight, TerrainSource, VisionObserver } from "./VisionTypes";
+import { TERRAIN_OUTLINE_RGB, TerrainOutlineCache } from "./TerrainOutlineCache";
+import type { PerceptionLight, TerrainSource, VisionDebugLayer, VisionObserver } from "./VisionTypes";
 import type { VisionRules } from "./VisionRules";
 
 const UNKNOWN_COLOR = "#05070a";
@@ -54,12 +54,11 @@ export class PerceptionRenderer {
   private groundMaskCtx: CanvasRenderingContext2D | null = null;
   private shadow: HTMLCanvasElement | null = null;
   private shadowCtx: CanvasRenderingContext2D | null = null;
-  private exploredTexture: HTMLCanvasElement | null = null;
-  private exploredRevision = -1;
-  private memorySolids: SolidTerrain | null = null;
-  private memorySolidRevision = -1;
-  private memoryPath: Path2D | null = null;
-  private memoryPathKey = "";
+  private terrainSolids: SolidTerrain | null = null;
+  private terrainSolidRevision = -1;
+  private terrainPath: Path2D | null = null;
+  private terrainPathKey = "";
+  private debugLayer: VisionDebugLayer | null = null;
 
   private scale: number;
   private viewWidth = 0;
@@ -71,13 +70,12 @@ export class PerceptionRenderer {
     this.rules = rules;
     this.config = { ...config };
     this.scale = Math.max(0.05, config.maskScale);
-    this.outline = new TerrainOutlineCache(terrain, this.scale, config.outlineContrast);
+    this.outline = new TerrainOutlineCache(terrain);
   }
 
   configure(config: VisibilityConfig): void {
     this.config = { ...config };
     const scale = Math.max(0.05, config.maskScale);
-    this.outline.configure(scale, config.outlineContrast);
     if (scale !== this.scale) {
       this.scale = scale;
       this.allocate(this.viewWidth, this.viewHeight);
@@ -112,38 +110,57 @@ export class PerceptionRenderer {
     if (!this.overlay || !this.overlayCtx || !this.memory || !this.memoryCtx
       || !this.scratch || !this.scratchCtx) return;
 
+    // 临时图层隔离：world 直接跳过遮蔽层，让原始地图与光照可见。
+    if (this.debugLayer === "world") return;
+
+    const layer = this.debugLayer;
     const overlay = this.overlayCtx;
     overlay.setTransform(1, 0, 0, 1, 0, 0);
     overlay.globalAlpha = 1;
     overlay.globalCompositeOperation = "source-over";
-    overlay.fillStyle = UNKNOWN_COLOR;
-    overlay.fillRect(0, 0, this.overlay.width, this.overlay.height);
+    // 单层诊断时保留透明背景，才能看清该层相对世界画面的真实贡献。
+    const wantsOutline = layer === null || layer === "outline" || layer === "grid";
+    const wantsMemory = layer === null || layer === "memory" || layer === "grid";
+    const wantsNear = layer === null || layer === "near" || layer === "grid";
+    const wantsLight = layer === null || layer === "light" || layer === "grid";
+    if (layer === null || layer === "near" || layer === "light" || layer === "grid") {
+      overlay.fillStyle = UNKNOWN_COLOR;
+      overlay.fillRect(0, 0, this.overlay.width, this.overlay.height);
+    }
 
-    // 1. 未探索区域的低对比地形轮廓（B 模式）。
-    // 先画到 scratch，再按 25px 探索覆盖层擦掉已探索部分，避免初始墙体在探索后残留成幽灵。
-    this.drawOutline(cameraX, cameraY, viewWidth, viewHeight, explored);
+    // 1. 地形轮廓：未知快照与已观察记忆合成同一条连续几何，画面不出现探索网格边界。
+    if (wantsOutline) this.drawOutline(cameraX, cameraY, viewWidth, viewHeight, memory);
 
-    // 2. 已探索但当前未被观察的地形记忆。
-    this.drawMemory(cameraX, cameraY, viewWidth, viewHeight, explored, memory);
-    overlay.globalAlpha = this.config.memoryBrightness;
-    overlay.drawImage(this.memory, 0, 0);
-    overlay.globalAlpha = 1;
+    // 2. 已探索但当前未被观察的地面色调（静态记忆，只做低亮度提示）。
+    if (wantsMemory) {
+      this.drawMemory(cameraX, cameraY, viewWidth, viewHeight, memory);
+      overlay.globalAlpha = this.config.memoryBrightness;
+      overlay.drawImage(this.memory, 0, 0);
+      overlay.globalAlpha = 1;
+    }
 
     // 地面轮廓在一帧内只栅格化一次；每个光源的阴影都复用这张遮罩，
     // 避免多光源时反复对大 Path2D 做 clip（软件栅格下这是主要开销）。
-    this.prepareGroundMask(cameraX, cameraY, viewWidth, viewHeight);
+    if (wantsNear || wantsLight) this.prepareGroundMask(cameraX, cameraY, viewWidth, viewHeight);
 
     // 3. 近身感知孔洞：硬墙遮挡，按 nearRevealAlpha 压暗而非完全去掉。
-    this.punchNear(observer, cameraX, cameraY);
+    if (wantsNear) this.punchNear(observer, cameraX, cameraY);
 
     // 4. 照明孔洞：光到达、且观察者能看见的区域完全露出。
-    for (const light of lights) this.punchLight(observer, light, cameraX, cameraY);
+    if (wantsLight) for (const light of lights) this.punchLight(observer, light, cameraX, cameraY);
+
+    if (layer === "grid") this.drawExplorationGrid(explored, cameraX, cameraY);
 
     // 5. 覆盖到世界画布。
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(this.overlay, 0, 0, viewWidth, viewHeight);
     ctx.restore();
+  }
+
+  /** 仅供诊断：切换 25px 探索网格等图层隔离视图。传 null 恢复正常合成。 */
+  setDebugLayer(layer: VisionDebugLayer | null): void {
+    this.debugLayer = layer;
   }
 
   private allocate(viewWidth: number, viewHeight: number): void {
@@ -162,49 +179,36 @@ export class PerceptionRenderer {
     this.groundMaskCtx = this.groundMask.getContext("2d");
     this.shadow = createCanvas(width, height);
     this.shadowCtx = this.shadow.getContext("2d");
-    this.exploredTexture = null;
-    this.exploredRevision = -1;
   }
 
   /**
-   * 未知轮廓先独立烘焙到 scratch，再擦掉已探索覆盖。
-   * 这样已探索区域不会残留“建图时存在、现在已被破坏”的初始墙体。
+   * 地形轮廓只画一条统一路径：已观察过的瓦片以 TerrainMemory 为准，其余以建图快照为准。
+   *
+   * 探索历史仍然保存在离散网格和瓦片记忆里，但画面上的墙顶几何与明暗完全连续，
+   * 不会出现与 25px 探索单元对齐的方块。记忆中的阻挡瓦片也经由这条路径绘制，
+   * 因此远处被破坏的墙在重新观察前保持记忆里的旧轮廓，不会提前泄露变化。
    */
   private drawOutline(cameraX: number, cameraY: number, viewWidth: number,
-    viewHeight: number, explored: ExplorationGrid): void {
-    const ctx = this.scratchCtx;
-    if (!ctx || !this.scratch) return;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1;
-    ctx.clearRect(0, 0, this.scratch.width, this.scratch.height);
-    ctx.setTransform(this.scale, 0, 0, this.scale,
-      -cameraX * this.scale, -cameraY * this.scale);
-    this.outline.draw(ctx, cameraX, cameraY, viewWidth, viewHeight);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.eraseExplored(ctx, explored, cameraX, cameraY);
+    viewHeight: number, memory: TerrainMemory): void {
     const overlay = this.overlayCtx;
     if (!overlay) return;
-    overlay.setTransform(1, 0, 0, 1, 0, 0);
-    overlay.drawImage(this.scratch, 0, 0);
-  }
-
-  private eraseExplored(ctx: CanvasRenderingContext2D, explored: ExplorationGrid,
-    cameraX: number, cameraY: number): void {
-    const texture = this.getExploredTexture(explored);
-    if (!texture) return;
-    ctx.save();
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.imageSmoothingEnabled = false;
-    ctx.setTransform(this.scale, 0, 0, this.scale,
+    const alpha = Math.min(0.5, Math.max(0.02, this.config.outlineContrast * 4));
+    const path = this.getTerrainPath(cameraX, cameraY, viewWidth, viewHeight, memory);
+    if (!path) return;
+    overlay.save();
+    overlay.setTransform(this.scale, 0, 0, this.scale,
       -cameraX * this.scale, -cameraY * this.scale);
-    ctx.drawImage(texture, 0, 0, explored.cols * explored.cellSize,
-      explored.rows * explored.cellSize);
-    ctx.restore();
+    overlay.fillStyle = `rgba(${TERRAIN_OUTLINE_RGB}, ${alpha})`;
+    overlay.fill(path);
+    overlay.restore();
   }
 
+  /**
+   * 已捕获的非阻挡地面/水面只叠一层低亮度色调；边界由瓦片几何决定，
+   * 不再用 25px 探索纹理裁剪，避免记忆层出现硬方块。
+   */
   private drawMemory(cameraX: number, cameraY: number, viewWidth: number,
-    viewHeight: number, explored: ExplorationGrid, memory: TerrainMemory): void {
+    viewHeight: number, memory: TerrainMemory): void {
     const ctx = this.memoryCtx;
     if (!ctx || !this.memory) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -230,42 +234,21 @@ export class PerceptionRenderer {
         ctx.fillRect(col * tileSize, row * tileSize, tileSize, tileSize);
       }
     }
-
-    // 记忆中的墙体/矿石也复用 SolidTerrain 的圆角拓扑；未观察过的邻居视为空，
-    // 因此探索边界会自然收成圆角，而不是把整块初始墙体画出来。
-    const solids = this.getMemoryPath(memory, cameraX, cameraY, viewWidth, viewHeight);
-    if (solids) {
-      ctx.fillStyle = "#2b3644";
-      ctx.fill(solids);
-    }
-
-    // 用 25px 探索覆盖层裁剪：半块瓦片只显示被观察到的部分。
-    const texture = this.getExploredTexture(explored);
-    if (texture) {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalCompositeOperation = "destination-in";
-      ctx.imageSmoothingEnabled = false;
-      ctx.setTransform(this.scale, 0, 0, this.scale,
-        -cameraX * this.scale, -cameraY * this.scale);
-      ctx.drawImage(texture, 0, 0, explored.cols * explored.cellSize,
-        explored.rows * explored.cellSize);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalCompositeOperation = "source-over";
-    }
   }
 
-  private getMemoryPath(memory: TerrainMemory, cameraX: number, cameraY: number,
-    viewWidth: number, viewHeight: number): Path2D | null {
-    if (!this.memorySolids || this.memorySolidRevision !== memory.revision) {
-      this.memorySolids = new SolidTerrain((col, row) => {
-        const cell = memory.get(col, row);
-        if (!cell) return false;
-        const type = MEMORY_TILE_ORDER[cell.typeIndex];
-        return !!type && !!TILE_TYPES[type]?.blocksLight;
-      });
-      this.memorySolidRevision = memory.revision;
-      this.memoryPath = null;
-      this.memoryPathKey = "";
+  /**
+   * 统一地形路径：记忆优先、建图快照兜底。
+   *
+   * SolidTerrain 只在记忆 revision 变化时重建；路径再按瓦片对齐的视口缓存，
+   * 与旧的“未知轮廓”缓存策略保持一致，不随玩家每一帧移动重建。
+   */
+  private getTerrainPath(cameraX: number, cameraY: number, viewWidth: number,
+    viewHeight: number, memory: TerrainMemory): Path2D | null {
+    if (!this.terrainSolids || this.terrainSolidRevision !== memory.revision) {
+      this.terrainSolids = new SolidTerrain((col, row) => this.isBlockingTile(col, row, memory));
+      this.terrainSolidRevision = memory.revision;
+      this.terrainPath = null;
+      this.terrainPathKey = "";
     }
 
     const size = this.terrain.tileSize;
@@ -277,42 +260,64 @@ export class PerceptionRenderer {
     if (endCol <= startCol || endRow <= startRow) return null;
 
     const key = `${memory.revision}:${startCol},${startRow},${endCol},${endRow}`;
-    if (this.memoryPath && this.memoryPathKey === key) return this.memoryPath;
+    if (this.terrainPath && this.terrainPathKey === key) return this.terrainPath;
 
-    const polygons = this.memorySolids.query({
+    const polygons = this.terrainSolids.query({
       x: startCol * size,
       y: startRow * size,
       width: (endCol - startCol) * size,
       height: (endRow - startRow) * size,
     }, size, this.terrain.width, this.terrain.height).map(patch => patch.polygon);
     if (polygons.length === 0) {
-      this.memoryPath = null;
-      this.memoryPathKey = key;
+      this.terrainPath = null;
+      this.terrainPathKey = key;
       return null;
     }
     const path = new Path2D();
     solidPath(path, polygons, 0, 0);
-    this.memoryPath = path;
-    this.memoryPathKey = key;
+    this.terrainPath = path;
+    this.terrainPathKey = key;
     return path;
   }
 
-  private getExploredTexture(explored: ExplorationGrid): HTMLCanvasElement | null {
-    if (this.exploredTexture && this.exploredRevision === explored.revision) {
-      return this.exploredTexture;
+  /** 已观察过的瓦片以记忆为准（可反映破坏），否则退回建图快照。 */
+  private isBlockingTile(col: number, row: number, memory: TerrainMemory): boolean {
+    const cell = memory.get(col, row);
+    if (cell) {
+      const type = MEMORY_TILE_ORDER[cell.typeIndex];
+      return !!type && !!TILE_TYPES[type]?.blocksLight;
     }
-    const canvas = createCanvas(explored.cols, explored.rows);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.fillStyle = "#fff";
-    for (let row = 0; row < explored.rows; row++) {
-      for (let col = 0; col < explored.cols; col++) {
-        if (explored.isExploredCell(col, row)) ctx.fillRect(col, row, 1, 1);
-      }
+    return this.outline.blocksLight(col, row);
+  }
+
+  /** 诊断用：把 25px 探索单元边界画在覆盖层上，用于确认色块是否与网格对齐。 */
+  private drawExplorationGrid(explored: ExplorationGrid, cameraX: number, cameraY: number): void {
+    const ctx = this.overlayCtx;
+    if (!ctx) return;
+    const size = explored.cellSize;
+    const startCol = Math.max(0, Math.floor(cameraX / size));
+    const startRow = Math.max(0, Math.floor(cameraY / size));
+    const endCol = Math.min(explored.cols, Math.ceil((cameraX + this.viewWidth) / size));
+    const endRow = Math.min(explored.rows, Math.ceil((cameraY + this.viewHeight) / size));
+    if (endCol <= startCol || endRow <= startRow) return;
+    ctx.save();
+    ctx.setTransform(this.scale, 0, 0, this.scale,
+      -cameraX * this.scale, -cameraY * this.scale);
+    ctx.strokeStyle = "rgba(255, 96, 96, 0.35)";
+    ctx.lineWidth = 1 / this.scale;
+    ctx.beginPath();
+    for (let col = startCol; col <= endCol; col++) {
+      const x = col * size;
+      ctx.moveTo(x, startRow * size);
+      ctx.lineTo(x, endRow * size);
     }
-    this.exploredTexture = canvas;
-    this.exploredRevision = explored.revision;
-    return canvas;
+    for (let row = startRow; row <= endRow; row++) {
+      const y = row * size;
+      ctx.moveTo(startCol * size, y);
+      ctx.lineTo(endCol * size, y);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   private prepareGroundMask(cameraX: number, cameraY: number,
@@ -508,22 +513,6 @@ export class PerceptionRenderer {
     ctx.globalCompositeOperation = "destination-out";
     ctx.drawImage(this.shadow, 0, 0);
     ctx.restore();
-  }
-
-  private carveShadowQuads(ctx: CanvasRenderingContext2D, quads: readonly number[][]): void {
-    if (quads.length === 0) return;
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.fillStyle = "#000";
-    for (const quad of quads) {
-      ctx.beginPath();
-      ctx.moveTo(quad[0], quad[1]);
-      ctx.lineTo(quad[2], quad[3]);
-      ctx.lineTo(quad[4], quad[5]);
-      ctx.lineTo(quad[6], quad[7]);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.globalCompositeOperation = "source-over";
   }
 
   private punchScratch(alpha: number): void {

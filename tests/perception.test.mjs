@@ -132,7 +132,7 @@ test('探索记忆保留旧地形，重新观察才更新', () => {
   assert.equal(memory.get(1, 1).typeIndex, MEMORY_TILE_ORDER.indexOf('default'));
 });
 
-test('邻接可视格的墙体进入探索记忆，拆墙后重观察更新', () => {
+test('墙体按外露表面采样写入探索记忆，拆墙后重观察更新', () => {
   const terrain = makeTerrain();
   setTile(terrain, 2, 1, 'wall');
   const map = new FakeMap([{ x: 100, y: 50, w: 50, h: 50 }]);
@@ -144,8 +144,9 @@ test('邻接可视格的墙体进入探索记忆，拆墙后重观察更新', ()
   const memory = system.getTerrainMemory('p');
   assert.ok(grid);
   assert.ok(memory);
-  // 墙体中心本身被墙挡住，但邻接的可视地面格会让它进入记忆。
-  assert.equal(grid.isExploredCell(4, 3), true);
+  // 墙体中心在实心多边形内部；只有外露面外侧 2px 的采样点会被标记。
+  assert.equal(grid.isExplored(99, 75), true);
+  assert.equal(grid.isExploredCell(4, 3), false);
   assert.equal(memory.get(2, 1).typeIndex, MEMORY_TILE_ORDER.indexOf('wall'));
 
   setTile(terrain, 2, 1, 'default');

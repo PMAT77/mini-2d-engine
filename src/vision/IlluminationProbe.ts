@@ -104,7 +104,12 @@ export function bestLightForTarget(
   return bestLightAt(map, target.x, target.y, lights, rules);
 }
 
-/** 单点照明强度：默认取最强单光源，不把多个弱光累加成“看清”。 */
+/**
+ * 单点照明强度：默认取最强单光源，不把多个弱光累加成“看清”。
+ *
+ * 这里**不做阈值过滤**：阈值判断交给调用方，辨识滞回需要读到阈值以下的
+ * 真实光照强度（否则强度会从 0.3 直接跳成 0，滞回区间失效）。
+ */
 export function illuminationStrengthAt(
   map: SightMap,
   x: number,
@@ -112,13 +117,13 @@ export function illuminationStrengthAt(
   lights: readonly PerceptionLight[],
   rules: VisionRules
 ): number {
-  if (rules.strongestLightOnly) return bestLightAt(map, x, y, lights, rules)?.strength ?? 0;
   let total = 0;
   for (const light of lights) {
     if (!light.active || !light.revealsDetails) continue;
     const strength = lightStrengthAt(light, x, y);
     if (strength <= 0) continue;
-    if (hasLineOfSight(map, light.x, light.y, x, y)) total += strength;
+    if (!hasLineOfSight(map, light.x, light.y, x, y)) continue;
+    total = rules.strongestLightOnly ? Math.max(total, strength) : total + strength;
   }
   return total;
 }
