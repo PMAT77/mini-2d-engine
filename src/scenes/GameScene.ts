@@ -19,6 +19,7 @@ import { FloatingTextSystem } from "../ui/FloatingTextSystem";
 import { WeaponHud, getWeaponHudLayout } from "../ui/WeaponHud";
 import { drawFlashlightHud, getFlashlightHudRect } from "../ui/FlashlightHud";
 import { CrosshairOverlay } from "../ui/CrosshairOverlay";
+import { NoiseSystem } from "../core/NoiseSystem";
 
 // 导入光照系统相关类
 import { ConfigLoader } from "../core/ConfigLoader";
@@ -252,6 +253,8 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly rippleSystem = new RippleSystem();
   // 地图边界反馈：贴边往里推时在接触点打一圈波纹
   private readonly boundaryRippleSystem = new BoundaryRippleSystem();
+  // 世界噪声总线：脚步、涉水、翻滚、枪声与小鸡叫声都记录成可查询事件。
+  private readonly noiseSystem = new NoiseSystem();
   // 地图外的毛玻璃与“无法通行”水印
   private readonly boundaryOverlay = new MapBoundaryOverlay();
   // 拾取飘字：在角色身边蹦出 "金块+N" / "HP+5"，1 秒后淡出
@@ -335,6 +338,13 @@ export class GameScene extends Scene {  private player!: Player;
     // 移动时在干燥地面留下脚印；涉水时改写为朝行进反方向扩散的涟漪。
     this.player.setOnFootstepCallback(step => {
       if (!this.footprintSystem.spawn(step, this.map)) this.rippleSystem.spawn(step, this.map);
+      // 噪声与脚印同源：每一步都记录，响度按是否涉水/是否接近满速区分。
+      const speed = this.player.getVelocity().length();
+      const running = speed > this.player.getMaxSpeed() * 0.75;
+      this.noiseSystem.emit(step.inWater ? "waterStep" : "footstep", step.x, step.y, {
+        sourceId: "player",
+        loudness: step.inWater ? 0.55 : running ? 0.5 : 0.3,
+      });
     });
 
     const playerCenterX = this.player.x + this.player.getSize() / 2;
@@ -387,6 +397,8 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 设置射击回调，配置震动参数
     this.player.setOnShootCallback((shootDir?: Vector2) => {
+      this.noiseSystem.emit("gunshot", this.player.x + this.player.getSize() / 2,
+        this.player.y + this.player.getSize() / 2, { sourceId: "player" });
       // 根据射速调整震动幅度，射速越高震动越小
       const magnitude = 3 * (1 - Math.min(this.player.getFireRate() * 0.5, 0.7));
       // 将震动持续时间设置为与射速相关，实现震动频率与射速同步
@@ -496,6 +508,7 @@ export class GameScene extends Scene {  private player!: Player;
    */
   private playChickenCluck(chicken: Chicken, x: number, y: number): void {
     if (this.chickenCluckDelay > 0) return;
+    this.noiseSystem.emit("cluck", x, y, { sourceId: "chicken", loudness: 0.45 });
     const attenuation = this.chickenAttenuation(x, y);
     if (attenuation <= this.audio.chicken.minAttenuation) return;
     const url = CHICKEN_CLUCK_SOUNDS[Math.floor(Math.random() * CHICKEN_CLUCK_SOUNDS.length)];
@@ -1148,6 +1161,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.updateFootstepSound(movedSpeed);
     // 两条循环音效的目标音量都设好了，统一推进一步淡入淡出，各自都是 120 毫秒。
     this.sfx.update(delta);
+    this.noiseSystem.update(delta);
     this.chickenStepDelay = Math.max(0, this.chickenStepDelay - delta);
     this.chickenCluckDelay = Math.max(0, this.chickenCluckDelay - delta);
 
@@ -1225,10 +1239,16 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 空格翻滚只认下沿：按住不会连续起滚，连滚需要松开再按。
     const spaceDown = input.isKeyDown(" ");
-    if (spaceDown && !this.spaceHeld) this.player.requestRoll(input);
+    if (spaceDown && !this.spaceHeld && this.player.requestRoll(input)) {
+      this.noiseSystem.emit("roll", this.player.x + this.player.getSize() / 2,
+        this.player.y + this.player.getSize() / 2, { sourceId: "player" });
+    }
     this.spaceHeld = spaceDown;
     this.updatePerception(delta);
   }
+
+  /** 供敌人听觉、调试面板与测试读取的噪声总线（只读用途，写入仍由场景负责）。 */
+  getNoiseSystem(): NoiseSystem { return this.noiseSystem; }
 
   /**
    * 把所有观察者可见性输入同步给感知系统。
