@@ -5,7 +5,7 @@ import { circleCollider, Point } from "../physics/Collider";
 import type { BulletImpact, DeathFinished, HitReactionPose, HitResult, LifeState } from "../combat/CombatTypes";
 import { KnockbackMotion } from "../combat/KnockbackMotion";
 import type { KnockbackWorld } from "../combat/KnockbackMotion";
-import { CHICKEN_KNOCKBACK_PROFILE } from "../combat/KnockbackProfiles";
+import { CHICKEN_KNOCKBACK_PROFILE, computeHitIntensity } from "../combat/KnockbackProfiles";
 import { Entities } from "./Entities";
 
 /** 小鸡色板：硬边平涂，保持低多边形的块面感。 */
@@ -154,13 +154,8 @@ export class Chicken extends Entities {
       this.velocity.set(0, 0);
     }
     const appliedSpeed = this.ensureKnockback(world)?.addImpact(impact, lethal) ?? 0;
-    const impulse = Number.isFinite(impact.impulse) ? Math.max(0, impact.impulse) : 0;
-    const reference = Math.max(1, this.knockbackProfile.maxSpeed);
-    // 有位移时由击退速度决定姿态；免疫或零冲量时仍保留一次轻微受击姿态。
-    this.hitIntensity = Math.min(1, Math.max(
-      appliedSpeed / reference,
-      impulse / (reference * 1.55),
-    ));
+    // 受击姿态强度由通用 combat 层计算，未来敌人类复用同一公式。
+    this.hitIntensity = computeHitIntensity(impact, this.knockbackProfile, appliedSpeed);
     return lethal ? "killed" : "damaged";
   }
 

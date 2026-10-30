@@ -73,7 +73,7 @@
 
 除表中标明可为 0 的字段外，数值必须是大于 0 的有限数。旋转策略只能是 `cw`、`ccw` 或 `auto`；散布角必须小于 45 度；最大散布不得小于基础散布；弹匣容量必须是整数。
 
-`shooting` 中的 damage、fireRate、bulletSpeed、magazineSize、reloadDuration、knockbackImpulse 对应副武器格洛克手枪；`primaryShooting` 的六项同名字段对应主武器冲锋枪。子弹散布、射程、后坐力等参数由 `shooting` 共享。`knockbackImpulse` 在开火瞬间快照进子弹，命中后实际施加的位移只由这次真实命中、武器冲量与目标自身的质量／抗性／上限决定，与准星落在目标身上还是目标后方无关。
+`shooting` 中的 damage、fireRate、bulletSpeed、magazineSize、reloadDuration、knockbackImpulse 对应副武器格洛克手枪；`primaryShooting` 的六项同名字段对应主武器冲锋枪。子弹散布、射程、后坐力等参数由 `shooting` 共享。`knockbackImpulse` 在开火瞬间快照进子弹，命中后实际施加的位移只由这次真实命中、武器冲量与目标自身的质量／抗性／上限决定，与准星落在目标身上还是目标后方无关。免疫位移的目标（`immuneToDisplacement`）不会移动，但仍会播放一次由冲量决定的受击姿态。
 
 ## 画面配置
 

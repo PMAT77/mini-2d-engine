@@ -77,3 +77,18 @@ export function computeKnockbackSpeed(impact: BulletImpact, profile: KnockbackPr
   if (!finite(speed)) return 0;
   return clamp(speed, 0, profile.maxSpeed);
 }
+
+/**
+ * 一次命中应播放多强的受击姿态（0–1）。
+ *
+ * 有位移时以实际击退速度为准；免疫位移或零冲量的目标仍会得到由冲量本身决定的
+ * 轻微姿态，保证「免疫击退」不等于「没有受击反馈」。姿态只是绘制输入，
+ * 不参与位移与死亡结算。
+ */
+export function computeHitIntensity(impact: BulletImpact, profile: KnockbackProfile, appliedSpeed: number): number {
+  const reference = Math.max(1, profile.maxSpeed);
+  const impulse = finite(impact.impulse) ? Math.max(0, impact.impulse) : 0;
+  const fromSpeed = finite(appliedSpeed) ? Math.max(0, appliedSpeed) / reference : 0;
+  const fromImpulse = impulse / (reference * 1.55);
+  return clamp(Math.max(fromSpeed, fromImpulse), 0, 1);
+}

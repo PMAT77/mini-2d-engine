@@ -112,6 +112,24 @@ const result = map.resolveMotion(body, { x: 10, y: 0 }, Math.PI / 4);
 
 这是运动约束系统，不模拟质量、惯性或动态刚体互推。几何接触容差为 0.01 像素；形状由代码／JSON 定义，不从图片提取轮廓，不接受自相交多边形和嵌套复合体。
 
+## 受击、击退与尸体滑行
+
+命中结算分成三层：`Bullet` 在真实命中时生成一份冻结的 `BulletImpact`（伤害、命中点、真实速度方向、武器冲量、命中／初始速度、飞行距离）；`KnockbackMotion` 只负责世界位移与碰撞；`Chicken` 用 `LifeState`（`alive`／`dying`／`removed`）管理生命周期与一次性死亡事件。击退速度是独立于普通移动 `velocity` 的第二份速度，不经过 `Entities.moveAndRotate()`，因此不会改写 AI 行走速度，也不影响玩家翻滚和武器系统。
+
+```ts
+const speed = computeKnockbackSpeed(impact, profile, lethal);
+// impulse × speedFactor × (1 - resistance) ÷ mass，再钳制到 maxSpeed
+const motion = new KnockbackMotion(host, map, profile);
+motion.addImpact(impact, lethal);
+motion.update(delta); // 指数衰减、子步碰撞、滑墙、干地边界；不写宿主 velocity
+```
+
+`distanceFactor` 在 V1 恒为 1：`traveledDistance` 只记录不参与强度。冲量与命中只来自真实命中事件和目标配置，准星落在目标身上还是目标后方不会改变击退速度。武器冲量在开火瞬间快照进子弹，之后切枪或改配置不影响已发射的子弹。
+
+鸡的击退参数为 mass 1、maxSpeed 360、damping 7／s、stopSpeed 10／s，死亡最短可见 0.14 秒、最长 0.45 秒；280 冲量对应约 40 像素滑行。四个时刻严格分开：致命帧只进入 `dying` 并停止叫声、脚步与 AI；滑行结束进入 `removed` 并只发出一次 `DeathFinished`（最终世界坐标）；场景消费事件后在最终落点生成白烟；肉块从尸体消失起再等待 `SMOKE_TO_MEAT_DELAY`（0.12 秒）才排队落下。尸体在 `dying` 期间保留碰撞、影子和感知目标身份，但不再可被命中或伤害。
+
+绘制层只读取 `getHitReactionPose()` 的倾斜、压缩与强度，不写回 `currentRotation` 或碰撞体；未来 2D Rig 替换这个消费者即可，世界位置、碰撞和掉落都不会从骨骼姿态反推。
+
 ## 光照与动态投影
 
 环境光是全屏底色（`rgba(214, 226, 240, 0.35)`），决定整张地图的基础明暗；地图左上方外部另有一盏固定弱光，位置为 `(-地图像素宽度, -地图像素高度)`，颜色 `#B4C8E0`、强度 `0.06`，把墙壁和矿石的短影投向右下方，投影长度为瓦片尺寸的 40%，柔边为 4%（当前 20／2 个世界像素）。单位光只照亮地面和水域：锥形手电筒默认 120°／400 世界像素、强度 0.8，脚边另有一圈半径 100、强度 0.5 的小范围全向微光，火把是暖色点光；它们的图层在合成前按地形轮廓裁剪，墙顶和矿石顶面保持环境光亮度，既不会被提亮也不会被压暗。手电筒光束从持灯者身体之外开始（内圈 30 像素），人物不会被自己的光打出高光。距离衰减采用带近场稳定项的平方反比近似，最后 25% 范围平滑归零。
