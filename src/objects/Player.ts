@@ -14,8 +14,10 @@ import { ColliderShape } from "../physics/Collider";
 import type { VisionState } from "../core/VisibilitySystem";
 import type { FootstepEvent } from "./FootprintSystem";
 import type { ReloadMode, WeaponKind, WeaponSlot, WeaponView } from "./Weapon";
-import { drawHeldWeapon, drawMuzzleFlame, drawStowedWeapons } from "./WeaponVisuals";
+import { drawMuzzleFlame } from "./WeaponVisuals";
 import { getRollPose, interpolateRollPose, rollEntryBlend, rollExitBlend, rollStowedAlpha, rollVisualAngle, ROLL_REST_POSE } from "./RollPose";
+import { advancePlayerAnimation, createPlayerRenderSnapshot, getPlayerMuzzleWorld, renderPlayerSnapshot } from "./animation/PlayerVisualAdapter";
+import { drawCharacterShadow } from "../animation2d/render/CharacterCanvasRenderer";
 import type { RollPose } from "./RollPose";
 
 interface WeaponState {
@@ -62,6 +64,9 @@ const LOAD_TIME_FACTOR = 1.5;
 const LOAD_MIN_SECONDS = 0.35;
 /** 枪口火焰的持续时间（秒）；比冲锋枪 0.075 秒的射速略短。 */
 const MUZZLE_FLASH_TIME = 0.07;
+
+/** 受击晃动的视觉时长（秒）；只驱动动画，不改生命、位移或输入。 */
+const HIT_REACT_SECONDS = 0.22;
 
 const WADING_COLORS = [[98, 186, 255], [177, 143, 178], [255, 100, 100], [255, 64, 64]];
 /** 脚印步距（世界像素），按实际位移累计而不是按时间。 */
@@ -123,7 +128,7 @@ export interface PlayerDebugValues {
 }
 
 /**
- * 当前帧真正交给 drawBody 的姿态与变换。
+ * 当前帧交给骨架渲染器的姿态与变换。
  * 正常站立与翻滚共用同一份结构，测试可以直接采样它来验证
  * 抬枪/换枪/奔跑/翻滚之间的渲染连续性。
  */
@@ -177,6 +182,8 @@ export class Player extends Entities {
   private rollSpeed = 0;
   /** 仅在调用 super.update 期间为真，让 updateVelocityNonlinear 走翻滚分支。 */
   private rollActive = false;
+  /** 翻滚视觉接地强度：实际位移 / 预期位移，撞墙时趋近 0，只影响动画。 */
+  private rollGroundingScale = 1;
   private rollDustSpawned = false;
   private trailDistance = 0;
   private footstepDistance = 0;
@@ -201,6 +208,19 @@ export class Player extends Entities {
   }
   /** 翻滚锁定剩余时间（含动作与冷却）；0 表示可以起滚。 */
   getRollCooldownRemaining(): number { return this.rollCooldownLeft; }
+  /** 起滚时锁定的方向（弧度）；视觉层用它与当前朝向插值。 */
+  getRollAngle(): number { return Math.atan2(this.rollDirection.y, this.rollDirection.x); }
+  /**
+   * 翻滚视觉接地强度。实际位移被墙削掉时趋近 0，动画据此压低伪高度与前压，
+   * 避免“原地滚却还在腾空”。只参与渲染，不参与任何玩法判定。
+   */
+  getRollGroundingScale(): number { return this.rollGroundingScale; }
+  /** 受击晃动的剩余幅度 0–1：刚受击为 1，随后衰减到 0。只读，不影响生命或移动。 */
+  getHitReactProgress(): number {
+    return this.hitReactTime > 0 ? this.hitReactTime / HIT_REACT_SECONDS : 0;
+  }
+  /** 视觉朝向（弧度）：碰撞体朝向再旋转 −π/2。 */
+  getVisualFacing(): number { return this.currentRotation - Math.PI; }
   /** 身体是否接触水体（任何水深，含岸边的一点重叠）；脚印湿度与涉水音效共用。 */
   isInWater(): boolean { return this.terrainWaterCoverage.fraction > 1e-6; }
   getHealth(): number { return this.health; }
@@ -208,6 +228,7 @@ export class Player extends Entities {
   takeDamage(amount: number): void {
     if (!Number.isFinite(amount) || amount < 0) throw new Error("伤害必须是非负有限数值");
     this.health = Math.max(0, this.health - amount);
+    if (amount > 0) this.hitReactTime = HIT_REACT_SECONDS;
     this.onStatsChangeCallback?.();
   }
   heal(amount: number): void {
@@ -216,6 +237,7 @@ export class Player extends Entities {
     this.onStatsChangeCallback?.();
   }
   // 动画相关属性
+  private hitReactTime: number = 0; // 受击晃动剩余时间（秒），仅视觉
   private idleTime: number = 0; // 玩家待机状态的计时器
   private walkTime: number = 0; // 玩家移动状态的计时器
   private scale: number = 1; // 玩家缩放比例
@@ -436,6 +458,7 @@ export class Player extends Entities {
 
   private updateMovement(delta: number, input: Input, map?: TileMap): void {
     this.rollCooldownLeft = Math.max(0, this.rollCooldownLeft - delta);
+    if (this.rollTimeLeft <= 0) this.rollGroundingScale = 1;
     let remaining = delta;
     if (this.rollTimeLeft > 0) {
       // 翻滚期间跳过疾跑与体力恢复：体力只在起滚时扣一次。
@@ -447,7 +470,13 @@ export class Player extends Entities {
       const distance = this.getRollDistance(elapsed + step) - this.getRollDistance(elapsed);
       this.rollSpeed = step > 0 ? distance / step : 0;
       this.rollActive = true;
+      const beforeX = this.x;
+      const beforeY = this.y;
       super.update(step, input, map);
+      const intended = this.rollSpeed * step;
+      this.rollGroundingScale = intended > 1e-6
+        ? Math.min(1, Math.max(0, Math.hypot(this.x - beforeX, this.y - beforeY) / intended))
+        : 1;
       this.rollActive = false;
       remaining -= step;
       this.rollTimeLeft = Math.max(0, this.rollTimeLeft - step);
@@ -541,6 +570,7 @@ export class Player extends Entities {
     this.rollCooldownLeft = this.roll.duration + this.roll.cooldown;
     this.rollDustSpawned = false;
     this.rollSpeed = 0;
+    this.rollGroundingScale = 1;
     this.sprinting = false;
     this.sprintTime = 0;
     this.trailDistance = 0;
@@ -1312,6 +1342,7 @@ export class Player extends Entities {
     this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y) ? aim : undefined;
     this.isShooting = !!this.pointerAim?.fire && !this.isRolling();
     this.updateRecoil(delta);
+    if (this.hitReactTime > 0) this.hitReactTime = Math.max(0, this.hitReactTime - delta);
     if (this.weaponSwapTime > 0) this.weaponSwapTime = Math.max(0, this.weaponSwapTime - delta);
     if (this.muzzleFlashTime > 0) this.muzzleFlashTime = Math.max(0, this.muzzleFlashTime - delta);
     const startX = this.x, startY = this.y;
@@ -1379,6 +1410,9 @@ export class Player extends Entities {
     }
     // 然后清理已销毁的子弹
     this.bullets = this.bullets.filter(bullet => !bullet.getIsDestroyed());
+
+    // 动画后端推进：只在 rig 开关打开时运行，legacy 下不增加任何每帧工作。
+    advancePlayerAnimation(this, delta);
   }
 
   /** 切到指定槽位；换弹进度留在原枪上，切回来会继续。 */
@@ -1513,44 +1547,34 @@ export class Player extends Entities {
     if (canvas.width !== extent || canvas.height !== extent) { canvas.width = extent; canvas.height = extent; }
     const buffer = canvas.getContext('2d')!;
     buffer.clearRect(0, 0, extent, extent);
-    this.drawModel(buffer, extent / 2, extent / 2);
+    // 骨架渲染现在是唯一路径；保留快照供阴影与枪口共用。
+    const rigSnapshot = createPlayerRenderSnapshot(this);
+    renderPlayerSnapshot(buffer, rigSnapshot, extent / 2, extent / 2);
     if (this.wadingMap) {
       buffer.save();
       buffer.globalCompositeOperation = 'source-atop'; buffer.globalAlpha = 0.35;
       this.wadingMap.drawWaterLayer(buffer, centerX - extent / 2, centerY - extent / 2, extent, extent);
       buffer.restore();
     }
+    // 阴影必须画在离屏缓冲之外：放进缓冲会被 source-atop 水纹染色，也会被当作角色本体缩放。
+    if (rigSnapshot.altitudePx > 0) {
+      drawCharacterShadow(ctx, centerX - offsetX, centerY - offsetY, this.size, rigSnapshot.altitudePx);
+    }
     ctx.drawImage(canvas, centerX - extent / 2 - offsetX, centerY - extent / 2 - offsetY);
   }
 
   /**
    * 枪口火焰。必须画在光照合成之后：它是一团光，画在前面会被环境光乘暗。
-   * 位置和朝向与 drawModel 里那把枪一致（枪口在握把原点前方 0.36 个身位）。
+   * 位置与朝向来自 visualMuzzle socket，与手持武器共用同一套骨骼变换。
    */
   drawMuzzleFlash(ctx: CanvasRenderingContext2D, offsetX: number = 0, offsetY: number = 0): void {
     if (this.muzzleFlashTime <= 0 || !this.isArmed()) return;
-    const s = this.size, facing = this.currentRotation - Math.PI;
-    const muzzle = this.getMuzzlePosition();
-    const swapProgress = this.weaponSwapTime > 0 ? 1 - this.weaponSwapTime / WEAPON_SWAP_DURATION : 1;
-    const swap = Math.sin(Math.PI * swapProgress);
-    // 前 40% 时间全亮，之后线性熄灭：开火瞬间不会只闪一帧。
+    const socket = getPlayerMuzzleWorld(this);
     const intensity = Math.min(1, this.muzzleFlashTime / (MUZZLE_FLASH_TIME * 0.4));
     ctx.save();
-    ctx.translate(muzzle.x - offsetX, muzzle.y - offsetY);
-    ctx.rotate(facing);
-    // 与 drawHeldWeapon 的挂点对齐：换枪下沉 + 握把原点 (-0.02s, +0.015s) + 枪管尖端 0.36s。
-    ctx.translate(-s * .10 * swap - s * .02 + s * .36, s * .18 * swap + s * .015);
-    drawMuzzleFlame(ctx, s, intensity, this.muzzleFlashSeed);
-    ctx.restore();
-  }
-
-  private drawModel(ctx: CanvasRenderingContext2D, centerX: number, centerY: number): void {
-    const state = this.getRenderState();
-    ctx.save();
-    ctx.translate(centerX, centerY);
-    ctx.rotate(state.angle);
-    ctx.scale(state.scale, state.scale);
-    this.drawBody(ctx, this.size, state.pose, state.stowedAlpha);
+    ctx.translate(socket.x - offsetX, socket.y - offsetY);
+    ctx.rotate(socket.facing);
+    drawMuzzleFlame(ctx, this.size, intensity, this.muzzleFlashSeed);
     ctx.restore();
   }
 
@@ -1595,7 +1619,7 @@ export class Player extends Entities {
    * 两端都调用同一份 getNormalPose，所以物理翻滚结束的那一帧不会跳变。
    */
   getRenderState(): PlayerRenderState {
-    const facing = this.currentRotation - Math.PI;
+    const facing = this.getVisualFacing();
     const progress = this.getRollProgress();
 
     // Visual breathing only: getCollider() uses size and never this render scale.
@@ -1615,7 +1639,7 @@ export class Player extends Entities {
       };
     }
 
-    const rollAngle = Math.atan2(this.rollDirection.y, this.rollDirection.x);
+    const rollAngle = this.getRollAngle();
     const angle = rollVisualAngle(progress, facing, rollAngle);
     const enter = rollEntryBlend(progress);
     const exit = rollExitBlend(progress);
@@ -1638,113 +1662,6 @@ export class Player extends Entities {
       progress,
       rolling: true,
     };
-  }
-
-  /**
-   * 按姿态数据绘制本地坐标下的角色，站立与翻滚共用：
-   * 腿 → 双臂 → 背影 → 躯干 → 胸板 → 枪 → 头 → 肩背外壳。
-   * 外壳最后画，中段会盖住头/胸板，形成“肩背从上面翻过去”的遮挡。
-   */
-  private drawBody(ctx: CanvasRenderingContext2D, s: number, pose: RollPose, stowedAlpha = 1): void {
-    const disc = (x: number, y: number, r: number, color: string | CanvasGradient) => {
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = color; ctx.fill();
-    };
-    const ellipse = (x: number, y: number, rx: number, ry: number, color: string | CanvasGradient) => {
-      ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-      ctx.fillStyle = color; ctx.fill();
-    };
-    const capsule = (ax: number, ay: number, bx: number, by: number, width: number, color: string) => {
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
-      ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.stroke();
-    };
-
-    // 1) 简化腿部：只在翻滚姿态里淡入，画在身体后面。
-    if (pose.legAlpha > .001) {
-      const hipX = (pose.bodyX - pose.bodyRx * .4) * s;
-      ctx.save();
-      ctx.globalAlpha = Math.min(1, pose.legAlpha);
-      for (const side of [-1, 1]) {
-        const kneeX = (side < 0 ? pose.leftKneeX : pose.rightKneeX) * s;
-        const kneeY = (side < 0 ? pose.leftKneeY : pose.rightKneeY) * s;
-        const footX = (side < 0 ? pose.leftFootX : pose.rightFootX) * s;
-        const footY = (side < 0 ? pose.leftFootY : pose.rightFootY) * s;
-        capsule(hipX, side * pose.bodyRy * .38 * s, kneeX, kneeY, s * .13, '#1d3f4b');
-        capsule(kneeX, kneeY, footX, footY, s * .11, '#1d3f4b');
-        disc(footX, footY, s * .055, '#2b5560');
-      }
-      ctx.restore();
-    }
-
-    // 2) 双臂：肩→肘→手两段圆头胶囊；先两臂外层再两臂内层，最后画手。
-    const arms = [
-      { sx: pose.leftShoulderX, sy: pose.leftShoulderY, ex: pose.leftElbowX, ey: pose.leftElbowY, hx: pose.leftHandX, hy: pose.leftHandY },
-      { sx: pose.rightShoulderX, sy: pose.rightShoulderY, ex: pose.rightElbowX, ey: pose.rightElbowY, hx: pose.rightHandX, hy: pose.rightHandY },
-    ];
-    for (const arm of arms) {
-      capsule(arm.sx * s, arm.sy * s, arm.ex * s, arm.ey * s, s * .22, '#183c4a');
-      capsule(arm.ex * s, arm.ey * s, arm.hx * s, arm.hy * s, s * .22, '#183c4a');
-    }
-    for (const arm of arms) {
-      capsule(arm.sx * s, arm.sy * s, arm.ex * s, arm.ey * s, s * .15, '#4d8999');
-      capsule(arm.ex * s, arm.ey * s, arm.hx * s, arm.hy * s, s * .15, '#4d8999');
-    }
-    disc(arms[0].hx * s, arms[0].hy * s, s * .085, '#e5ccb0');
-    disc(arms[1].hx * s, arms[1].hy * s, s * .085, '#eed7b9');
-
-    // 3) 背影轮廓 + 4) 躯干 + 5) 胸板
-    disc(pose.backX * s, pose.backY * s, pose.backR * s, '#102c39');
-    const bx = pose.bodyX * s, by = pose.bodyY * s;
-    const body = ctx.createLinearGradient(bx - s * .4, by + s * .3, bx + s * .35, by - s * .3);
-    body.addColorStop(0, '#245362'); body.addColorStop(1, '#73b4bf');
-    // 圆是站立姿态的常态；只有蜷缩的翻滚姿态才会变成椭圆。
-    if (Math.abs(pose.bodyRx - pose.bodyRy) < 1e-6) disc(bx, by, pose.bodyRx * s, body);
-    else ellipse(bx, by, pose.bodyRx * s, pose.bodyRy * s, body);
-    disc(pose.plateX * s, pose.plateY * s, pose.plateR * s, '#23404a');
-
-    // 未拿在手上的枪斜挎在背上、挂在腰间，压在身体上面、头下面，两端从头两侧露出。
-    drawStowedWeapons(ctx, s, this.activeSlot, stowedAlpha);
-    // 手中的武器压在身体之上、头之下，换枪时随手下沉，翻滚时随手腕额外旋转。
-    drawHeldWeapon(ctx, s, this.weaponKind, this.activeSlot,
-      { x: pose.rightHandX * s, y: pose.rightHandY * s }, pose.weaponAngle);
-
-    // 6) 头：径向渐变随头的位置和半径缩放，头能独立低头/缩起而不带动躯干。
-    if (pose.headAlpha > .001) {
-      const hx = pose.headX * s, hy = pose.headY * s;
-      const k = pose.headR / ROLL_REST_POSE.headR;
-      ctx.save();
-      ctx.globalAlpha = Math.min(1, pose.headAlpha);
-      const head = ctx.createRadialGradient(
-        hx + s * .07 * k, hy - s * .12 * k, s * .015 * k, hx, hy, s * .28 * k);
-      head.addColorStop(0, '#fff1d6'); head.addColorStop(.65, '#ead3b2'); head.addColorStop(1, '#b49a7a');
-      disc(hx, hy, pose.headR * s, head);
-      // A small crown highlight indicates facing without drawing a face.
-      capsule(hx + s * .13 * k, hy - s * .08 * k, hx + s * .18 * k, hy + s * .025 * k, s * .035 * k, '#fff4dd');
-      ctx.restore();
-    }
-
-    // 7) 肩背外壳：只在中段出现，盖住头与胸板，表示背/肩从上面翻过去。
-    if (pose.shellAlpha > .001) {
-      const alpha = Math.min(1, pose.shellAlpha);
-      const sx = pose.shellX * s, sy = pose.shellY * s, rx = pose.shellRx * s, ry = pose.shellRy * s;
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      const shell = ctx.createLinearGradient(sx - rx, sy, sx + rx, sy);
-      shell.addColorStop(0, '#16343e'); shell.addColorStop(.6, '#1f4854'); shell.addColorStop(1, '#2f6572');
-      ellipse(sx, sy, rx, ry, shell);
-      // 外壳刚出现时只是压暗轮廓，纹理要等背真正翻上来才显形，
-      // 否则脊柱线会像一根棍子横在还没收起来的头上。
-      const detail = Math.max(0, Math.min(1, (alpha - .35) / .5));
-      if (detail > .001) {
-        ctx.globalAlpha = alpha * detail;
-        // 背面纹理：一条脊柱沟 + 两道斜向肩胛，避免睁眼/张嘴的观感。
-        capsule(sx + s * .22, sy, sx - s * .26, sy, s * .05, '#0f2831');
-        capsule(sx + s * .20, sy - s * .035, sx - s * .24, sy - s * .035, s * .018, '#3d7b89');
-        capsule(sx + s * .10, sy - s * .13, sx - s * .08, sy - s * .21, s * .12, '#2d6573');
-        capsule(sx + s * .10, sy + s * .13, sx - s * .08, sy + s * .21, s * .12, '#2d6573');
-      }
-      ctx.restore();
-    }
   }
 
   /** Screen-space overlays are drawn after lighting. */

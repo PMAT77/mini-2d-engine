@@ -412,13 +412,13 @@ test('翻滚渲染帧不再压扁或镜像，旋转对齐翻滚方向且不出�
   for (const progress of [0, 0.25, 0.5, 0.75]) {
     const { p, rec } = rollFrame(progress);
     // 每一帧只允许一个等比缩放（呼吸），不能出现负值/压扁/镜像。
-    assert.ok(rec.scales.length >= 1, 'drawModel should scale at least once');
+    assert.ok(rec.scales.length >= 1, 'the rig renderer should scale at least once');
     for (const [sx, sy] of rec.scales) {
       near(sx, sy, 1e-9);
       assert.ok(sx > 0.6 && sx < 1.4, `scale ${sx}`);
     }
     // 朝向：中段对齐 rollDirection（向东），起滚/收尾回到鼠标朝向（向北）。
-    // rotates[0] 是 drawModel 的整体朝向；后面的是武器等局部旋转。
+    // rotates[0] 是整帧的整体朝向；后面的是武器等局部旋转。
     assert.ok(rec.rotates.length >= 1);
     const expected = progress === 0 ? -Math.PI / 2 : rollVisualAngle(progress, -Math.PI / 2, 0);
     near(rec.rotates[0], expected, 1e-9);

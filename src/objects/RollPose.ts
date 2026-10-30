@@ -298,6 +298,12 @@ const STOP_POSES: readonly RollPose[] = [
   ROLL_REST_POSE,
 ];
 
+/**
+ * 构建好的关键帧姿态（含首尾静止姿态）。
+ * 动画层直接复用这份数值构建标量轨道，避免把 12 个关键帧抄成两份。
+ */
+export const ROLL_POSE_STOP_POSES: readonly RollPose[] = STOP_POSES;
+
 const POSE_KEYS = Object.keys(ROLL_REST_POSE) as (keyof RollPose)[];
 
 /**

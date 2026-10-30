@@ -92,13 +92,14 @@ export function drawStowedWeapons(ctx: CanvasRenderingContext2D, size: number,
 
 /**
  * 拿在手里的武器；空手时不画。
+ * `grip` 是握把原点（世界或缓冲坐标，已含 -0.02s/+0.015s 的握点偏移）；
  * `angle` 是手腕的额外旋转（翻滚时枪随手臂收拢），默认 0 保持站立姿态不变。
  */
 export function drawHeldWeapon(ctx: CanvasRenderingContext2D, size: number, kind: WeaponKind,
-  slot: WeaponSlot, hand: { x: number; y: number }, angle = 0): void {
+  slot: WeaponSlot, grip: { x: number; y: number }, angle = 0): void {
   if (kind === "empty") return;
   ctx.save();
-  ctx.translate(hand.x - size * 0.02, hand.y + size * 0.015);
+  ctx.translate(grip.x, grip.y);
   if (angle !== 0) ctx.rotate(angle);
   if (kind === "melee") {
     ctx.rotate(-0.15);
