@@ -63,6 +63,11 @@ export class PlayerDebugPanel {
   private activeTab: DebugTabId = 'character';
   private open = false;
   private lastFocus?: Element;
+  private dragged = false;
+  private dragOffsetX = 0;
+  private dragOffsetY = 0;
+  private dragOriginX = 0;
+  private dragOriginY = 0;
 
   private fields: Field[] = [];
   private colors: ColorField[] = [];
@@ -90,7 +95,15 @@ export class PlayerDebugPanel {
     this.toggle.textContent = '调试 · F2';
     this.toggle.setAttribute('aria-controls', 'player-debug-panel');
     this.toggle.setAttribute('aria-expanded', 'false');
-    this.toggle.onclick = () => this.setOpen(!this.open);
+    this.toggle.onclick = () => {
+      // 拖动结束时浏览器仍会补发一次 click，这里吞掉，避免松手顺手开合面板。
+      if (this.dragged) { this.dragged = false; return; }
+      this.setOpen(!this.open);
+    };
+    this.toggle.addEventListener('pointerdown', this.onTogglePointerDown);
+    this.toggle.addEventListener('pointermove', this.onTogglePointerMove);
+    this.toggle.addEventListener('pointerup', this.onTogglePointerUp);
+    this.toggle.addEventListener('pointercancel', this.onTogglePointerUp);
 
     this.overlay.className = 'debug-overlay';
     this.overlay.hidden = true;
@@ -235,7 +248,7 @@ export class PlayerDebugPanel {
     }
     if (id === 'stamina') {
       this.stateField(section, 'stamina', '当前体力', '', () => this.player.getMaxStamina());
-      section.append(this.button('体力回满', () => this.player.setDebugState({ stamina: this.player.getMaxStamina() })));
+      section.append(this.button('体力回满', () => this.player.setDebugState({ stamina: this.player.getMaxStamina() }), 'debug-button-block'));
     }
     if (id === 'movement') {
       const speed = document.createElement('p');
@@ -260,7 +273,9 @@ export class PlayerDebugPanel {
       value => this.player.setDefaultReloadMode(value === 'load' ? 'load' : 'reload'));
       this.meter(section, '换弹进度', s => [s.reloadProgress, 100], 'reload');
       this.stateField(section, 'reloadProgress', '换弹进度', '%', () => 100);
-      section.append(
+      const ammoActions = document.createElement('div');
+      ammoActions.className = 'debug-button-row';
+      ammoActions.append(
         this.button('打空弹匣', () => this.player.setDebugState({ magazineAmmo: 0, chambered: false })),
         this.button('立即换弹', () => this.player.requestReload('reload')),
         this.button('立即装填', () => this.player.requestReload('load')),
@@ -268,13 +283,15 @@ export class PlayerDebugPanel {
           magazineAmmo: this.player.getMagazineSize(), chambered: true,
         })),
       );
+      section.append(ammoActions);
     }
   }
 
-  private button(text: string, action: () => void): HTMLButtonElement {
+  private button(text: string, action: () => void, className?: string): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = text;
+    if (className) button.className = className;
     button.onclick = () => { action(); this.refresh(); };
     return button;
   }
@@ -703,6 +720,39 @@ export class PlayerDebugPanel {
       event.preventDefault();
       first.focus();
     }
+  };
+
+  private onTogglePointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0) return;
+    this.dragged = false;
+    this.dragOriginX = event.clientX;
+    this.dragOriginY = event.clientY;
+    this.toggle.setPointerCapture(event.pointerId);
+  };
+  private onTogglePointerMove = (event: PointerEvent): void => {
+    if (!this.toggle.hasPointerCapture(event.pointerId)) return;
+    if (!this.dragged) {
+      if (Math.hypot(event.clientX - this.dragOriginX, event.clientY - this.dragOriginY) < 4) return;
+      const rect = this.toggle.getBoundingClientRect();
+      // 真正开始拖动才把 right 定位换算成 left/top，普通点击仍贴着右边。
+      this.dragOffsetX = event.clientX - rect.left;
+      this.dragOffsetY = event.clientY - rect.top;
+      this.toggle.style.left = `${rect.left}px`;
+      this.toggle.style.top = `${rect.top}px`;
+      this.toggle.style.right = 'auto';
+      this.toggle.classList.add('dragging');
+      this.dragged = true;
+    }
+    const maxLeft = Math.max(0, window.innerWidth - this.toggle.offsetWidth);
+    const maxTop = Math.max(0, window.innerHeight - this.toggle.offsetHeight);
+    const left = Math.min(maxLeft, Math.max(0, event.clientX - this.dragOffsetX));
+    const top = Math.min(maxTop, Math.max(0, event.clientY - this.dragOffsetY));
+    this.toggle.style.left = `${left}px`;
+    this.toggle.style.top = `${top}px`;
+  };
+  private onTogglePointerUp = (event: PointerEvent): void => {
+    if (this.toggle.hasPointerCapture(event.pointerId)) this.toggle.releasePointerCapture(event.pointerId);
+    this.toggle.classList.remove('dragging');
   };
 
   dispose(): void {

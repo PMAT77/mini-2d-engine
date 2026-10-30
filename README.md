@@ -56,6 +56,7 @@ npm run preview
 - `src/status`：待机、移动和射击状态。
 - `src/ui`：右下角武器 HUD、手电开关胶囊与角色属性调试面板。
 - `public/configs`：角色／画面／音效三份配置及配置说明。
+- `public/audio`：按用途分目录，`footsteps`（干地／湿身／涉水脚步）、`pickups`（金块／肉块）、`flashlight`（开关）、`chicken`（脚步与三段叫声）、`weapons`（枪械音效库）。目录与 `audioConfig.json` 的音效分组一一对应，文件名只写用途、不重复分类名。
 - `public/audio/weapons`：现代手枪音效库，含 25 段开火、8 组换弹与 12 段户外枪声尾音；当前开火声取自其中的 Type1（格洛克）与 Type5（冲锋枪），换弹声取自 Type_1（格洛克）与 Type_5（冲锋枪）。
 - `tests`：逻辑回归测试、固定布局光照与碰撞验收页。
 

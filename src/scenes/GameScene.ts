@@ -43,23 +43,28 @@ import { SoundPlayer } from "../core/SoundPlayer";
 import type { PlayOptions, SoundHandle } from "../core/SoundPlayer";
 import type { FootstepEvent } from "../objects/FootprintSystem";
 
-/** 声音资源：干地与湿身脚步，以及一段循环的涉水行走采样；枪声与换弹声由当前武器决定。 */
-const DRY_STEP_SOUND = "/audio/step-brick.wav";
-const WATER_STEP_SOUND = "/audio/step-water.wav";
-const WET_STEP_SOUND = "/audio/step-mud.wav";
+/**
+ * 声音资源。目录按 `public/audio/<分类>/<用途>.<扩展名>` 组织，分类与 audioConfig 的分组
+ * （footsteps／pickups／flashlight／chicken／weapon）一一对应，文件名只写用途、不重复分类。
+ * 枪声与换弹声由当前武器决定，见 Player 的武器状态。
+ */
+/** 干地与湿身脚步，以及一段循环的涉水行走采样。 */
+const DRY_STEP_SOUND = "/audio/footsteps/dry.wav";
+const WATER_STEP_SOUND = "/audio/footsteps/water.wav";
+const WET_STEP_SOUND = "/audio/footsteps/wet.wav";
 /** 小鸡：走路时每一步的轻响，以及停下时偶尔的叫声。 */
-const CHICKEN_STEP_SOUND = "/audio/chicken-step.wav";
+const CHICKEN_STEP_SOUND = "/audio/chicken/step.wav";
 /** 三段真实鸡叫，每次随机取一段；每段都完整播完，不用同一句反复循环。 */
 const CHICKEN_CLUCK_SOUNDS = [
-  "/audio/chicken-cluck-1.mp3",
-  "/audio/chicken-cluck-2.mp3",
-  "/audio/chicken-cluck-3.mp3",
+  "/audio/chicken/cluck-1.mp3",
+  "/audio/chicken/cluck-2.mp3",
+  "/audio/chicken/cluck-3.mp3",
 ] as const;
 /** 拾取：肉块只留入口的第一口撕咬（采样已裁到 0.75 秒），金块是一声硬币落袋的清脆响。 */
-const MEAT_PICKUP_SOUND = "/audio/142-short-food-meat-pickup.wav";
-const GOLD_PICKUP_SOUND = "/audio/116-short-platinum-coin-pickup-pure.wav";
+const MEAT_PICKUP_SOUND = "/audio/pickups/meat.wav";
+const GOLD_PICKUP_SOUND = "/audio/pickups/gold.wav";
 /** 手电筒开关的机械轻响，开灯和关灯都播这一声。 */
-const FLASHLIGHT_SWITCH_SOUND = "/audio/flashlight-switch.mp3";
+const FLASHLIGHT_SWITCH_SOUND = "/audio/flashlight/switch.mp3";
 
 
 

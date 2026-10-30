@@ -38,10 +38,30 @@
   outline-offset: 2px;
 }
 
-.debug-toggle {
+/* 体力回满：占满整行，与上方字段拉开距离。 */
+.debug-button-block {
+  width: 100%;
+  margin-top: 10px;
+}
+
+/* 弹匣操作四个按钮并排，彼此留 10px 右边距。 */
+.debug-button-row button {
+  margin-right: 10px;
+}
+
+.player-debug .debug-toggle {
   position: absolute;
   top: 14px;
   right: 14px;
+  /* 按住按钮可拖到任意位置；拖动期间禁用滚动与文字选择。 */
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.player-debug .debug-toggle.dragging {
+  cursor: grabbing;
+  border-color: var(--debug-accent);
 }
 
 .debug-overlay {
