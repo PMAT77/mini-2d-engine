@@ -83,34 +83,58 @@ async function checkBulletVisuals(page){
     const expect=(value,message)=>{if(!value)throw Error(message);checks++;};
     const pixel=(x,y)=>[...ctx.getImageData(Math.floor(x*dpr),Math.floor(y*dpr),1,1).data];
     const tint=(type,base=[255,255,0])=>{const hex=TILE_TYPES[type].color;return base.map((v,i)=>Math.round(v*.65+parseInt(hex.slice(i*2+1,i*2+3),16)*.35));};
-    const color=(actual,rgb,message)=>expect(actual[3]===255&&rgb.every((v,i)=>Math.abs(v-actual[i])<=4),`${message}: ${actual} vs ${rgb}`);
+    // 水面遮罩只改颜色、不改覆盖；细线本身带抗锯齿，所以用同一条线在旱地上的像素当基准。
+    const tintCheck=(draw,x,y,type,message,tileMap=map)=>{
+      const saved=tileMap.tiles.map(row=>row.slice());
+      tileMap.tiles.forEach(row=>row.fill('default'));
+      clear();draw();const dry=pixel(x,y);
+      saved.forEach((row,i)=>row.forEach((value,col)=>{tileMap.tiles[i][col]=value;}));
+      clear();draw();const actual=pixel(x,y);
+      const expected=type?tint(type,dry.slice(0,3)):dry.slice(0,3);
+      expect(actual[3]===dry[3]&&expected.every((v,i)=>Math.abs(v-actual[i])<=4),`${message}: ${actual} vs ${expected}`);
+    };
+    const tintFromWhite=(draw,x,y,type,message)=>{
+      clear();draw();const actual=pixel(x,y);const expected=tint(type,[255,255,255]);
+      expect(actual[3]>120&&expected.every((v,i)=>Math.abs(v-actual[i])<=4),`${message}: ${actual} vs ${expected}`);
+    };
+    const whiteCheck=(draw,x,y,message)=>{
+      clear();draw();const actual=pixel(x,y);
+      expect(actual[3]>120&&actual.slice(0,3).every(v=>Math.abs(v-255)<=4),`${message}: ${actual} vs opaque white`);
+    };
     const clear=()=>{ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);ctx.setTransform(dpr,0,0,dpr,0,0);};
     // Masking also applies to dry-origin bullets without altering their speed; the visual is a 6px line ending at the centre.
     const bullet=new Bullet(new Vector2(100,100),new Vector2(800,0));
     for(const type of ['shallow_water','water','deep_water','ultra_deep_water']){
-      map.tiles.forEach(row=>row.fill(type));clear();bullet.draw(ctx,0,0,map);
-      color(pixel(97,100),tint(type,[255,255,255]),`${type} bullet tint`);
+      map.tiles.forEach(row=>row.fill(type));
+      tintCheck(()=>bullet.draw(ctx,0,0,map),97,100,type,`${type} bullet tint`);
       expect(pixel(107,100)[3]===0,'water must not color outside the drawn trail');
     }
     // A moved bullet keeps both trail endpoints, so one line can straddle two depths.
     const halved=new Bullet(new Vector2(60,100),new Vector2(800,0));
     halved.update(.2);
+    const halfDraw=()=>halved.draw(ctx,0,0,map);
     map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<2?'default':'deep_water'));
-    clear();halved.draw(ctx,0,0,map);color(pixel(95,100),[255,255,255],'dry half');color(pixel(105,100),tint('deep_water'),'wet half');
+    whiteCheck(halfDraw,95,100,'dry half');
+    tintCheck(halfDraw,105,100,'deep_water','wet half');
     map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<2?'shallow_water':'deep_water'));
-    clear();halved.draw(ctx,0,0,map);color(pixel(95,100),tint('shallow_water'),'shallow half');color(pixel(105,100),tint('deep_water'),'deep half');
+    tintCheck(halfDraw,95,100,'shallow_water','shallow half');
+    tintCheck(halfDraw,105,100,'deep_water','deep half');
     map.tiles.forEach(row=>row.fill('water'));
-    for(const [x,y] of [[.375,.625],[13.25,7.75]]){clear();bullet.draw(ctx,x,y,map);color(pixel(97-x,100-y),tint('water'),'fractional camera and shake');}
-    map.tiles.forEach(row=>row.fill('default'));clear();bullet.draw(ctx,0,0,map);color(pixel(97,100),[255,255,255],'land leaves the bullet color untouched');
-    map.tiles.forEach(row=>row.fill('deep_water'));bullet.setColor('#ff5a5a');clear();bullet.draw(ctx,0,0,map);color(pixel(97,100),tint('deep_water',[255,90,90]),'custom bullet color');
-    bullet.setColor('#ffffff');clear();bullet.draw(ctx);color(pixel(97,100),[255,255,255],'drawing without a map remains compatible');
+    for(const [x,y] of [[.375,.625],[13.25,7.75]])tintCheck(()=>bullet.draw(ctx,x,y,map),97-x,100-y,'water','fractional camera and shake');
+    map.tiles.forEach(row=>row.fill('default'));
+    whiteCheck(()=>bullet.draw(ctx,0,0,map),97,100,'land leaves the bullet color untouched');
+    map.tiles.forEach(row=>row.fill('deep_water'));bullet.setColor('#ff5a5a');
+    tintCheck(()=>bullet.draw(ctx,0,0,map),97,100,'deep_water','custom bullet color');
+    bullet.setColor('#ffffff');
+    whiteCheck(()=>bullet.draw(ctx),97,100,'drawing without a map remains compatible');
     const curved=new TileMap(100,100,{seed:8351});curved.tiles.forEach(row=>row.fill('default'));
     const lake=curved.water.lakes[0],cy=lake.center.y*50,seen=new Set();
     for(let x=lake.bounds.x*50;x<lake.center.x*50;x+=3){
       const type=curved.water.getTypeAt(x,cy,50);if(!type||seen.has(type))continue;
       if(Math.abs(curved.getShapeSpeedFactor(circleCollider(x,cy,5))-TILE_TYPES[type].speedFactor)>1e-7)continue;
-      const b=new Bullet(new Vector2(x,cy),new Vector2(800,0));clear();b.draw(ctx,x-100,cy-100,curved);
-      color(pixel(97,100),tint(type,[255,255,255]),`curved lake ${type}`);seen.add(type);
+      const b=new Bullet(new Vector2(x,cy),new Vector2(800,0));
+      // 生成式湖泊的水层是烘焙好的，改 tiles 拿不到旱地基准，这里按白色弹道反推期望值。
+      tintFromWhite(()=>b.draw(ctx,x-100,cy-100,curved),97,100,type,`curved lake ${type}`);seen.add(type);
     }
     expect(seen.size===4,'generated lake mask must include all four depths');
     const particles=new ParticleSystem(),stopped=new Bullet(new Vector2(100,100),new Vector2(100,0),10,particles,true);
@@ -145,14 +169,17 @@ async function checkWaterBullets(page,dpr){
       p.applyConfig({shooting:{fireRate:5,reloadDuration:.02}});
       p.x=(wet?245:225)-24.5;p.y=500-24.5;p.velocity.set(0,0);
       p.update(0,{isKeyDown:()=>false},scene.map);scene.camera.reset();
-      window.waterBulletRun={original:p.update,originalExplosion:scene.particleSystem.createExplosion,bursts:[],bullet:undefined,samples:[],frames:0,wet,originCoverage:p.terrainWaterCoverage.fraction,depths:new Set()};
+      window.waterBulletRun={original:p.update,originalExplosion:scene.particleSystem.createExplosion,bursts:[],bullet:undefined,samples:[],frames:0,wet,originCoverage:p.terrainWaterCoverage.fraction,depths:new Set(),lastX:p.x+p.getSize()/2};
       scene.particleSystem.createExplosion=function(...args){waterBulletRun.bursts.push({count:args[1],colors:args[5],x:args[0].x,y:args[0].y});return waterBulletRun.originalExplosion.apply(this,args);};
       p.update=function(...args){
         waterBulletRun.original.apply(this,args);
         const r=waterBulletRun;r.frames++;r.bullet??=this.bullets[0];
         if(r.bullet&&!r.bullet.getIsDestroyed()){
           const x=r.bullet.getPosition().x+5,y=r.bullet.getPosition().y+5;
-          r.samples.push({x,speed:r.bullet.velocity.length()});r.depths.add(scene.map.getSpeedFactor(x,y));
+          r.samples.push({x,speed:r.bullet.velocity.length()});
+          // 子弹一帧能飞 40 多像素，逐帧取点会跳过整条深度带；沿本帧轨迹补采样，才能证明穿过所有水层。
+          for(let sx=r.lastX;sx<=x;sx+=4)r.depths.add(scene.map.getSpeedFactor(sx,y));
+          r.lastX=x;
         }
       };
     },wet);
@@ -164,15 +191,20 @@ async function checkWaterBullets(page,dpr){
       s.draw(waterBulletGame.renderer.ctx); const v = s.displayedView, r = s.getCanvasViewport();
       return { x: r.left + (900 - v.x) * r.width / v.width, y: r.top + (500 - v.y) * r.height / v.height };
     });
+    // 单发，确保只有一个子弹：自动连发会让 bursts 与跟踪到的子弹对不上。
+    const framesAtFire=await page.evaluate(()=>waterBulletRun.frames);
     await page.mouse.move(waterTarget.x, waterTarget.y); await page.mouse.down();
-    await page.waitForFunction(()=>waterBulletRun.samples.length>=8);
+    // 水面子弹两帧内就会被打空销毁，等采样点数量会抖动；按帧数保证确实开了一枪再松手。
+    await page.waitForFunction(n=>waterBulletRun.frames>=n,framesAtFire+3,{timeout:10000});
     await page.mouse.up();
+    // 子弹是池化的一次性对象，会在飞行中销毁；等它彻底销毁后再核对整段轨迹与湮灭特效。
+    await page.waitForFunction(()=>{const r=waterBulletRun;return !!r.bullet&&r.bullet.getIsDestroyed();},null,{timeout:15000});
     if(wet)await page.screenshot({path:`${output}/water-bullets-dpr${dpr}.png`});
-    await page.waitForFunction(()=>waterBulletRun.depths.size>=3||waterBulletRun.bullet.getIsDestroyed());
     const result=await page.evaluate(()=>{
       const r=waterBulletRun;
       return{wet:r.wet,coverage:r.originCoverage,samples:r.samples,depths:[...r.depths]};
     });
+    assert.ok(result.samples.length>=1,JSON.stringify(result));
     assert.ok(result.depths.length>=3,JSON.stringify(result));
     assert.ok(wet?result.coverage>1e-6&&result.coverage<1:result.coverage===0);
     for(let i=0;i<result.samples.length;i++){
@@ -182,7 +214,6 @@ async function checkWaterBullets(page,dpr){
     }
     if(wet){
       assert.ok(result.samples.at(-1).speed<2600,'water-origin bullet must lose speed while traversing depth bands');
-      await page.waitForFunction(()=>waterBulletRun.bullet.getIsDestroyed());
       const stopped=await page.evaluate(()=>({speed:waterBulletRun.bullet.velocity.length(),remaining:waterBulletGame.sceneManager.getCurrentScene().player.getBullets().length,bursts:waterBulletRun.bursts}));
       assert.equal(stopped.speed,0);assert.equal(stopped.remaining,0);
       assert.equal(stopped.bursts.length,1);assert.equal(stopped.bursts[0].count,4);assert.deepEqual(stopped.bursts[0].colors,['#ffffff', '#e8e8e8', '#cfcfcf', '#b5b5b5']);
