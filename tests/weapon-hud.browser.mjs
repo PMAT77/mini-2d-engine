@@ -9,9 +9,8 @@ const output = process.env.SCREENSHOT_DIR || '.review';
 mkdirSync(output, { recursive: true });
 
 const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:5173/';
-const LAMP_ON = [255, 206, 107];
-const LAMP_OFF = [91, 116, 128];
-const nearColor = (pixel, expected, tolerance = 14) => expected.every((value, index) => Math.abs(pixel[index] - value) <= tolerance);
+const LAMP_ON = [121, 226, 160];
+const LAMP_OFF = [116, 135, 148];
 const brightness = pixel => (pixel[0] + pixel[1] + pixel[2]) / 3;
 
 /** 进入主场景并停掉 rAF，之后所有帧都由测试逐步驱动。 */
@@ -84,6 +83,39 @@ async function openGame({ dpr = 1, width = 1100, height = 800, failImages = fals
       }
       return count;
     };
+    // 图标是描边剪影，单个像素会落在抗锯齿边缘上；数一片区域里接近目标色的像素更稳。
+    const countNear = (ctx, rect, expected, tolerance) => {
+      const data = readRect(ctx, rect);
+      let count = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (Math.abs(data[i] - expected[0]) <= tolerance
+          && Math.abs(data[i + 1] - expected[1]) <= tolerance
+          && Math.abs(data[i + 2] - expected[2]) <= tolerance) count += 1;
+      }
+      return count;
+    };
+    // 墨迹的垂直中线：图标与文案各自墨迹的上下缘中点，用来验证两者共线。
+    const inkCenterY = (ctx, rect, match) => {
+      const d = window.devicePixelRatio || 1;
+      const x = Math.max(0, Math.floor(rect.x * d));
+      const y = Math.max(0, Math.floor(rect.y * d));
+      const w = Math.max(1, Math.ceil(rect.width * d));
+      const h = Math.max(1, Math.ceil(rect.height * d));
+      const data = ctx.getImageData(x, y, w, h).data;
+      let top = -1;
+      let bottom = -1;
+      for (let row = 0; row < h; row += 1) {
+        for (let col = 0; col < w; col += 1) {
+          const i = (row * w + col) * 4;
+          if (match(data[i], data[i + 1], data[i + 2])) {
+            if (top < 0) top = row;
+            bottom = row;
+            break;
+          }
+        }
+      }
+      return top < 0 ? null : y + (top + bottom + 1) / 2;
+    };
     const maxBright = (ctx, rect) => {
       const data = readRect(ctx, rect);
       let max = 0;
@@ -138,7 +170,46 @@ async function openGame({ dpr = 1, width = 1100, height = 800, failImages = fals
         const { width, height } = this.size();
         return window.hudModules.list.getWeaponListLayout(width, height);
       },
-      flashlightRect() { return window.hudModules.flashlight.getFlashlightHudRect(this.listLayout().area); },
+      /** 手电状态条的文案右缘对齐武器列表内容右缘（弹药列右缘）。 */
+      flashlightContentRight() {
+        const layout = this.listLayout();
+        return layout.area.x + layout.area.width - layout.metrics.paddingRight;
+      },
+      flashlightRect() {
+        return window.hudModules.flashlight.getFlashlightHudRect(
+          this.listLayout().area,
+          this.flashlightContentRight(),
+        );
+      },
+      lampIconRect() {
+        const { FLASHLIGHT_HUD } = window.hudModules.flashlight;
+        const rect = this.flashlightRect();
+        // 轮廓与斜杠都会略微出头，探针区域向外放 1px，避免剪切抗锯齿边缘。
+        return {
+          x: rect.x + FLASHLIGHT_HUD.iconLeft - 1,
+          y: rect.y + (rect.height - FLASHLIGHT_HUD.iconHeight) / 2 - 1,
+          width: FLASHLIGHT_HUD.iconWidth + 2,
+          height: FLASHLIGHT_HUD.iconHeight + 2,
+        };
+      },
+      /** 手电文案（不含 G）的绘制区域。 */
+      lampTextRect() {
+        const { FLASHLIGHT_HUD } = window.hudModules.flashlight;
+        const rect = this.flashlightRect();
+        const left = rect.x + FLASHLIGHT_HUD.iconLeft + FLASHLIGHT_HUD.iconWidth + FLASHLIGHT_HUD.iconGap;
+        return { x: left, y: rect.y, width: rect.width - (left - rect.x) - 12, height: rect.height };
+      },
+      /** 手电图标的墨迹中线（设备像素）。 */
+      lampInkCenterY() {
+        return inkCenterY(game.renderer.ctx, this.lampIconRect(), (r, g, b) => g > 120 && g - r > 40 && g - b > 20);
+      },
+      /** 手电文案的墨迹中线（设备像素）。 */
+      lampTextInkCenterY() {
+        return inkCenterY(game.renderer.ctx, this.lampTextRect(), (r, g, b) => Math.min(r, g, b) > 150);
+      },
+      countNear(rect, expected, tolerance = 30) {
+        return countNear(game.renderer.ctx, rect, expected, tolerance);
+      },
       listStatus() { return scene.weaponListHud.getLastStatus(); },
       view() { return scene.player.getWeaponView(); },
       activeSlot() { return scene.player.getActiveWeaponSlot(); },
@@ -215,6 +286,11 @@ try {
     };
     const status = () => page.evaluate(() => hudTest.listStatus());
     const sample = (x, y) => page.evaluate(([x, y]) => hudTest.pixel(x, y), [x, y]);
+    const lampIcon = await page.evaluate(() => hudTest.lampIconRect());
+    const lampPixels = target => page.evaluate(
+      ([rect, color]) => hudTest.countNear(rect, color),
+      [lampIcon, target],
+    );
     const probe = slot => page.evaluate(value => hudTest.probe(value), slot);
 
     // 等素材落定，保证截图看到的是 PNG 而不是加载中的矢量回退。
@@ -324,12 +400,27 @@ try {
     assert.ok(textLeft.bright > textRight.bright * 1.3,
       `大号弹匣数字应位于斜杠左侧: 左 ${textLeft.bright} vs 右 ${textRight.bright}`);
 
-    // 手电胶囊仍在列表上方，且不压住第一行。
+    // 手电状态条仍在列表上方，文案右缘与弹药列右缘对齐。
     assert.equal(chip.y, list.area.y - 34);
-    assert.equal(chip.x, list.area.x + list.area.width - 96);
-    assert.ok(chip.y + chip.height <= list.area.y, '手电胶囊不能覆盖武器栏');
-    const lampOn = await sample(chip.x + 12, chip.y + 13);
-    assert.ok(nearColor(lampOn, LAMP_ON), `手电开着时灯色应为琥珀，实际 ${lampOn}`);
+    const contentRight = await page.evaluate(() => hudTest.flashlightContentRight());
+    assert.ok(Math.abs(chip.x + chip.width - contentRight) < 1e-6,
+      `手电文案右缘应贴住武器列表内容右缘: ${chip.x + chip.width} vs ${contentRight}`);
+    assert.ok(chip.y + chip.height <= list.area.y, '手电状态条不能覆盖武器栏');
+    // 图标与文案的墨迹中线都应落在状态条中线上（±1.5 逻辑像素），否则看起来就是没对齐。
+    const chipCenter = (chip.y + chip.height / 2) * dpr;
+    const iconCenter = await page.evaluate(() => hudTest.lampInkCenterY());
+    const textCenter = await page.evaluate(() => hudTest.lampTextInkCenterY());
+    assert.ok(iconCenter !== null && Math.abs(iconCenter - chipCenter) <= 1.5 * dpr,
+      `手电图标应垂直居中: ${iconCenter} vs ${chipCenter}`);
+    assert.ok(textCenter !== null && Math.abs(textCenter - chipCenter) <= 1.5 * dpr,
+      `手电文案应垂直居中: ${textCenter} vs ${chipCenter}`);
+    assert.ok(Math.abs(iconCenter - textCenter) <= 1.5 * dpr,
+      `手电图标与文案应共用一条中线: ${iconCenter} vs ${textCenter}`);
+
+    const greenLamp = await lampPixels(LAMP_ON);
+    const greyLamp = await lampPixels(LAMP_OFF);
+    assert.ok(greenLamp >= 14, `手电开着时图标应为绿色，实际绿色像素 ${greenLamp}`);
+    assert.ok(greenLamp > greyLamp * 3, `开灯时绿色应明显压过灰色: ${greenLamp} vs ${greyLamp}`);
 
     await page.screenshot({ path: shot('pistol-active') });
 
@@ -436,12 +527,18 @@ try {
       - (settled.rows[1].gunRect.x + settled.rows[1].gunRect.width),
     ) < 1e-6, '冲锋枪与手枪右端对齐');
 
-    // G 手电：关灯变成冷灰，再开回来。
+    // G 手电：关灯变灰，再开回绿色。150ms 渐变需要额外推进一帧以上再采样。
     await press('g');
-    const lampOff = await sample(chip.x + 12, chip.y + 13);
-    assert.ok(nearColor(lampOff, LAMP_OFF), `关灯后灯色应转冷灰，实际 ${lampOff}`);
+    await page.evaluate(() => hudTest.step(0.2));
+    const offGreen = await lampPixels(LAMP_ON);
+    const offGrey = await lampPixels(LAMP_OFF);
+    assert.ok(offGrey >= 14, `关灯后图标应转冷灰，实际灰色像素 ${offGrey}`);
+    assert.ok(offGreen <= 2, `关灯后图标不应残留绿色，实际绿色像素 ${offGreen}`);
+    await page.screenshot({ path: shot('flashlight-off') });
     await press('g');
-    assert.ok(nearColor(await sample(chip.x + 12, chip.y + 13), LAMP_ON), 'G 应能重新开灯');
+    await page.evaluate(() => hudTest.step(0.2));
+    assert.ok((await lampPixels(LAMP_ON)) >= 14, 'G 应能重新开灯');
+    await page.screenshot({ path: shot('flashlight-on') });
 
     // 调试面板开关不影响 HUD。
     await page.keyboard.press('F2');

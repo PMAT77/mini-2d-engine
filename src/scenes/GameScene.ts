@@ -20,7 +20,7 @@ import { PlayerDebugPanel } from "../ui/PlayerDebugPanel";
 import { FloatingTextSystem } from "../ui/FloatingTextSystem";
 import { WeaponListHud, getWeaponListLayout } from "../ui/WeaponListHud";
 import { preloadWeaponHudAssets } from "../ui/WeaponHudAssets";
-import { drawFlashlightHud, getFlashlightHudRect } from "../ui/FlashlightHud";
+import { FlashlightHud, getFlashlightHudRect } from "../ui/FlashlightHud";
 import { CrosshairOverlay, getCrosshairOffset } from "../ui/CrosshairOverlay";
 import { NoiseSystem } from "../core/NoiseSystem";
 import { computeAudibleGain } from "../core/SoundAttenuation";
@@ -318,6 +318,8 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly floatingTexts = new FloatingTextSystem();
   // 右侧武器列表 HUD：当前手持枪械在上，切换时与副武器交换位置
   private readonly weaponListHud = new WeaponListHud();
+  // 手电状态条：贴在武器列表上方，开关做 150ms 的绿色/灰色渐变
+  private readonly flashlightHud = new FlashlightHud();
   /**
    * 左上角圆形战术小地图：只是“玩家已知世界”的可视化，不参与碰撞、感知或掉落。
    * 地形来自探索/记忆，标记来自感知授权，GameScene 只负责组织数据。
@@ -1594,6 +1596,8 @@ export class GameScene extends Scene {  private player!: Player;
     // 切枪输入结算完再推进 HUD：第一帧的武器顺序与动画起点必须同源，
     // 否则会先用旧进度画新顺序、下一帧才重新开始交换。
     this.weaponListHud.update(delta, this.player.getWeaponLoadoutView());
+    // 手电开关已在感知之前结算，这里同帧推进状态条渐变，避免 HUD 慢一帧。
+    this.flashlightHud.update(delta, this.flashlightOn);
 
     // 空格翻滚只认下沿：按住不会连续起滚，连滚需要松开再按。
     const spaceDown = input.isKeyDown(" ");
@@ -2297,9 +2301,17 @@ export class GameScene extends Scene {  private player!: Player;
     const hudWidth = ctx.canvas.width / hudDpr;
     const hudHeight = ctx.canvas.height / hudDpr;
     const loadout = this.player.getWeaponLoadoutView();
+    const listLayout = getWeaponListLayout(hudWidth, hudHeight);
     this.weaponListHud.draw(ctx, loadout, hudWidth, hudHeight);
-    // 手电胶囊贴在武器列表上方，与列表右缘对齐。
-    drawFlashlightHud(ctx, getFlashlightHudRect(getWeaponListLayout(hudWidth, hudHeight).area), this.flashlightOn);
+    // 手电状态条贴在武器列表上方，文案右缘与弹药列右缘对齐。
+    this.flashlightHud.draw(
+      ctx,
+      getFlashlightHudRect(
+        listLayout.area,
+        listLayout.area.x + listLayout.area.width - listLayout.metrics.paddingRight,
+      ),
+      hudDpr,
+    );
     ctx.restore();
     // 拾取标记与 E 提示放在 HUD 之后：交互提示优先于静态信息，且布局已避让 HUD 区域。
     this.drawPickupPrompts(screenContext, cameraOffset);
