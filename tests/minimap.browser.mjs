@@ -128,7 +128,7 @@ try {
 
       // 5) The gold counter sits below the minimap instead of under it.
       const goldPixel = [...screen.getImageData(Math.round(28 * devicePixelRatio),
-        Math.round(200 * devicePixelRatio), 1, 1).data];
+        Math.round(240 * devicePixelRatio), 1, 1).data];
       const oldGoldPixel = [...screen.getImageData(Math.round(28 * devicePixelRatio),
         Math.round(30 * devicePixelRatio), 1, 1).data];
 
@@ -163,8 +163,8 @@ try {
     });
 
     assert.deepEqual(errors, []);
-    assert.deepEqual(result.layout, { left: 20, top: 20, diameter: 160, radius: 80,
-      centerX: 100, centerY: 100, goldRow: 194 });
+    assert.deepEqual(result.layout, { left: 20, top: 20, diameter: 200, radius: 100,
+      centerX: 120, centerY: 120, goldRow: 234 });
     assert.ok(result.unknownCells > result.exploredCells * 4,
       `unexplored area must dominate: ${JSON.stringify({ unknown: result.unknownCells, explored: result.exploredCells })}`);
     assert.ok(result.exploredCells > 0, 'spawn area should be explored');
@@ -185,7 +185,7 @@ try {
     assert.ok(result.terrainShifted && result.arrowCentered, 'terrain shifts while the arrow stays centered');
     assert.deepEqual(result.goldPixel, [255, 215, 0, 255], `gold HUD must sit below the minimap: ${JSON.stringify(result.goldPixel)}`);
     assert.equal(same([result.oldGoldPixel[0], result.oldGoldPixel[1], result.oldGoldPixel[2]], GOLD), false,
-      'the old gold position must be covered by the minimap now');
+      'the old gold position must not be gold any more');
     assert.ok(result.refreshes <= 6, `terrain cache refresh must be throttled: ${result.refreshes} refreshes in ~0.33s`);
     assert.ok(result.stats.refreshMs < 30, `terrain cache refresh took ${result.stats.refreshMs}ms`);
     assert.ok(result.drawMs < 8, `minimap draw took ${result.drawMs.toFixed(2)}ms`);

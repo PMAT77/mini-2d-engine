@@ -74,6 +74,8 @@ export interface MinimapLayout {
   top: number;
   diameter: number;
   radius: number;
+  /** 内容圆半径：半径减去外圈描边、间隙与内圈描边后，真正绘制地形的范围。 */
+  contentRadius: number;
   centerX: number;
   centerY: number;
   /** 圆形范围覆盖的世界半径。 */

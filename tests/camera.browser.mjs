@@ -41,14 +41,14 @@ try {
         const expectedContext = expected.getContext('2d');
         expectedContext.drawImage(worldCanvas, 0, 0, expected.width, expected.height);
         // Below the minimap HUD (circle + gold counter) the screen must be the world composite.
-        const hudBottom = 240 * devicePixelRatio;
+        const hudBottom = 280 * devicePixelRatio;
         const actualPixels = screen.getImageData(0, hudBottom,
           expected.width, expected.height - hudBottom).data;
         const expectedPixels = expectedContext.getImageData(0, hudBottom,
           expected.width, expected.height - hudBottom).data;
         const samePixels = actualPixels.every((value, i) => value === expectedPixels[i]);
         // The gold counter now sits just below the circular minimap.
-        const hud = [...screen.getImageData(28 * devicePixelRatio, 200 * devicePixelRatio, 1, 1).data];
+        const hud = [...screen.getImageData(28 * devicePixelRatio, 240 * devicePixelRatio, 1, 1).data];
         const x = camera.x, y = camera.y;
         camera.follow(x + camera.width / 2 + 201, y + camera.height / 2 + 126, 1 / 60);
         const follows = camera.x > x && camera.y > y;

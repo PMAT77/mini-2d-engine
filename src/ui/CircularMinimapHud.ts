@@ -209,19 +209,25 @@ export class CircularMinimapHud {
   /** 绘制一帧小地图；调用方已把画布变换设置为 DPR 逻辑像素。 */
   draw(ctx: CanvasRenderingContext2D): void {
     const layout = this.layout;
-    const radius = layout.radius;
+    const content = layout.contentRadius;
 
+    // 外圈与内圈之间的暗色底盘：两圈描边之间留出可见间隙，而不是贴在一起。
     ctx.save();
     ctx.beginPath();
-    ctx.arc(layout.centerX, layout.centerY, radius, 0, Math.PI * 2);
+    ctx.arc(layout.centerX, layout.centerY, Math.max(1, layout.radius - this.config.borderWidth), 0, Math.PI * 2);
+    ctx.fillStyle = this.palette.ringBackground;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(layout.centerX, layout.centerY, content, 0, Math.PI * 2);
     ctx.clip();
 
     ctx.fillStyle = this.palette.unknown;
-    ctx.fillRect(layout.left, layout.top, layout.diameter, layout.diameter);
+    ctx.fillRect(layout.centerX - content, layout.centerY - content, content * 2, content * 2);
 
     const cache = this.cacheCanvas;
     if (cache && this.cacheScale > 0 && layout.scale > 0) {
-      const halfWorld = radius / layout.scale;
+      const halfWorld = content / layout.scale;
       const sourceSize = halfWorld * 2 * this.cacheScale;
       const sourceX = (this.playerX - halfWorld) * this.cacheScale;
       const sourceY = (this.playerY - halfWorld) * this.cacheScale;
@@ -232,10 +238,10 @@ export class CircularMinimapHud {
           sourceY,
           sourceSize,
           sourceSize,
-          layout.centerX - radius,
-          layout.centerY - radius,
-          radius * 2,
-          radius * 2
+          layout.centerX - content,
+          layout.centerY - content,
+          content * 2,
+          content * 2
         );
       }
     }
@@ -444,25 +450,36 @@ export class CircularMinimapHud {
   }
 
   private drawBorder(ctx: CanvasRenderingContext2D): void {
-    const { centerX, centerY, radius } = this.layout;
+    const { centerX, centerY, radius, contentRadius } = this.layout;
+    const outerWidth = this.config.borderWidth;
+    const innerWidth = this.config.innerBorderWidth;
     ctx.save();
+
+    // 外圈描边：贴着圆盘最外缘。
     ctx.strokeStyle = this.palette.border;
-    ctx.lineWidth = this.config.borderWidth;
+    ctx.lineWidth = outerWidth;
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius - ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, radius - outerWidth / 2, 0, Math.PI * 2);
     ctx.stroke();
 
+    // 内圈描边：紧贴内容圆外沿，与外圈之间由 ringGap 留出空隙。
     ctx.strokeStyle = this.palette.borderInset;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = innerWidth;
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius - 3, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, contentRadius + innerWidth / 2, 0, Math.PI * 2);
     ctx.stroke();
 
-    // 北向刻度：只做 3px 细线，不抢地形。
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY - radius + 1);
-    ctx.lineTo(centerX, centerY - radius + 4.5);
-    ctx.stroke();
+    // 北向刻度：穿过两圈之间的间隙，只做一条 1px 细线，不抢地形。
+    const tickOuter = radius - outerWidth - 0.6;
+    const tickInner = contentRadius + innerWidth + 0.6;
+    if (tickOuter > tickInner) {
+      ctx.strokeStyle = this.palette.border;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY - tickOuter);
+      ctx.lineTo(centerX, centerY - tickInner);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 }

@@ -33,8 +33,12 @@ export interface MinimapConfig {
   goldIconSize: number;
   /** 黄金计数文字字体。 */
   goldFont: string;
-  /** 圆形外边框宽度。 */
+  /** 圆形外边框（外圈描边）宽度。 */
   borderWidth: number;
+  /** 外圈与内圈描边之间的暗色间隙。 */
+  ringGap: number;
+  /** 内容圆内侧那圈描边的宽度。 */
+  innerBorderWidth: number;
   /** 地形缓存窗口比显示半径多扫的世界像素，覆盖两次刷新之间的位移。 */
   windowMargin: number;
   /** 标记与圆边的最小间距（CSS 逻辑像素）。 */
@@ -58,6 +62,8 @@ export interface MinimapPalette {
   playerEdge: string;
   border: string;
   borderInset: string;
+  /** 外圈与内圈描边之间的暗色底盘，让两圈之间形成可读的间隙。 */
+  ringBackground: string;
   marker: Readonly<Record<MinimapMarkerType, string>>;
   /** 熄灭的火把：比点燃时更暗、更低饱和。 */
   markerTorchDark: string;
@@ -68,7 +74,7 @@ export interface MinimapPalette {
 export const DEFAULT_MINIMAP_CONFIG: Readonly<MinimapConfig> = Object.freeze({
   left: 20,
   top: 20,
-  diameter: 160,
+  diameter: 200,
   worldRadius: 1200,
   cacheSuperSample: 2,
   refreshInterval: 0.1,
@@ -77,7 +83,9 @@ export const DEFAULT_MINIMAP_CONFIG: Readonly<MinimapConfig> = Object.freeze({
   goldGap: 14,
   goldIconSize: 12,
   goldFont: "18px sans-serif",
-  borderWidth: 1,
+  borderWidth: 2,
+  ringGap: 6,
+  innerBorderWidth: 1,
   windowMargin: 120,
   markerPadding: 5,
   markerClusterDistance: 9,
@@ -104,7 +112,8 @@ export const DEFAULT_MINIMAP_PALETTE: Readonly<MinimapPalette> = Object.freeze({
   player: "#E7F2FF",
   playerEdge: "#0A1118",
   border: "#65727C",
-  borderInset: "#2A343C",
+  borderInset: "#3B4753",
+  ringBackground: "#05090D",
   marker: {
     mineral: "#E8BB62",
     gold: "#E0A94F",
@@ -145,6 +154,8 @@ export function createMinimapConfig(overrides: Partial<MinimapConfig> = {}): Min
   requireFinite(merged.goldGap, "goldGap");
   requirePositive(merged.goldIconSize, "goldIconSize");
   requirePositive(merged.borderWidth, "borderWidth");
+  requireFinite(merged.ringGap, "ringGap");
+  requirePositive(merged.innerBorderWidth, "innerBorderWidth");
   requireFinite(merged.windowMargin, "windowMargin");
   requireFinite(merged.markerPadding, "markerPadding");
   requireFinite(merged.markerClusterDistance, "markerClusterDistance");
@@ -168,11 +179,15 @@ export function computeMinimapLayout(
   const limit = Math.floor(Math.min(width, height) * config.maxViewportFraction);
   const diameter = Math.max(24, Math.min(config.diameter, Math.max(config.minDiameter, limit)));
   const radius = diameter / 2;
+  // 外圈描边、暗色间隙、内圈描边都从半径里让出，地形只画在内容圆内。
+  const ringWidth = config.borderWidth + config.ringGap + config.innerBorderWidth;
+  const contentRadius = Math.max(4, radius - ringWidth);
   return {
     left: config.left,
     top: config.top,
     diameter,
     radius,
+    contentRadius,
     centerX: config.left + radius,
     centerY: config.top + radius,
     worldRadius: config.worldRadius,
@@ -209,7 +224,7 @@ export function isInsideMinimap(
   padding = 0
 ): boolean {
   const point = worldToMinimap(layout, playerX, playerY, worldX, worldY);
-  const limit = Math.max(0, layout.radius - padding);
+  const limit = Math.max(0, layout.contentRadius - padding);
   return Math.hypot(point.x - layout.centerX, point.y - layout.centerY) <= limit;
 }
 
