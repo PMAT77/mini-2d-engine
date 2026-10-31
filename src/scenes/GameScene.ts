@@ -19,6 +19,7 @@ import { Chicken } from "../objects/Chicken";
 import { PlayerDebugPanel } from "../ui/PlayerDebugPanel";
 import { FloatingTextSystem } from "../ui/FloatingTextSystem";
 import { WeaponListHud, getWeaponListLayout } from "../ui/WeaponListHud";
+import { preloadWeaponHudAssets } from "../ui/WeaponHudAssets";
 import { drawFlashlightHud, getFlashlightHudRect } from "../ui/FlashlightHud";
 import { CrosshairOverlay, getCrosshairOffset } from "../ui/CrosshairOverlay";
 import { NoiseSystem } from "../core/NoiseSystem";
@@ -1394,6 +1395,8 @@ export class GameScene extends Scene {  private player!: Player;
       this.interactionEnabled = true;
       this.interaction.reset();
       this.pickupPrompt.preload();
+      // 武器 HUD 的装饰素材只触发加载，不参与启动成败判定；失败时 HUD 自己回退矢量图。
+      preloadWeaponHudAssets();
       this.tabHeld = false;
       // 准星改成独立图层：鼠标一动就更新，不必等这一帧的世界渲染。
       if (typeof document !== 'undefined') {
@@ -1484,8 +1487,7 @@ export class GameScene extends Scene {  private player!: Player;
       this.reloadVoice.stop(0.12);
       this.reloadVoice = null;
     }
-    // 右侧武器列表跟着玩家切枪走；放在 update 之后才能当帧反映切换。
-    this.weaponListHud.update(delta, this.player.getWeaponLoadoutView());
+    // 右侧武器列表的更新放在本帧 Tab/C 处理之后，保证动画起点与最终武器顺序同帧一致。
     // 用实际位移判断“在走”，顶墙原地推和被墙卡住时不会继续播放涉水声。
     const movedSpeed = delta > 0 ? Math.hypot(this.player.x - prevX, this.player.y - prevY) / delta : 0;
     this.updateWadingSound(movedSpeed);
@@ -1586,6 +1588,10 @@ export class GameScene extends Scene {  private player!: Player;
       this.weaponSwitchedThisFrame = true;
     }
     this.cHeld = cDown;
+
+    // 切枪输入结算完再推进 HUD：第一帧的武器顺序与动画起点必须同源，
+    // 否则会先用旧进度画新顺序、下一帧才重新开始交换。
+    this.weaponListHud.update(delta, this.player.getWeaponLoadoutView());
 
     // 空格翻滚只认下沿：按住不会连续起滚，连滚需要松开再按。
     const spaceDown = input.isKeyDown(" ");
