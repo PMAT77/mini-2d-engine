@@ -106,11 +106,11 @@ try {
         },
         /** 只重绘，不推进游戏逻辑：用于验证相机偏移变化时的提示布局。 */
         draw() { scene.draw(game.renderer.ctx); },
-        /** 进度框在 E 图标外 1.5px 处的左右边缘（图标中心为 box 原点 +12）。 */
+        /** 进度框在 E 图标外 1px 处的左右边缘（图标中心为 box 原点 +12）。 */
         frameEdges(box) {
           const centerX = box.x + 12;
           const centerY = box.y + 12;
-          const edge = 14.5;
+          const edge = 14;
           return {
             right: this.maxBrightness(centerX + edge, centerY, 1),
             left: this.maxBrightness(centerX - edge, centerY, 1),
@@ -178,12 +178,12 @@ try {
     state = await page.evaluate(() => pickupTest.state());
     const focusedUi = state.ui;
     const itemPoint = await page.evaluate(() => pickupTest.screen(pickupTest.state().targetX, pickupTest.state().targetY));
-    assert.equal(focusedUi.promptSide, 'right', 'the E prompt prefers the right side of the item');
-    assert.ok(focusedUi.promptBox.width > 26, 'the prompt box contains the keycap and the 拾取 text');
+    assert.equal(focusedUi.promptSide, 'right', 'the E prompt sits to the right of the item');
+    assert.ok(focusedUi.promptBox.width >= 23.5 && focusedUi.promptBox.width <= 24.5,
+      'the prompt is just the keycap: the 拾取 label was removed');
     assert.ok(focusedUi.promptBox.x >= itemPoint.x + 8, 'the prompt clears the item body');
     assert.ok(focusedUi.promptBox.x + focusedUi.promptBox.width <= 1100 - 8, 'the prompt stays inside the screen');
     assert.ok(focusedUi.promptBox.y + focusedUi.promptBox.height <= 800 - 8, 'the prompt stays inside the screen');
-    assert.ok(focusedUi.textCenter.x > focusedUi.promptBox.x + 26, 'the text follows the keycap horizontally');
     const dotPoint = { x: focusedUi.markers[0].x, y: focusedUi.markers[0].y };
     const dotInsidePrompt = dotPoint.x >= focusedUi.promptBox.x
       && dotPoint.x <= focusedUi.promptBox.x + focusedUi.promptBox.width
@@ -381,38 +381,47 @@ try {
     assert.ok(state.ui.promptBox, 'exactly one full E prompt is drawn');
     await page.screenshot({ path: `${output}/pickup-cluster-dpr${dpr}.png` });
 
-    // 14) 贴边自适应：目标靠近右缘时提示翻到左侧并留在屏幕内，方向保持稳定。
+    // 14) 方向规则：玩家从右侧靠近时提示在掉落物上方，其余情况统一在右侧。
     await page.evaluate(([cx, cy]) => {
       pickupTest.reset();
       pickupTest.spawnMeat(cx + 50, cy);
     }, [origin.x, origin.y]);
     await step(20);
     await step(8);
-    const edgeState = await page.evaluate(() => {
+    const aboveState = await page.evaluate(() => {
       const scene = pickupTest.scene;
+      const target = scene.meatPickups[0];
+      // 把玩家放到掉落物右侧，只重绘不推进模拟，验证纯布局规则。
+      scene.player.x = target.x + 40;
+      scene.player.y = target.y;
+      pickupTest.draw();
+      return pickupTest.state();
+    });
+    assert.equal(aboveState.ui.promptSide, 'above',
+      'a player approaching from the right moves the prompt above the drop');
+    assert.ok(aboveState.ui.promptBox.y + aboveState.ui.promptBox.height <= aboveState.ui.markers[0].y - 8,
+      'the prompt above the item clears the highlight dot');
+    await page.screenshot({ path: `${output}/pickup-from-right-dpr${dpr}.png` });
+
+    // 目标贴住屏幕右缘且玩家在左侧时：仍然保持在右侧，只把框夹回屏幕内。
+    const edgeState = await page.evaluate(([cx, cy]) => {
+      const scene = pickupTest.scene;
+      scene.player.x = cx;
+      scene.player.y = cy;
       const camera = scene.camera;
       const d = window.devicePixelRatio || 1;
       const canvas = window.pickupGame.renderer.ctx.canvas;
       const scale = (canvas.width / d) / camera.width;
       const snapshot = pickupTest.state();
       const anchor = pickupTest.screen(snapshot.targetX, snapshot.targetY);
-      // 目标放到右下角：右侧出界，左侧会压住角色，布局应回退到上方。
-      camera.x += (anchor.x - 1055) / scale;
-      camera.y += (anchor.y - 660) / scale;
+      camera.x += (anchor.x - 1060) / scale;
       pickupTest.draw();
       return pickupTest.state();
-    });
-    assert.equal(edgeState.ui.promptSide, 'above',
-      'both horizontal sides blocked: the prompt falls back above the item');
-    assert.ok(edgeState.ui.promptBox.x >= 8, 'the flipped prompt stays inside the screen');
+    }, [origin.x, origin.y]);
+    assert.equal(edgeState.ui.promptSide, 'right',
+      'the prompt stays on the right even when the item is near the screen edge');
+    assert.ok(edgeState.ui.promptBox.x >= 8, 'the clamped prompt stays inside the screen');
     assert.ok(edgeState.ui.promptBox.x + edgeState.ui.promptBox.width <= 1092);
-    assert.ok(edgeState.ui.promptBox.y >= 8);
-    assert.ok(edgeState.ui.promptBox.y + edgeState.ui.promptBox.height <= 792);
-    const stableSide = await page.evaluate(() => {
-      pickupTest.draw();
-      return pickupTest.state().ui.promptSide;
-    });
-    assert.equal(stableSide, 'above', 'the prompt keeps its side while the target is locked');
     await page.screenshot({ path: `${output}/pickup-edge-dpr${dpr}.png` });
 
     assert.deepEqual(errors, [], `page errors: ${errors.join('; ')}`);

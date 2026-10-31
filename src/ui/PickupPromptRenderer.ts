@@ -1,5 +1,5 @@
 /**
- * 拾取提示的纯视觉层：鸭科夫风格的小光点、物品右侧的 E + 拾取横向提示，
+ * 拾取提示的纯视觉层：鸭科夫风格的小光点、E 键帽提示，
  * 以及贴合键帽外轮廓的圆角矩形进度框。
  *
  * 只负责画，不判断按键、不结算拾取；坐标由调用方换算成屏幕 CSS 逻辑像素，
@@ -26,11 +26,8 @@ export const PICKUP_ICON_URL =
 
 /** 视觉规范（单位：屏幕 CSS 像素）。 */
 export const PICKUP_ICON_SIZE = 24;
-/** E 键与“拾取”文字之间的间距。 */
-export const PICKUP_ICON_TEXT_GAP = 5;
-export const PICKUP_TEXT_SIZE = 11.5;
 /** 键帽与进度框之间的空隙。 */
-export const PICKUP_FRAME_GAP = 1.5;
+export const PICKUP_FRAME_GAP = 1;
 /** 进度框线宽。 */
 export const PICKUP_FRAME_LINE_WIDTH = 2;
 /** 进度框圆角，与键帽视觉圆角协调。 */
@@ -46,10 +43,8 @@ export const PICKUP_MARKER_HALO_RADIUS = 8;
 export const PICKUP_MARKER_BREATH_SECONDS = 1.3;
 /** 提示淡入时间。 */
 export const PICKUP_FADE_SECONDS = 0.13;
-/** 完成拾取后提示淡出时间。 */
+/** 完成拾取后提示向下淡出的时间。 */
 export const PICKUP_FADE_OUT_SECONDS = 0.12;
-/** 完成反馈持续时间；不延迟真实结算。 */
-export const PICKUP_COMPLETION_FLASH_SECONDS = 0.08;
 
 export interface PickupMarkerDraw {
   /** 物品中心的屏幕 CSS 坐标。 */
@@ -72,17 +67,10 @@ export interface PickupPromptDraw {
   /** 0..1，只有 holding 时才绘制进度。 */
   progress: number;
   holding: boolean;
-  /** AUTO 物品不会产生 prompt。 */
-  label: string;
-  /** 剪影触觉拾取时为 false：只给通用“拾取”，不带物品信息。 */
-  named: boolean;
+  /** 玩家位于物品右侧：提示停在物品上方，否则停在右侧。 */
+  preferAbove?: boolean;
   /** 目标标识：目标变化时重新计算布局方向并重新淡入。 */
   key?: string;
-}
-
-export interface PickupPromptFeedback {
-  x: number;
-  y: number;
 }
 
 export interface PickupPromptViewport {
@@ -93,12 +81,8 @@ export interface PickupPromptViewport {
 export interface PickupPromptScene {
   markers: readonly PickupMarkerDraw[];
   prompt: PickupPromptDraw | null;
-  /** 完成拾取的短反馈；只用于视觉，不参与结算。 */
-  feedback?: PickupPromptFeedback | null;
-  /** 目标刚被拾取：让提示短暂淡出，而不是硬切。 */
+  /** 目标刚被拾取：让提示向下淡出，而不是硬切。 */
   fadeOut?: boolean;
-  /** 需要避让的 HUD 区域（屏幕 CSS），例如右侧武器列表与手电胶囊。 */
-  obstacles?: readonly LayoutBox[];
   /** 当前屏幕 CSS 可见区域。 */
   viewport: PickupPromptViewport;
 }
@@ -114,15 +98,10 @@ export interface PickupPromptDebug {
   promptSide: PromptSide | null;
   promptFade: number;
   promptCenter: LayoutPoint | null;
-  textCenter: LayoutPoint | null;
 }
 
 const WHITE = "#ffffff";
 const GOLD = "#ffd76a";
-
-/** 提示文字：浅灰白，避免纯白在暗场景里过跳。 */
-const PROMPT_TEXT_COLOR = "rgba(236, 239, 244, 0.94)";
-const PROMPT_FONT = `700 ${PICKUP_TEXT_SIZE}px system-ui, -apple-system, "Segoe UI", sans-serif`;
 
 export class PickupPromptRenderer {
   private icon: HTMLImageElement | null = null;
@@ -133,19 +112,11 @@ export class PickupPromptRenderer {
   private side: PromptSide | null = null;
   private fade = 0;
   private lastTime: number | null = null;
-  private lastPromptCenter: LayoutPoint | null = null;
 
-  /** 最近一次完整提示：完成拾取后用它做淡出，避免硬切。 */
+  /** 最近一次完整提示：完成拾取后用它做向下淡出，避免硬切。 */
   private lastPromptData: PickupPromptDraw | null = null;
-  private lastPromptDots: readonly LayoutPoint[] = [];
-  private lastPromptTargetIndex = -1;
   private fadingPrompt: PickupPromptDraw | null = null;
-  private fadingDots: readonly LayoutPoint[] = [];
-  private fadingTargetIndex = -1;
   private fadeOutElapsed = 0;
-
-  private flashStart: number | null = null;
-  private flashCenter: LayoutPoint | null = null;
 
   private debugState: PickupPromptDebug = {
     markers: [],
@@ -153,7 +124,6 @@ export class PickupPromptRenderer {
     promptSide: null,
     promptFade: 0,
     promptCenter: null,
-    textCenter: null,
   };
 
   constructor(private readonly iconUrl: string = PICKUP_ICON_URL) {}
@@ -208,9 +178,8 @@ export class PickupPromptRenderer {
       if (scene.fadeOut && this.lastPromptData && !this.fadingPrompt) {
         // 只在“拾取完成、物品已移除”这一安全时机淡出；
         // 感知或墙体导致的消失由调用方直接停掉提示，不能留下残影。
-        this.fadingPrompt = this.lastPromptData;
-        this.fadingDots = this.lastPromptDots;
-        this.fadingTargetIndex = this.lastPromptTargetIndex;
+        // 用满圈进度淡出，避免把上一帧的半圈残留成第二道“重影”。
+        this.fadingPrompt = { ...this.lastPromptData, progress: 1, holding: true };
         this.fadeOutElapsed = delta;
       } else if (this.fadingPrompt) {
         this.fadeOutElapsed += delta;
@@ -225,10 +194,6 @@ export class PickupPromptRenderer {
       markerDotPosition(marker.x, marker.y, marker.halfHeight));
     const targetIndex = scene.markers.findIndex(marker => marker.target === true);
     const secondary = secondaryMarkerIndices(dots, targetIndex, MARKER_CLUSTER_DISTANCE);
-    if (prompt) {
-      this.lastPromptDots = dots;
-      this.lastPromptTargetIndex = targetIndex;
-    }
 
     this.debugState.markers = [];
     for (let index = 0; index < scene.markers.length; index += 1) {
@@ -248,30 +213,17 @@ export class PickupPromptRenderer {
     this.debugState.promptBox = null;
     this.debugState.promptSide = null;
     this.debugState.promptCenter = null;
-    this.debugState.textCenter = null;
     this.debugState.promptFade = this.fade;
 
     if (prompt) {
-      this.drawPrompt(
-        ctx, prompt, dots, targetIndex, scene.viewport, scene.obstacles ?? [], this.fade,
-      );
+      this.drawPrompt(ctx, prompt, scene.viewport, this.fade);
     } else if (this.fadingPrompt) {
       const alpha = Math.max(0, 1 - this.fadeOutElapsed / PICKUP_FADE_OUT_SECONDS);
       this.debugState.promptFade = alpha;
-      this.drawPrompt(
-        ctx,
-        this.fadingPrompt,
-        this.fadingDots,
-        this.fadingTargetIndex,
-        scene.viewport,
-        scene.obstacles ?? [],
-        alpha,
-      );
+      this.drawPrompt(ctx, this.fadingPrompt, scene.viewport, alpha);
     } else {
       this.side = null;
     }
-
-    this.updateCompletionFlash(ctx, scene.feedback ?? null, timeSeconds);
   }
 
   private drawMarker(
@@ -317,39 +269,31 @@ export class PickupPromptRenderer {
   private drawPrompt(
     ctx: CanvasRenderingContext2D,
     prompt: PickupPromptDraw,
-    dots: readonly LayoutPoint[],
-    targetIndex: number,
     viewport: PickupPromptViewport,
-    obstacles: readonly LayoutBox[],
     alpha: number,
   ): void {
-    ctx.save();
-    ctx.font = PROMPT_FONT;
-    const textWidth = ctx.measureText(prompt.label).width;
-    ctx.restore();
-
-    const contentWidth = PICKUP_ICON_SIZE + PICKUP_ICON_TEXT_GAP + textWidth;
+    // 按住期间锁定方向：目标不变就不因为玩家小幅移动而左右跳。
+    const preferAbove = prompt.holding && this.side
+      ? this.side === "above"
+      : prompt.preferAbove === true;
     const placement = placePickupPrompt({
       anchorX: prompt.x,
       anchorY: prompt.y,
       halfWidth: prompt.halfWidth,
       halfHeight: prompt.halfHeight,
-      contentWidth,
+      contentWidth: PICKUP_ICON_SIZE,
       contentHeight: PICKUP_ICON_SIZE,
-      markers: dots,
-      targetMarker: targetIndex >= 0 ? dots[targetIndex] : null,
+      preferAbove,
       viewportWidth: viewport.width,
       viewportHeight: viewport.height,
-      previousSide: this.side,
-      obstacles,
       margin: PROMPT_SCREEN_MARGIN,
     });
     this.side = placement.side;
 
     const fade = Math.max(0, Math.min(1, alpha));
+    // 出现时轻微上移，消失时向下淡出。
     const lift = (1 - fade) * 3;
     const half = PICKUP_ICON_SIZE / 2;
-    const textX = PICKUP_ICON_SIZE + PICKUP_ICON_TEXT_GAP;
     const { box } = placement;
     const center = { x: box.x + half, y: box.y + half };
 
@@ -364,26 +308,11 @@ export class PickupPromptRenderer {
     }
 
     if (prompt.holding) this.drawProgressFrame(ctx, prompt.progress);
-
-    ctx.font = PROMPT_FONT;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.shadowColor = "rgba(0, 0, 0, 0.65)";
-    ctx.shadowBlur = 2;
-    ctx.shadowOffsetY = 1;
-    ctx.fillStyle = PROMPT_TEXT_COLOR;
-    // 粗体文字与键帽在同一中线上，避免视觉上“文字偏低”。
-    ctx.fillText(prompt.label, textX, half);
     ctx.restore();
 
-    this.lastPromptCenter = { x: center.x, y: center.y };
     this.debugState.promptBox = { ...box };
     this.debugState.promptSide = placement.side;
     this.debugState.promptCenter = { ...center };
-    this.debugState.textCenter = {
-      x: box.x + textX + textWidth / 2,
-      y: center.y,
-    };
     this.debugState.promptFade = fade;
   }
 
@@ -430,44 +359,6 @@ export class PickupPromptRenderer {
       }
       ctx.lineTo(half + point.x, half + point.y);
     }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  private updateCompletionFlash(
-    ctx: CanvasRenderingContext2D,
-    feedback: PickupPromptFeedback | null,
-    timeSeconds: number,
-  ): void {
-    if (feedback && this.flashStart === null) {
-      this.flashStart = timeSeconds;
-      this.flashCenter = this.lastPromptCenter ?? { x: feedback.x, y: feedback.y - PICKUP_ICON_SIZE };
-    }
-    if (this.flashStart === null || !this.flashCenter) return;
-
-    const progress = (timeSeconds - this.flashStart) / PICKUP_COMPLETION_FLASH_SECONDS;
-    if (progress >= 1 || progress < 0) {
-      this.flashStart = null;
-      this.flashCenter = null;
-      return;
-    }
-
-    const half = PICKUP_ICON_SIZE / 2;
-    const frameHalf = PICKUP_FRAME_SIZE / 2;
-    const grow = 1 + progress * 0.14;
-    ctx.save();
-    ctx.translate(this.flashCenter.x - half, this.flashCenter.y - half);
-    ctx.globalAlpha = (1 - progress) * 0.9;
-    ctx.strokeStyle = WHITE;
-    ctx.lineWidth = 2.5;
-    roundRect(
-      ctx,
-      half - frameHalf * grow,
-      half - frameHalf * grow,
-      PICKUP_FRAME_SIZE * grow,
-      PICKUP_FRAME_SIZE * grow,
-      PICKUP_FRAME_RADIUS + 1,
-    );
     ctx.stroke();
     ctx.restore();
   }

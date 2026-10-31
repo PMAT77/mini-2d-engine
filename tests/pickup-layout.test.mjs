@@ -14,18 +14,16 @@ const {
   PROMPT_SCREEN_MARGIN,
 } = load('ui/PickupLayout');
 
+// 提示只有键帽，没有文字，所以内容宽度等于键帽尺寸。
 const base = {
   anchorX: 500,
   anchorY: 400,
   halfWidth: 7,
   halfHeight: 7,
-  contentWidth: 54,
-  contentHeight: 26,
-  markers: [],
-  targetMarker: { x: 500, y: 400 - 7 - MARKER_GAP },
+  contentWidth: 24,
+  contentHeight: 24,
   viewportWidth: 1100,
   viewportHeight: 800,
-  previousSide: null,
 };
 const place = overrides => placePickupPrompt({ ...base, ...overrides });
 
@@ -45,89 +43,63 @@ test('dense markers keep the target as the primary dot and weaken the others', (
   assert.equal(secondary.has(2), false);
 });
 
-test('the prompt prefers the right side by default and clears the item edge', () => {
+test('the prompt sits to the right of the item by default', () => {
   const placement = place();
   assert.equal(placement.side, 'right');
   assert.equal(placement.box.x, 500 + 7 + 10);
-  assert.equal(placement.box.y, 400 - 13);
+  assert.equal(placement.box.y, 400 - 24 / 2);
 });
 
-test('a still valid previous side is kept to avoid left/right flicker', () => {
-  const placement = place({ previousSide: 'left' });
-  assert.equal(placement.side, 'left');
-  assert.equal(placement.box.x, 500 - 7 - 10 - 54);
+test('approaching from the right puts the prompt above the item', () => {
+  const placement = place({ preferAbove: true });
+  assert.equal(placement.side, 'above');
+  assert.equal(placement.box.x, 500 - 24 / 2);
+  const dotY = 400 - 7 - MARKER_GAP;
+  assert.ok(placement.box.y + placement.box.height <= dotY - MARKER_HALO_RADIUS,
+    'the prompt stays above the highlight dot halo');
+  assert.ok(placement.box.y >= PROMPT_SCREEN_MARGIN);
 });
 
-test('the prompt flips to the left near the right screen edge', () => {
+test('the right-side prompt is clamped inside the viewport', () => {
   const placement = place({ anchorX: 1060 });
-  assert.equal(placement.side, 'left');
+  assert.equal(placement.side, 'right');
   assert.ok(placement.box.x >= PROMPT_SCREEN_MARGIN);
   assert.ok(placement.box.x + placement.box.width <= 1100 - PROMPT_SCREEN_MARGIN);
 });
 
-test('both horizontal sides blocked falls back above the dot, not over it', () => {
+test('the above prompt is clamped inside the viewport near the top-left corner', () => {
   const placement = place({
-    anchorX: 50,
-    anchorY: 90,
-    halfWidth: 6,
-    halfHeight: 6,
-    targetMarker: { x: 50, y: 90 - 6 - MARKER_GAP },
+    anchorX: 10,
+    anchorY: 20,
+    preferAbove: true,
     viewportWidth: 100,
     viewportHeight: 100,
   });
   assert.equal(placement.side, 'above');
-  const dotY = 90 - 6 - MARKER_GAP;
-  assert.ok(placement.box.y + placement.box.height <= dotY - MARKER_HALO_RADIUS,
-    'the prompt must not cover the marker halo');
-});
-
-test('a nearby foreign marker blocks the preferred side', () => {
-  const placement = place({ markers: [{ x: 545, y: 400 }] });
-  assert.equal(placement.side, 'left');
-});
-
-test('reserved HUD areas push the prompt away instead of drawing underneath it', () => {
-  const placement = place({
-    obstacles: [{ x: 515, y: 380, width: 60, height: 40 }],
-  });
-  assert.notEqual(placement.side, 'right', 'the right side is reserved by the HUD');
-  const box = placement.box;
-  const obstacle = { x: 515, y: 380, width: 60, height: 40 };
-  const overlaps = box.x < obstacle.x + obstacle.width
-    && box.x + box.width > obstacle.x
-    && box.y < obstacle.y + obstacle.height
-    && box.y + box.height > obstacle.y;
-  assert.equal(overlaps, false, 'the chosen prompt box avoids the HUD obstacle');
-});
-
-test('when nothing fits, the prompt is clamped inside the viewport', () => {
-  const placement = place({
-    anchorX: 20,
-    anchorY: 20,
-    viewportWidth: 40,
-    viewportHeight: 40,
-  });
   assert.ok(placement.box.x >= PROMPT_SCREEN_MARGIN);
   assert.ok(placement.box.y >= PROMPT_SCREEN_MARGIN);
 });
 
 test('the rounded rectangle outline is continuous and quarters land on edge midpoints', () => {
-  const outline = roundedRectOutline(33, 33, 8);
-  const expectedLength = 2 * (33 + 33) - 8 * 8 + 2 * Math.PI * 8;
+  const size = 28;
+  const radius = 8;
+  const outline = roundedRectOutline(size, size, radius);
+  const expectedLength = 2 * (size + size) - 8 * radius + 2 * Math.PI * radius;
   assert.ok(Math.abs(outline.length - expectedLength) < 0.01,
     `outline length ${outline.length} should be ${expectedLength}`);
 
+  const half = size / 2;
   const first = outline.points[0];
-  assert.ok(Math.abs(first.x) < 0.01 && Math.abs(first.y + 16.5) < 0.01,
+  assert.ok(Math.abs(first.x) < 0.01 && Math.abs(first.y + half) < 0.01,
     'the path starts at the top midpoint');
 
   const pointAtDistance = distance => outline.points.reduce((best, point) =>
     Math.abs(point.distance - distance) < Math.abs(best.distance - distance) ? point : best);
   const quarter = pointAtDistance(outline.length / 4);
   const threeQuarters = pointAtDistance((outline.length * 3) / 4);
-  assert.ok(Math.abs(quarter.x - 16.5) < 1.2 && Math.abs(quarter.y) < 1.2,
+  assert.ok(Math.abs(quarter.x - half) < 1.2 && Math.abs(quarter.y) < 1.2,
     `the quarter point should sit on the right edge, got ${quarter.x},${quarter.y}`);
-  assert.ok(Math.abs(threeQuarters.x + 16.5) < 1.2 && Math.abs(threeQuarters.y) < 1.2,
+  assert.ok(Math.abs(threeQuarters.x + half) < 1.2 && Math.abs(threeQuarters.y) < 1.2,
     `the three-quarter point should sit on the left edge, got ${threeQuarters.x},${threeQuarters.y}`);
 
   for (let index = 1; index < outline.points.length; index += 1) {
@@ -135,6 +107,6 @@ test('the rounded rectangle outline is continuous and quarters land on edge midp
       'sampled distances must keep increasing');
   }
   const last = outline.points.at(-1);
-  assert.ok(Math.abs(last.x) < 0.01 && Math.abs(last.y + 16.5) < 0.01,
+  assert.ok(Math.abs(last.x) < 0.01 && Math.abs(last.y + half) < 0.01,
     'the full path closes back at the top midpoint');
 });

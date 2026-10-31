@@ -56,11 +56,7 @@ import {
   type PickupCandidate,
 } from "../interaction/PickupTargetResolver";
 import { resolvePickupVisibility, type PickupVisibilityDecision } from "../interaction/PickupVisibilityPolicy";
-import {
-  INTERACTION_PROMPT_LABEL,
-  type PickupConfig,
-  type PickupMarker,
-} from "../interaction/PickupTypes";
+import type { PickupConfig, PickupMarker } from "../interaction/PickupTypes";
 import { PickupPromptRenderer } from "../ui/PickupPromptRenderer";
 import { hasLineOfSight } from "../vision/SightGeometry";
 import type { BulletEntityHit } from "../objects/Bullet";
@@ -2198,30 +2194,9 @@ export class GameScene extends Scene {  private player!: Player;
       height: ctx.canvas.height / dpr,
     };
     const snapshot = this.interaction.getSnapshot();
-
-    const hud = getWeaponListLayout(viewport.width, viewport.height).area;
-    const flashlight = getFlashlightHudRect(hud);
-    const pad = (
-      rect: { x: number; y: number; width: number; height: number },
-      amount: number,
-    ) => ({
-      x: rect.x - amount,
-      y: rect.y - amount,
-      width: rect.width + amount * 2,
-      height: rect.height + amount * 2,
-    });
-    const obstacles = [pad(hud, 6), pad(flashlight, 4)];
-    // 提示也不该盖住角色本体：角色始终在物品附近，是稳定的避让对象。
+    // 提示只需要一个方向依据：玩家是否站在掉落物右侧。
     const playerView = this.player.getVisionState();
-    const playerHalf = (GameScene.PLAYER_SIZE / 2) * scale + 2;
-    const playerX = (playerView.x - cameraOffset.x) * scale;
-    const playerY = (playerView.y - cameraOffset.y) * scale;
-    obstacles.push({
-      x: playerX - playerHalf,
-      y: playerY - playerHalf,
-      width: playerHalf * 2,
-      height: playerHalf * 2,
-    });
+    const playerScreenX = (playerView.x - cameraOffset.x) * scale;
 
     const markers = this.pickupMarkers.map(entry => {
       const halfSize = (entry.target instanceof MeatPickup ? MeatPickup.SIZE : GoldPickup.SIZE) / 2;
@@ -2238,26 +2213,19 @@ export class GameScene extends Scene {  private player!: Player;
     if (snapshot.target && (snapshot.state === "focused" || snapshot.state === "holding")) {
       const anchor = snapshot.target.getPickupAnchor();
       const halfSize = MeatPickup.SIZE / 2 * scale;
+      const anchorX = (anchor.x - cameraOffset.x) * scale;
       prompt = {
-        x: (anchor.x - cameraOffset.x) * scale,
+        x: anchorX,
         y: (anchor.y - cameraOffset.y) * scale,
         halfWidth: halfSize,
         halfHeight: halfSize,
         progress: snapshot.progress,
         holding: snapshot.state === "holding",
-        label: INTERACTION_PROMPT_LABEL,
-        // V1 提示本身就是通用“拾取”；剪影触觉拾取更不允许带物品信息。
-        named: false,
+        // 玩家从右侧靠近时提示停在掉落物上方，其余情况统一在右侧。
+        preferAbove: playerScreenX > anchorX + 4,
         key: snapshot.targetId ?? undefined,
       };
     }
-
-    const feedback = this.completedPickupFeedback
-      ? {
-        x: (this.completedPickupFeedback.x - cameraOffset.x) * scale,
-        y: (this.completedPickupFeedback.y - cameraOffset.y) * scale,
-      }
-      : null;
 
     ctx.save();
     ctx.scale(dpr, dpr);
@@ -2266,11 +2234,9 @@ export class GameScene extends Scene {  private player!: Player;
       {
         markers,
         prompt,
-        feedback,
-        // 只在“刚完成拾取、物品已移除”时淡出；感知/墙体导致的消失没有淡出。
+        // 只在“刚完成拾取、物品已移除”时向下淡出；感知/墙体导致的消失没有淡出。
         fadeOut: !!this.completedPickupFeedback,
         viewport,
-        obstacles,
       },
       this.promptTime,
     );

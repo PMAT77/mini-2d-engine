@@ -1,5 +1,5 @@
 /**
- * 拾取提示的纯布局几何：标记点位置、密集标记聚合、提示框避让与圆角矩形路径。
+ * 拾取提示的纯布局几何：标记点位置、密集标记聚合、提示停靠位置与圆角矩形路径。
  *
  * 这里不接触 Canvas，也不读取游戏状态，方便单测；渲染器只消费计算结果。
  * 所有尺寸单位都是屏幕 CSS 逻辑像素。
@@ -72,19 +72,13 @@ export interface PromptPlacementInput {
   /** 物品可见范围的半宽/半高（屏幕 CSS）。 */
   halfWidth: number;
   halfHeight: number;
-  /** E 键 + 文字的整体内容尺寸。 */
+  /** E 键内容尺寸；V1 只有键帽，没有文字。 */
   contentWidth: number;
   contentHeight: number;
-  /** 已绘制标记点的屏幕坐标，用来避免提示压住光点。 */
-  markers: readonly LayoutPoint[];
-  /** 当前目标自己的光点；没有标记时为 null。 */
-  targetMarker: LayoutPoint | null;
+  /** 玩家位于物品右侧时提示放到物品上方，其余情况统一放右侧。 */
+  preferAbove?: boolean;
   viewportWidth: number;
   viewportHeight: number;
-  /** 上一帧的布局方向；有效时沿用，避免左右跳动。 */
-  previousSide?: PromptSide | null;
-  /** 需要避让的界面区域（例如右侧武器列表、手电胶囊），屏幕 CSS 坐标。 */
-  obstacles?: readonly LayoutBox[];
   margin?: number;
 }
 
@@ -93,120 +87,35 @@ export interface PromptPlacement {
   box: LayoutBox;
 }
 
-const SIDES: readonly PromptSide[] = ["right", "left", "above", "below"];
-
-/** 优先右侧；右侧空间不足时依次尝试左侧、上方、下方，并保持方向滞回。 */
+/**
+ * 只有两种停靠位置：默认在物品右侧；玩家从物品右侧靠近时改到物品上方，
+ * 避免提示夹在玩家与掉落物之间。无论哪种都夹回屏幕安全区。
+ */
 export function placePickupPrompt(input: PromptPlacementInput): PromptPlacement {
   const margin = input.margin ?? PROMPT_SCREEN_MARGIN;
   const { anchorX, anchorY, halfWidth, halfHeight } = input;
   const width = input.contentWidth;
   const height = input.contentHeight;
-  const itemBox: LayoutBox = {
-    x: anchorX - halfWidth - 4,
-    y: anchorY - halfHeight - 4,
-    width: halfWidth * 2 + 8,
-    height: halfHeight * 2 + 8,
-  };
-
   const dotY = anchorY - halfHeight - MARKER_GAP;
-  const candidates: Record<PromptSide, LayoutBox> = {
-    right: { x: anchorX + halfWidth + PROMPT_ITEM_GAP, y: anchorY - height / 2, width, height },
-    left: {
-      x: anchorX - halfWidth - PROMPT_ITEM_GAP - width,
-      y: anchorY - height / 2,
-      width,
-      height,
-    },
-    above: {
+
+  const box: LayoutBox = input.preferAbove
+    ? {
       x: anchorX - width / 2,
       y: dotY - MARKER_HALO_RADIUS - 4 - height,
       width,
       height,
-    },
-    below: {
-      x: anchorX - width / 2,
-      y: anchorY + halfHeight + PROMPT_ITEM_GAP,
+    }
+    : {
+      x: anchorX + halfWidth + PROMPT_ITEM_GAP,
+      y: anchorY - height / 2,
       width,
       height,
-    },
-  };
+    };
 
-  const order: PromptSide[] = [];
-  if (input.previousSide) order.push(input.previousSide);
-  for (const side of SIDES) if (!order.includes(side)) order.push(side);
-
-  const scored = order.map(side => ({
-    side,
-    box: candidates[side],
-    score: placementScore(candidates[side], {
-      margin,
-      viewportWidth: input.viewportWidth,
-      viewportHeight: input.viewportHeight,
-      itemBox,
-      targetMarker: input.targetMarker,
-      markers: input.markers,
-      obstacles: input.obstacles ?? [],
-    }),
-  }));
-
-  const valid = scored.find(candidate => candidate.score <= 1e-6);
-  if (valid) return { side: valid.side, box: valid.box };
-
-  const best = scored.reduce((a, b) => (a.score <= b.score ? a : b));
   return {
-    side: best.side,
-    box: clampBox(best.box, input.viewportWidth, input.viewportHeight, margin),
+    side: input.preferAbove ? "above" : "right",
+    box: clampBox(box, input.viewportWidth, input.viewportHeight, margin),
   };
-}
-
-interface PlacementContext {
-  margin: number;
-  viewportWidth: number;
-  viewportHeight: number;
-  itemBox: LayoutBox;
-  targetMarker: LayoutPoint | null;
-  markers: readonly LayoutPoint[];
-  obstacles: readonly LayoutBox[];
-}
-
-/** 0 表示完全可用；数值越大，出界或遮挡越严重。 */
-function placementScore(box: LayoutBox, context: PlacementContext): number {
-  let score = 0;
-  const { margin, viewportWidth, viewportHeight } = context;
-  score += Math.max(0, margin - box.x);
-  score += Math.max(0, margin - box.y);
-  score += Math.max(0, box.x + box.width - (viewportWidth - margin));
-  score += Math.max(0, box.y + box.height - (viewportHeight - margin));
-
-  score += overlapArea(box, context.itemBox);
-
-  if (context.targetMarker) {
-    score += circleOverlap(box, context.targetMarker, MARKER_HALO_RADIUS + 2);
-  }
-  for (const marker of context.markers) {
-    score += circleOverlap(box, marker, MARKER_HALO_RADIUS);
-  }
-  // 界面遮挡是硬性优先级：宁可换边，也不要压在武器列表或手电胶囊上。
-  for (const obstacle of context.obstacles) {
-    if (overlapArea(box, obstacle) > 0) score += 160;
-  }
-  return score;
-}
-
-function overlapArea(a: LayoutBox, b: LayoutBox): number {
-  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
-  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
-  if (width <= 0 || height <= 0) return 0;
-  return width * height * 2;
-}
-
-/** 圆与矩形相交时给一个稳定的惩罚值，越深入惩罚越大。 */
-function circleOverlap(box: LayoutBox, point: LayoutPoint, radius: number): number {
-  const nearestX = Math.min(Math.max(point.x, box.x), box.x + box.width);
-  const nearestY = Math.min(Math.max(point.y, box.y), box.y + box.height);
-  const distance = Math.hypot(point.x - nearestX, point.y - nearestY);
-  if (distance >= radius) return 0;
-  return (radius - distance + 1) * 90;
 }
 
 function clampBox(box: LayoutBox, viewportWidth: number, viewportHeight: number, margin: number): LayoutBox {
