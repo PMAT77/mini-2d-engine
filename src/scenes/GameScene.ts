@@ -273,7 +273,7 @@ export class GameScene extends Scene {  private player!: Player;
   private static readonly GOLD_DROP_COUNT = 10;
   private static readonly GOLD_DROP_THRESHOLDS = [0.9, 0.7, 0.5, 0.3, 0.1];
   /** 出生点周围随机游荡的小鸡数量。 */
-  private static readonly CHICKEN_COUNT = 6;
+  private static readonly CHICKEN_COUNT = 60;
   /** 同一只鸡两次叫声之间的最短间隔（秒）。 */
   private static readonly CHICKEN_CLUCK_COOLDOWN = 0.9;
   /** 同时播放的鸡叫上限：六只鸡同时受惊时只留最响的几声，世界事件一条不少。 */

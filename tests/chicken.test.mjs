@@ -42,10 +42,10 @@ test('spawn places chickens on dry walkable ground near the center and degrades 
   assert.deepEqual(Chicken.spawn(map, 0, center, seededRandom(3)), []);
 });
 
-test('the game scene adds six roaming chickens on dry ground', () => {
+test('the game scene adds sixty roaming chickens on dry ground', () => {
   const scene = new GameScene({ seed: 42 });
   const map = scene.map;
-  assert.equal(scene.chickens.length, 6);
+  assert.equal(scene.chickens.length, 60);
   scene.chickens.forEach(chicken => {
     const body = chicken.getCollider();
     assert.ok(map.isShapeWalkable(body));
