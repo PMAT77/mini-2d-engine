@@ -16,9 +16,9 @@ import { PlayerConfig } from "../objects/PlayerConfig";
 import { Chicken } from "../objects/Chicken";
 import { PlayerDebugPanel } from "../ui/PlayerDebugPanel";
 import { FloatingTextSystem } from "../ui/FloatingTextSystem";
-import { WeaponHud, getWeaponHudLayout } from "../ui/WeaponHud";
+import { WeaponListHud, getWeaponListLayout } from "../ui/WeaponListHud";
 import { drawFlashlightHud, getFlashlightHudRect } from "../ui/FlashlightHud";
-import { CrosshairOverlay } from "../ui/CrosshairOverlay";
+import { CrosshairOverlay, getCrosshairOffset } from "../ui/CrosshairOverlay";
 import { NoiseSystem } from "../core/NoiseSystem";
 
 // 导入光照系统相关类
@@ -227,21 +227,15 @@ export class GameScene extends Scene {  private player!: Player;
   private static readonly GOLD_DROP_THRESHOLDS = [0.9, 0.7, 0.5, 0.3, 0.1];
   /** 出生点周围随机游荡的小鸡数量。 */
   private static readonly CHICKEN_COUNT = 6;
-  /** 准星：未瞄准/完全收紧时的间隙，以及每秒收紧、回弹速度。 */
-  private static readonly CROSSHAIR_GAP_IDLE = 6;
-  private static readonly CROSSHAIR_GAP_AIMED = 2;
-  private static readonly CROSSHAIR_TIGHTEN_RATE = 5;
-  private static readonly CROSSHAIR_RELEASE_RATE = 8;
-  /** 尸体消失后先播放白色气团，延迟这么久再掉出肉块。 */
-  private static readonly SMOKE_TO_MEAT_DELAY = 0.12;
+  /** 准星：每秒收紧、回弹速度；外扩/内收幅度见 getCrosshairOffset。 */
+  private static readonly CROSSHAIR_TIGHTEN_RATE = 9;
+  private static readonly CROSSHAIR_RELEASE_RATE = 9;
   /** 每块鸡肉直接恢复的生命值；不再单独计数。 */
   private static readonly MEAT_HEAL = 5;
   private goldPickups: GoldPickup[] = [];
   private goldDroppedByTile = new Map<number, number>();
   /** 小鸡死亡后掉落的肉块，落地后才可收集。 */
   private meatPickups: MeatPickup[] = [];
-  /** 死亡气团播放期间等待出肉的延迟队列。 */
-  private pendingMeatDrops: { x: number; y: number; timer: number }[] = [];
 
   // 粒子系统
   private particleSystem: ParticleSystem;
@@ -259,8 +253,8 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly boundaryOverlay = new MapBoundaryOverlay();
   // 拾取飘字：在角色身边蹦出 "金块+N" / "HP+5"，1 秒后淡出
   private readonly floatingTexts = new FloatingTextSystem();
-  // 右下角主武器 HUD：武器图标、武器名、弹匣/膛内/备弹状态
-  private readonly weaponHud = new WeaponHud();
+  // 右侧武器列表 HUD：当前手持枪械在上，切换时与副武器交换位置
+  private readonly weaponListHud = new WeaponListHud();
   // 光照系统
   private lightingSystem: LightingSystem;
   private visibilitySystem = new VisibilitySystem();
@@ -750,8 +744,8 @@ export class GameScene extends Scene {  private player!: Player;
   /**
    * 小鸡受击：把真实命中交给目标结算，本方法只负责命中反馈与死亡当帧的音频收尾。
    *
-   * 致命命中不生成白烟、不掉肉、也不立刻删鸡：这些表现全部等到尸体滑行结束、
-   * 场景消费一次性 DeathFinished 之后，在最终落点统一执行。
+   * 致命命中不生成白烟、不掉肉、也不立刻删鸡：这些表现全部等到尸体滑行到
+   * 收尾距离、场景消费一次性 DeathFinished 之后，在收尾落点统一执行。
    */
   private damageChicken(chicken: Chicken, impact: BulletImpact): void {
     const result = chicken.receiveHit(impact, this.map);
@@ -766,7 +760,7 @@ export class GameScene extends Scene {  private player!: Player;
   }
 
   /**
-   * 消费一次性死亡完成事件：在尸体最终位置生成白烟、排队肉块，然后移除尸体。
+   * 消费一次性死亡完成事件：在尸体收尾位置同帧生成白烟与肉块，然后移除尸体。
    * 白烟、肉块与数组移除都只发生在这里，避免和「致命命中」混在同一帧。
    */
   private flushChickenDeaths(): void {
@@ -782,27 +776,15 @@ export class GameScene extends Scene {  private player!: Player;
     this.chickens = survivors;
   }
 
-  /** 尸体滑行完成后的统一表现：白烟跟随最终落点，肉块在烟散后开始下落。 */
+  /** 尸体滑行收尾时的统一表现：白烟与肉块同帧落在收尾位置。 */
   private resolveDeathPresentation(finished: DeathFinished): void {
     const center = new Vector2(finished.x, finished.y);
     // 慢速大颗粒形成白色气团，再补一圈快速白点。
     this.particleSystem.createExplosion(center, 28, 70, 7, 0.9,
       ["#ffffff", "#f7f7f7", "#e8e8e8"]);
     this.particleSystem.createExplosion(center, 8, 150, 4, 0.32, ["#ffffff"]);
-    this.pendingMeatDrops.push({
-      x: finished.x,
-      y: finished.y,
-      timer: GameScene.SMOKE_TO_MEAT_DELAY,
-    });
-  }
-
-  private updateMeatDrops(delta: number): void {
-    for (const drop of this.pendingMeatDrops) drop.timer -= delta;
-    const ready = this.pendingMeatDrops.filter(drop => drop.timer <= 0);
-    this.pendingMeatDrops = this.pendingMeatDrops.filter(drop => drop.timer > 0);
-    for (const drop of ready) {
-      this.meatPickups.push(new MeatPickup(drop.x - MeatPickup.SIZE / 2, drop.y - MeatPickup.SIZE / 2));
-    }
+    // 肉块与白烟同帧出现：击杀反馈要跟着击退收尾一起到，而不是再等烟散。
+    this.meatPickups.push(new MeatPickup(finished.x - MeatPickup.SIZE / 2, finished.y - MeatPickup.SIZE / 2));
   }
 
   private updateMeatPickups(delta: number): void {
@@ -1148,13 +1130,13 @@ export class GameScene extends Scene {  private player!: Player;
     // 更新玩家状态
     const prevX = this.player.x, prevY = this.player.y;
     this.player.update(delta, input, this.map, this.getPointerAim(input));
-    // 换弹完成、被开火打断或切走时收掉没放完的换弹声，别压到下面那声枪响。
+    // 换弹完成、被翻滚打断或切走时收掉没放完的换弹声，别压到下面那声枪响。
     if (this.reloadVoice && !this.player.getWeaponView().isReloading) {
       this.reloadVoice.stop(0.12);
       this.reloadVoice = null;
     }
-    // 主武器 HUD 跟着玩家弹药走；放在 update 之后才能当帧反映开火/换弹。
-    this.weaponHud.update(delta, this.player.getWeaponView());
+    // 右侧武器列表跟着玩家切枪走；放在 update 之后才能当帧反映切换。
+    this.weaponListHud.update(delta, this.player.getWeaponLoadoutView());
     // 用实际位移判断“在走”，顶墙原地推和被墙卡住时不会继续播放涉水声。
     const movedSpeed = delta > 0 ? Math.hypot(this.player.x - prevX, this.player.y - prevY) / delta : 0;
     this.updateWadingSound(movedSpeed);
@@ -1197,8 +1179,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 检查玩家与道具的碰撞
     this.checkPickupCollisions();
     this.updateGoldPickups(delta);
-    // 先结算死亡延迟，再让已落地的肉块参与拾取。
-    this.updateMeatDrops(delta);
+    // 白烟与肉块同帧出现，肉块当帧就开始下落。
     this.updateMeatPickups(delta);
 
     // 相机跟随玩家中心位置
@@ -1776,7 +1757,7 @@ export class GameScene extends Scene {  private player!: Player;
         ctx.restore();
       }
     }
-    // 界外毛玻璃压在世界层上、玩家 UI 之下：缩放与相机震动完全一致，且不遮住血条。
+    // 界外毛玻璃压在世界层上、屏幕层 HUD 之下：缩放与相机震动完全一致。
     this.boundaryOverlay.draw(ctx, cameraOffset.x, cameraOffset.y,
       this.map.width * this.map.tileSize, this.map.height * this.map.tileSize,
       screenContext.canvas.width / ctx.canvas.width, window.devicePixelRatio || 1);
@@ -1814,18 +1795,17 @@ export class GameScene extends Scene {  private player!: Player;
     ctx.textBaseline = "middle";
     ctx.fillText(`黄金 ${this.player.getGold()}`, 46, 32);
     ctx.restore();
-    // 右下角主武器 HUD：单独按 dpr 缩放成逻辑像素，避免继承资源栏的 transform。
+    // 屏幕层 HUD：右侧武器列表与手电胶囊；生命/体力条仍在角色脚边。
+    // 单独按 dpr 缩放成逻辑像素，避免继承资源栏的 transform。
     ctx.save();
     const hudDpr = window.devicePixelRatio || 1;
     ctx.scale(hudDpr, hudDpr);
     const hudWidth = ctx.canvas.width / hudDpr;
     const hudHeight = ctx.canvas.height / hudDpr;
-    const weaponView = this.player.getWeaponView();
-    this.weaponHud.draw(ctx, weaponView, hudWidth, hudHeight);
-    // 手电胶囊贴在武器卡片上方，与卡片右缘对齐。
-    const compact = this.weaponHud.getLastStatus()?.showAmmo === false;
-    const card = getWeaponHudLayout(hudWidth, hudHeight, compact, weaponView.magazineSize).card;
-    drawFlashlightHud(ctx, getFlashlightHudRect(card), this.flashlightOn);
+    const loadout = this.player.getWeaponLoadoutView();
+    this.weaponListHud.draw(ctx, loadout, hudWidth, hudHeight);
+    // 手电胶囊贴在武器列表上方，与列表右缘对齐。
+    drawFlashlightHud(ctx, getFlashlightHudRect(getWeaponListLayout(hudWidth, hudHeight).area), this.flashlightOn);
     ctx.restore();
     this.updateCrosshair();
   }
@@ -1870,8 +1850,8 @@ export class GameScene extends Scene {  private player!: Player;
   }
 
   /**
-   * 准星外观每帧刷新（张开间距、压住活鸡时转红）；位置由 pointermove 直接写图层，
-   * 所以世界帧再慢，准星也不会落后于鼠标。
+   * 准星外观每帧刷新（瞄准内收、后坐力外扩、压住活鸡时左右括弧转红）；位置由
+   * pointermove 直接写图层，所以世界帧再慢，准星也不会落后于鼠标。
    */
   private updateCrosshair(): void {
     const overlay = this.crosshairOverlay;
@@ -1895,10 +1875,8 @@ export class GameScene extends Scene {  private player!: Player;
     const dt = Math.min(Math.max(this.deltaSinceLastFrame, 0), 0.1);
     const rate = onTarget ? GameScene.CROSSHAIR_TIGHTEN_RATE : -GameScene.CROSSHAIR_RELEASE_RATE;
     this.crosshairTighten = Math.min(1, Math.max(0, this.crosshairTighten + rate * dt));
-    const gap = GameScene.CROSSHAIR_GAP_IDLE
-      + (GameScene.CROSSHAIR_GAP_AIMED - GameScene.CROSSHAIR_GAP_IDLE) * this.crosshairTighten
-      + this.player.getRecoilState().intensity * 8;
-    overlay.setAppearance(gap, overTarget);
+    const offset = getCrosshairOffset(this.player.getRecoilState().intensity, this.crosshairTighten);
+    overlay.setAppearance(offset, overTarget);
   }
 
   /** 准星中心是否压在活鸡的命中圆内；与子弹使用同一套命中判定。 */

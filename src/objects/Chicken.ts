@@ -31,8 +31,8 @@ const SILHOUETTE_COLOR = "#ffffff";
  *
  * 只在地图的干燥可行走地面上自由游荡；物理、贴墙滑动和地图边界全部复用 Entities。
  * 真实命中由 receiveHit 结算：致命后进入 dying，用独立的 KnockbackMotion 继续滑行，
- * 滑行结束或达到最长可见时间才进入 removed 并发出一次死亡完成事件。世界坐标、碰撞体
- * 与死亡结算都不依赖绘制姿态，未来 2D Rig 只需替换 getHitReactionPose 的消费者。
+ * 滑到只剩收尾距离（或达到最长可见时间）才进入 removed 并发出一次死亡完成事件。世界坐标、
+ * 碰撞体与死亡结算都不依赖绘制姿态，未来 2D Rig 只需替换 getHitReactionPose 的消费者。
  */
 export class Chicken extends Entities {
   /** 身体直径（世界像素）。造型会略微超出碰撞圆，但不会回写尺寸。 */
@@ -65,6 +65,8 @@ export class Chicken extends Entities {
   private lifeState: LifeState = "alive";
   /** 致命命中后的存活时间，用于最短可见/最长收尾。 */
   private deathAge = 0;
+  /** 本次死亡滑行到「只剩收尾距离」的解析时刻，秒；死亡表现在这里统一播放。 */
+  private deathSettleSeconds = 0;
   /** 一次性死亡完成事件；被场景消费后清空。 */
   private deathFinished: DeathFinished | null = null;
   private readonly knockbackProfile = CHICKEN_KNOCKBACK_PROFILE;
@@ -132,8 +134,8 @@ export class Chicken extends Entities {
   /**
    * 结算一次真实命中。返回 ignored / damaged / killed。
    *
-   * 致命命中只切换生命周期，不删除实体：尸体继续用独立击退速度滑行，
-   * 由 update 在滑行结束或达到最长可见时间后进入 removed，并通过
+   * 致命命中只切换生命周期，不删除实体：尸体继续用独立击退速度滑行，滑到只剩
+   * deathSettleDistance（或达到最长可见时间）就进入 removed，并通过
    * consumeDeathFinished() 发出唯一一次死亡完成事件。击退参数只来自目标配置
    * 与本次命中数据，命中点位置与准星位置都不参与强度计算。
    */
@@ -154,6 +156,9 @@ export class Chicken extends Entities {
       this.velocity.set(0, 0);
     }
     const appliedSpeed = this.ensureKnockback(world)?.addImpact(impact, lethal) ?? 0;
+    // 死亡表现在滑行还剩收尾距离时就播放，收尾时刻在命中帧一次算定，
+    // 避免逐帧判断「是否已经停稳」带来的帧率差异。
+    if (lethal) this.deathSettleSeconds = this.resolveDeathSettleSeconds(appliedSpeed);
     // 受击姿态强度由通用 combat 层计算，未来敌人类复用同一公式。
     this.hitIntensity = computeHitIntensity(impact, this.knockbackProfile, appliedSpeed);
     return lethal ? "killed" : "damaged";
@@ -277,18 +282,34 @@ export class Chicken extends Entities {
   }
 
   /**
-   * 死亡滑行：继续按独立击退速度移动，满足「已停稳且达到最短可见时间」或
-   * 「达到最长可见时间」时进入 removed，并留下一次性死亡完成事件。
+   * 死亡滑行：按命中帧算定的收尾时刻推进，最多滑到该时刻为止。
+   *
+   * 这样做的好处是尸体在「击退还没完全停下」时就交出死亡完成事件，
+   * 而收尾位姿仍然是确定的：每个子步都只做解析积分，只把最后一帧截短到收尾
+   * 时刻，不同帧率下累积的位移完全一致。
    */
   private updateDying(delta: number, map?: TileMap): void {
-    this.deathAge += delta;
-    if (map) this.knockback?.update(delta);
-    const resting = !this.knockback || !this.knockback.isActive();
+    const previous = this.deathAge;
+    this.deathAge = Math.min(this.deathAge + delta, this.deathSettleSeconds);
+    const step = this.deathAge - previous;
+    if (map && step > 0) this.knockback?.update(step);
+    if (this.deathAge >= this.deathSettleSeconds) this.finishDeath();
+  }
+
+  /**
+   * 解析求解本次死亡滑行到「只剩 deathSettleDistance」的时刻。
+   *
+   * 减速位移的闭式解是 s(t) = v0(1 - e^-kt)/k，剩余距离为 v0·e^-kt/k；
+   * 令剩余距离等于 D 得 t = ln(v0 / (D·k)) / k。速度还会在 stopSpeed 处直接
+   * 停住，所以截止速度取 max(D·k, stopSpeed)：D = 0 时自然退化成「必须停稳」，
+   * 没有击退（v0 = 0）时退化成最短可见时间。结果再夹在最短/最长可见时长之间。
+   */
+  private resolveDeathSettleSeconds(speed: number): number {
     const profile = this.knockbackProfile;
-    if (this.deathAge >= profile.maxDeathSeconds ||
-      (resting && this.deathAge >= profile.minDeathSeconds)) {
-      this.finishDeath();
-    }
+    const damping = profile.damping > 0 ? profile.damping : 1;
+    const cutoffSpeed = Math.max(profile.deathSettleDistance * damping, profile.stopSpeed);
+    const raw = speed > cutoffSpeed ? Math.log(speed / cutoffSpeed) / damping : 0;
+    return Math.min(Math.max(raw, profile.minDeathSeconds), profile.maxDeathSeconds);
   }
 
   private finishDeath(): void {

@@ -12,6 +12,7 @@ const {
 } = load('combat/KnockbackProfiles');
 const { circleCollider } = load('physics/Collider');
 const { Chicken } = load('objects/Chicken');
+const { MeatPickup } = load('objects/MeatPickup');
 const { TileMap } = load('map/TileMap');
 const { GameScene } = load('scenes/GameScene');
 const { seededRandom } = load('map/WaterTerrain');
@@ -139,10 +140,12 @@ test('60 Hz and 120 Hz death slides agree at a fixed total time', () => {
   for (let i = 0; i < 18; i++) sixty.update(1 / 60, idle, map);
   for (let i = 0; i < 36; i++) hundredTwenty.update(1 / 120, idle, map);
   assert.ok(Math.abs(sixty.x - hundredTwenty.x) < 0.05, `${sixty.x} vs ${hundredTwenty.x}`);
-  assert.equal(sixty.getLifeState(), 'dying');
+  // 0.3 秒时两边都已经滑到收尾距离并结束滑行，端点仍由解析积分保证一致。
+  assert.equal(sixty.getLifeState(), 'removed');
+  assert.equal(hundredTwenty.getLifeState(), 'removed');
 });
 
-test('presentation waits for the death event: no puff or drop until the corpse settles', () => {
+test('the death event fires while the corpse is still sliding, and the drop lands with the puff', () => {
   const scene = new GameScene({ seed: 42, generateWater: false });
   scene.loaded = true;
   scene.map = dryMap();
@@ -172,7 +175,7 @@ test('presentation waits for the death event: no puff or drop until the corpse s
     frames++;
   }
   assert.equal(chicken.getLifeState(), 'dying', 'the bullet must connect within a few frames');
-  assert.equal(scene.pendingMeatDrops.length, 0, 'the hit frame must not queue a drop');
+  assert.equal(scene.meatPickups.length, 0, 'the hit frame must not drop meat');
   assert.equal(scene.particleSystem.getPerformanceStats().activeParticles, 0, 'no death puff on the hit frame');
   assert.equal(scene.chickens.length, 1, 'the dying corpse stays in the scene');
 
@@ -182,15 +185,15 @@ test('presentation waits for the death event: no puff or drop until the corpse s
   }
   assert.equal(scene.chickens.length, 0);
   assert.ok(finished, 'the scene must consume exactly one death event');
-  assert.ok(finished.elapsedSeconds >= 0.14);
-  assert.ok(scene.pendingMeatDrops.length === 1, 'one drop is queued at the final position');
-  assert.deepEqual(
-    { x: scene.pendingMeatDrops[0].x, y: scene.pendingMeatDrops[0].y },
-    { x: finished.x, y: finished.y },
-  );
-  assert.ok(scene.particleSystem.getPerformanceStats().activeParticles > 0, 'the puff starts only now');
-  assert.ok(Math.abs(finished.x - center.x) > 25, 'the death event follows the slide');
+  // 白雾在收尾距离处就播放，不等阻尼把尸体彻底拖停（彻底停下需要约 0.48 秒）。
+  assert.ok(finished.elapsedSeconds >= 0.14, `finished too early: ${finished.elapsedSeconds}`);
+  assert.ok(finished.elapsedSeconds < 0.3, `finished too late: ${finished.elapsedSeconds}`);
+  assert.ok(Math.abs(finished.x - center.x) > 25, 'the death event follows most of the slide');
+  assert.ok(Math.abs(finished.x - center.x) < 38.6, 'the corpse must not finish the whole slide');
 
-  for (let i = 0; i < 10; i++) scene.update(1 / 60, idle);
-  assert.equal(scene.meatPickups.length, 1);
+  // 白烟与肉块同帧出现：事件帧既要有粒子，也要有肉块，落在同一个收尾位置。
+  assert.ok(scene.particleSystem.getPerformanceStats().activeParticles > 0, 'the puff starts on the event frame');
+  assert.equal(scene.meatPickups.length, 1, 'the meat drops on the same frame as the puff');
+  assert.ok(Math.abs(scene.meatPickups[0].x - (finished.x - MeatPickup.SIZE / 2)) < 1e-9);
+  assert.ok(Math.abs(scene.meatPickups[0].y - (finished.y - MeatPickup.SIZE / 2)) < 1e-9);
 });

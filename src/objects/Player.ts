@@ -13,7 +13,7 @@ import type { RollConfig, WeaponShootingConfig } from "./PlayerConfig";
 import { ColliderShape } from "../physics/Collider";
 import type { VisionState } from "../core/VisibilitySystem";
 import type { FootstepEvent } from "./FootprintSystem";
-import type { ReloadMode, WeaponKind, WeaponSlot, WeaponView } from "./Weapon";
+import type { ReloadMode, WeaponKind, WeaponLoadoutView, WeaponSlot, WeaponView } from "./Weapon";
 import { drawMuzzleFlame } from "./WeaponVisuals";
 import { getRollPose, interpolateRollPose, rollEntryBlend, rollExitBlend, rollStowedAlpha, rollVisualAngle, ROLL_REST_POSE } from "./RollPose";
 import { advancePlayerAnimation, createPlayerRenderSnapshot, getPlayerMuzzleWorld, renderPlayerSnapshot } from "./animation/PlayerVisualAdapter";
@@ -198,6 +198,8 @@ export class Player extends Entities {
   getStamina(): number { return this.stamina; }
   getMaxStamina(): number { return this.sprint.maxStamina; }
   getIsSprinting(): boolean { return this.sprinting; }
+  /** 体力耗尽锁定中：必须松开过 Shift 且恢复到阈值才能再次疾跑。 */
+  getIsExhausted(): boolean { return this.exhausted; }
   /** 翻滚动作是否进行中。 */
   isRolling(): boolean { return this.rollTimeLeft > 1e-9; }
   /** 翻滚进度 0–1；不在翻滚时为 0。 */
@@ -578,6 +580,8 @@ export class Player extends Entities {
     this.movementTime = 0;
     this.stopTime = 0;
     this.muzzleFlashTime = 0;
+    // 翻滚打断补弹：已经装进弹匣的子弹保留，补弹进度清零，起身后要重新按 R。
+    this.cancelReload();
     // 不重置 armLift / shotPoseTime：翻滚入场和收尾都要混合回“真实的”抬枪姿态，
     // 起滚瞬间把手臂清零反而会在第一帧产生跳变。翻滚期间不开火，由射击限制兜底。
     if (this.roll.staminaCost > 0) {
@@ -1188,9 +1192,10 @@ export class Player extends Entities {
     if (this.fireCooldown > 1e-9) return;
     // 空手 / 近战槽没有枪，不能开火。
     if (!this.isArmed()) return;
-    // 没有子弹时只能等换弹；射击打断换弹会清零进度，必须重新按 R。
+    // 没有子弹时只能等换弹。
     if (!this.hasAmmo()) return;
-    if (this.isReloading) this.cancelReload();
+    // 补弹未完成时禁止射击：不发射、不消耗、也不打断补弹；想提前结束只能翻滚。
+    if (this.isReloading) return;
     // Preserve a sub-frame remainder without replaying missed shots after a long frame.
     this.fireCooldown = this.getFireRate() + Math.min(0, this.fireCooldown);
 
@@ -1289,7 +1294,7 @@ export class Player extends Entities {
     this.onReloadCallback?.(mode);
   }
 
-  /** 中止补弹并清零进度；开火会打断补弹。 */
+  /** 中止补弹并清零进度；翻滚会打断补弹。 */
   private cancelReload(): void {
     this.isReloading = false;
     this.reloadRemaining = 0;
@@ -1340,7 +1345,7 @@ export class Player extends Entities {
   update(delta: number, input: Input, map?: TileMap, aim?: PlayerAimInput): void {
     if (!Number.isFinite(delta) || delta < 0) return;
     this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y) ? aim : undefined;
-    this.isShooting = !!this.pointerAim?.fire && !this.isRolling();
+    this.isShooting = !!this.pointerAim?.fire && !this.isRolling() && !this.isReloading;
     this.updateRecoil(delta);
     if (this.hitReactTime > 0) this.hitReactTime = Math.max(0, this.hitReactTime - delta);
     if (this.weaponSwapTime > 0) this.weaponSwapTime = Math.max(0, this.weaponSwapTime - delta);
@@ -1482,17 +1487,33 @@ export class Player extends Entities {
 
   /** HUD 用的当前武器快照；每帧读取一次，避免 UI 直接摸内部字段。 */
   getWeaponView(): WeaponView {
+    return this.getWeaponViewForSlot(this.activeSlot);
+  }
+
+  /** 指定槽位的武器快照；读取它不会改变当前手持槽位。 */
+  getWeaponViewForSlot(slot: WeaponSlot): WeaponView {
+    const state = this.weapons[slot];
     return {
-      slot: this.activeSlot,
-      name: this.weaponName,
-      kind: this.weaponKind,
-      magazineAmmo: this.magazineAmmo,
-      magazineSize: this.magazineSize,
-      chambered: this.chambered,
-      reserveAmmo: this.reserveAmmo,
-      isReloading: this.isReloading,
-      reloadMode: this.reloadMode,
-      reloadProgress: this.getReloadProgress(),
+      slot,
+      name: state.name,
+      kind: state.kind,
+      magazineAmmo: state.magazineAmmo,
+      magazineSize: state.magazineSize,
+      chambered: state.chambered,
+      reserveAmmo: state.reserveAmmo,
+      isReloading: state.isReloading,
+      reloadMode: state.reloadMode,
+      reloadProgress: this.getReloadProgressFor(state),
+    };
+  }
+
+  /** 右侧武器列表需要的整组快照：当前槽位与三个槽各自独立的弹药/换弹状态。 */
+  getWeaponLoadoutView(): WeaponLoadoutView {
+    return {
+      activeSlot: this.activeSlot,
+      primary: this.getWeaponViewForSlot("primary"),
+      secondary: this.getWeaponViewForSlot("secondary"),
+      melee: this.getWeaponViewForSlot("melee"),
     };
   }
 
@@ -1521,9 +1542,13 @@ export class Player extends Entities {
 
   /** 换弹进度（0-1）；未换弹时为 0。 */
   getReloadProgress(): number {
-    const total = this.reloadTotal || this.reloadDuration;
-    if (!this.isReloading || total <= 0) return 0;
-    return Math.max(0, Math.min(1, 1 - this.reloadRemaining / total));
+    return this.getReloadProgressFor(this.weapon);
+  }
+
+  private getReloadProgressFor(state: WeaponState): number {
+    const total = state.reloadTotal || state.reloadDuration;
+    if (!state.isReloading || total <= 0) return 0;
+    return Math.max(0, Math.min(1, 1 - state.reloadRemaining / total));
   }
 
   /** 枪口火焰剩余时间（秒）；仅供测试和调试。 */
@@ -1664,7 +1689,7 @@ export class Player extends Entities {
     };
   }
 
-  /** Screen-space overlays are drawn after lighting. */
+  /** 绘制角色脚边的血条、体力条与涉水/换弹指示。 */
   drawUI(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
     this.drawWadingIndicator(ctx, offsetX, offsetY);
     this.drawReloadRing(ctx, offsetX, offsetY);

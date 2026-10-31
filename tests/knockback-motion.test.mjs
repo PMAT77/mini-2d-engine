@@ -64,6 +64,7 @@ test('the default chicken profile matches the design table', () => {
     deathImpulseMultiplier: 1,
     minDeathSeconds: 0.14,
     maxDeathSeconds: 0.45,
+    deathSettleDistance: 12,
     immuneToDisplacement: false,
   });
   assert.ok(Object.isFrozen(CHICKEN_KNOCKBACK_PROFILE));
@@ -75,6 +76,7 @@ test('profiles reject impossible values and freeze valid ones', () => {
   assert.throws(() => createKnockbackProfile({ damping: 0 }), /damping/);
   assert.throws(() => createKnockbackProfile({ maxSpeed: NaN }), /maxSpeed/);
   assert.throws(() => createKnockbackProfile({ minDeathSeconds: 0.6, maxDeathSeconds: 0.4 }), /maxDeathSeconds/);
+  assert.throws(() => createKnockbackProfile({ deathSettleDistance: -1 }), /deathSettleDistance/);
   assert.throws(() => createKnockbackProfile({ immuneToDisplacement: 'yes' }), /immuneToDisplacement/);
   assert.throws(() => validateKnockbackProfile(null), /对象/);
   const heavy = createKnockbackProfile({ mass: 6, resistance: 0.5 });

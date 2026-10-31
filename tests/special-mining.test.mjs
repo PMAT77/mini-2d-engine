@@ -144,31 +144,23 @@ test('special ores block movement, bullets and light until destruction and retai
   }
 });
 
-test('seeded generation reproducibly replaces about five percent of remaining ore, with all five special types', () => {
-  let total = 0, special = 0;
-  const counts = new Map(SPECIAL_MINERAL_TYPES.map(type => [type, 0]));
+test('seeded generation keeps gold ore as the only drop-bearing tile', () => {
+  let minerals = 0;
   for (const seed of [0, 1, 42, 8351, 99999, 72, 8352, 2026, 1234, 9876]) {
     const a = new TileMap(100, 100, { seed }), b = new TileMap(100, 100, { seed });
     assert.deepEqual(a.tiles, b.tiles); assert.deepEqual(a.tileHp, b.tileHp);
     assert.deepEqual(a.water.lakes, b.water.lakes);
     for (let row = 0; row < a.height; row++) for (let col = 0; col < a.width; col++) {
       const type = a.tiles[row][col];
-      if (type === 'mineral' || counts.has(type)) total++;
-      if (counts.has(type)) {
-        special++; counts.set(type, counts.get(type) + 1);
-        assert.equal(a.tileHp[row][col], 100);
-        assert.equal(a.terrainMap.get(type).baseProbability, 0);
-        assert.equal(a.terrainMap.get(type).inheritProbability, 0);
-        assert.equal(a.water.getCell(col, row, 50), undefined);
-      }
+      if (type === 'mineral') { minerals++; assert.equal(a.tileHp[row][col], 100); }
+      assert.ok(!SPECIAL_MINERAL_TYPES.includes(type), `unexpected ${type} at ${col},${row}`);
     }
   }
-  assert.ok(special / total > .035 && special / total < .065, `${special}/${total}`);
-  for (const count of counts.values()) assert.ok(count > special * .1 && count < special * .3);
+  assert.ok(minerals > 0, 'generated maps still contain gold ore');
 });
 
-test('special replacement preserves the original seeded base geometry and water layout', () => {
-  // Captured from the generator before the special-ore replacement pass.
+test('removing the special replacement pass preserves the original seeded base geometry and water layout', () => {
+  // Captured from the generator before the special-ore replacement pass was removed.
   const snapshots = [
     [0, '775e2c17f81ee80a19d1890ad5301c64f179424f21f5952d1b9327c7a207b450', '6cccc8d8620d4b6954e59c147ddc7733900f1a8a4a7d670fc0356e7f5b8619a8'],
     [42, 'ae312e9626723fb103f296b04fe978302395e9bf1c71ed1f478070d622cca724', 'e339772050a0e925968c90c3a5730de4040c2e0a75846595fb375aec1b05b345'],

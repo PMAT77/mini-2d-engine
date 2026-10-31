@@ -18,11 +18,12 @@ try {
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(`${base}/?vision=legacy`);
     await page.evaluate(async () => { window.shootingGame = (await import('/src/main.ts')).game; });
-    assert.equal(await page.locator('canvas').evaluate(c => c.dispatchEvent(new MouseEvent('contextmenu', { cancelable: true }))), true);
+    assert.equal(await page.locator('body > canvas').evaluate(c => c.dispatchEvent(new MouseEvent('contextmenu', { cancelable: true }))), true);
     await page.keyboard.down('Enter');
     await page.waitForFunction(() => shootingGame.sceneManager.getCurrentScene()?.loaded && document.querySelector('[data-player-debug]'));
     await page.keyboard.up('Enter');
     await page.mouse.move(500, 300);
+    await page.waitForFunction(() => document.querySelector('[data-crosshair="root"]')?.dataset.crosshairImage === 'loaded', null, { timeout: 5000 });
     await page.screenshot({ path: join(output, 'mouse-gameplay-dpr' + dpr + '.png') });
     await page.evaluate(() => {
       const s = shootingGame.sceneManager.getCurrentScene();
@@ -51,6 +52,22 @@ try {
         client(x, y) { const v = scene.displayedView, r = scene.getCanvasViewport(); return { x: r.left + (x - v.x) * r.width / v.width, y: r.top + (y - v.y) * r.height / v.height }; },
         reset() { p.bullets = []; p.fireCooldown = 0; p.recoil = 0; p.setDebugState({ magazineAmmo: 6, chambered: true }); this.shots = 0; },
       };
+      // 准星改成 canvas 精灵后，颜色/张开幅度只能靠像素统计和 dataset 验证。
+      window.reticleStats = () => {
+        const root = document.querySelector('[data-crosshair="root"]');
+        if (!root) return null;
+        const canvas = root.querySelector('[data-crosshair="canvas"]');
+        const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+        let idle = 0, red = 0, opaque = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 32) continue;
+          opaque++;
+          if (data[i] > 180 && data[i + 1] < 120 && data[i + 2] < 120) red++;
+          else if (data[i] > 120 && data[i + 1] > 120 && data[i + 2] > 120) idle++;
+        }
+        return { idle, red, opaque, offset: Number(root.dataset.crosshairOffset), target: root.dataset.crosshairTarget === '1',
+          image: root.dataset.crosshairImage, canvas: { width: canvas.width, height: canvas.height } };
+      };
       p.setOnShootCallback(() => mouseTest.shots++); mouseTest.render();
     });
     await page.mouse.move(500, 300);
@@ -63,15 +80,20 @@ try {
         const r = t.scene.getCanvasViewport(), o = c.getOffset(), target = t.scene.screenToWorld(500, 300);
         const bounds = t.game.renderer.ctx.canvas.getBoundingClientRect();
         const root = document.querySelector('[data-crosshair="root"]'), box = root.getBoundingClientRect();
-        const color = selector => getComputedStyle(root.querySelector(selector)).backgroundColor;
-        return { target, border: { left: r.left - bounds.left, top: r.top - bounds.top, width: bounds.width - r.width, height: bounds.height - r.height }, expected: { x: o.x + (500 - r.left) * t.scene.worldCanvas.width / r.width, y: o.y + (300 - r.top) * t.scene.worldCanvas.height / r.height }, overlay: { display: getComputedStyle(root).display, x: box.x, y: box.y }, arm: color('[data-crosshair="arm"]'), center: color('[data-crosshair="dot"]'), cursor: t.game.renderer.ctx.canvas.style.cursor };
+        return { target, border: { left: r.left - bounds.left, top: r.top - bounds.top, width: bounds.width - r.width, height: bounds.height - r.height }, expected: { x: o.x + (500 - r.left) * t.scene.worldCanvas.width / r.width, y: o.y + (300 - r.top) * t.scene.worldCanvas.height / r.height }, overlay: { display: getComputedStyle(root).display, x: box.x, y: box.y }, reticle: reticleStats(), cursor: t.game.renderer.ctx.canvas.style.cursor };
       }, shake);
       near(check.target.x, check.expected.x); near(check.target.y, check.expected.y);
       assert.deepEqual(check.border, { left: 2, top: 2, width: 4, height: 4 }, 'the bitmap excludes the existing canvas border');
       // The reticle is a DOM layer at the pointer position, so zoom, shake and DPR cannot move it.
       assert.equal(check.overlay.display, 'block', 'the reticle overlay is visible');
       near(check.overlay.x, 500, .75); near(check.overlay.y, 300, .75);
-      assert.equal(check.center, 'rgb(216, 250, 255)'); assert.equal(check.arm, 'rgb(216, 250, 255)', 'idle crosshair arms are white'); assert.equal(check.cursor, 'none');
+      assert.equal(check.reticle.image, 'loaded', 'the crosshair asset finished loading');
+      assert.ok(check.reticle.opaque > 0, 'the crosshair sprite draws pixels');
+      assert.ok(check.reticle.idle > 0, 'the idle crosshair uses the pale-cyan tint');
+      assert.equal(check.reticle.red, 0, 'the idle crosshair has no red pixels');
+      near(check.reticle.offset, 0, .2); assert.equal(check.reticle.target, false);
+      assert.equal(check.reticle.canvas.width, Math.round(64 * dpr), 'the reticle canvas matches the device pixel ratio');
+      assert.equal(check.cursor, 'none');
       // 对局内系统指针隐藏（页面级），只留准星；调试面板自己保留可点击指针。
       assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), true, 'system cursor is hidden while playing');
       assert.equal(await page.evaluate(() => getComputedStyle(document.body).cursor), 'none', 'body cursor is suppressed in game');
@@ -86,6 +108,9 @@ try {
       return { shots: t.shots, body: t.scene.player.currentRotation, x: b.getPosition().x + 5, y: b.getPosition().y + 5, destroyed: b.getIsDestroyed(), start };
     });
     assert.equal(click.shots, 1); near(click.x, 625); near(click.y, 225); assert.equal(click.destroyed, true);
+    const spread = await page.evaluate(() => reticleStats());
+    assert.ok(spread.offset > 0 && spread.offset <= 7, 'a shot spreads both brackets outward');
+    await page.screenshot({ path: join(output, 'mouse-crosshair-spread-dpr' + dpr + '.png') });
     await page.mouse.down({ button: 'right' });
     const right = await page.evaluate(() => { const t = mouseTest, before = t.scene.player.currentRotation; t.tick(.05); return { before, after: t.scene.player.currentRotation, shots: t.shots }; });
     assert.ok(Math.abs(right.after - right.before) > .01); assert.equal(right.shots, 1);
@@ -109,7 +134,7 @@ try {
     await page.mouse.up();
     await page.keyboard.press('ArrowRight'); await page.evaluate(() => mouseTest.tick(.3));
     assert.equal(await page.evaluate(() => mouseTest.shots), 1);
-    assert.equal(await page.locator('canvas').evaluate(c => c.dispatchEvent(new MouseEvent('contextmenu', { cancelable: true }))), false);
+    assert.equal(await page.locator('body > canvas').evaluate(c => c.dispatchEvent(new MouseEvent('contextmenu', { cancelable: true }))), false);
     await page.evaluate(() => { const t = mouseTest; t.reset(); t.scene.player.x = t.scene.player.y = 200.5; t.scene.camera.reset(); t.scene.map.tiles[4][6] = 'wall'; t.scene.map.tiles[4][9] = 'mineral'; t.scene.map.tileHp[4][9] = 100; t.render(); });
     const behindWall = await page.evaluate(() => mouseTest.client(725, 225));
     await page.mouse.move(behindWall.x, behindWall.y); await page.mouse.click(behindWall.x, behindWall.y);
@@ -117,7 +142,7 @@ try {
     near(wall.x, 295); assert.equal(wall.hp, 100); assert.equal(wall.destroyed, true);
     await page.mouse.down(); await page.mouse.move(1110, 300); await page.mouse.up();
     assert.equal(await page.evaluate(() => mouseTest.game.input.getPointerState().leftDown), false);
-    assert.equal(await page.locator('canvas').evaluate(c => c.style.cursor), '');
+    assert.equal(await page.locator('body > canvas').evaluate(c => c.style.cursor), '');
     await page.mouse.move(500, 300); await page.mouse.down({ button: 'right' }); await page.mouse.down();
     await page.evaluate(() => window.dispatchEvent(new Event('blur')));
     assert.equal(await page.evaluate(() => { const p = mouseTest.game.input.getPointerState(); return p.leftDown || p.rightDown || p.leftPressed || p.active; }), false);
@@ -142,24 +167,26 @@ try {
     await page.mouse.move(400, 250);
     await page.mouse.down({ button: 'right' });
     assert.ok(await page.evaluate(() => mouseTest.pump()) > 0.9, 'aiming at a live chicken tightens the crosshair');
-    const aimed = await page.evaluate(() => {
-      const root = document.querySelector('[data-crosshair="root"]');
-      return { center: getComputedStyle(root.querySelector('[data-crosshair="dot"]')).backgroundColor,
-        arm: getComputedStyle(root.querySelector('[data-crosshair="arm"]')).backgroundColor };
-    });
-    assert.equal(aimed.center, 'rgb(216, 250, 255)', 'crosshair centre stays white on target');
-    assert.equal(aimed.arm, 'rgb(255, 59, 48)', 'crosshair arms turn red on a live chicken');
+    const aimed = await page.evaluate(() => reticleStats());
+    assert.ok(aimed.offset < -4, 'aiming pulls both brackets inward');
+    assert.equal(aimed.target, true, 'the crosshair reports the live chicken as a target');
+    assert.ok(aimed.red > 0, 'crosshair brackets turn red on a live chicken');
+    assert.ok(aimed.idle > 0, 'the centre dot keeps the idle tint on target');
     await page.screenshot({ path: join(output, 'mouse-crosshair-target-dpr' + dpr + '.png') });
     await page.mouse.move(700, 250);
     assert.ok(await page.evaluate(() => mouseTest.pump()) < 0.1, 'leaving the target relaxes the crosshair');
-    const relaxed = await page.evaluate(() => getComputedStyle(document.querySelector('[data-crosshair="arm"]')).backgroundColor);
-    assert.equal(relaxed, 'rgb(216, 250, 255)', 'crosshair arms return to white off target');
+    const relaxed = await page.evaluate(() => reticleStats());
+    assert.ok(relaxed.offset > -1, 'off target the brackets return to the asset spacing');
+    assert.equal(relaxed.red, 0, 'crosshair brackets return to the idle tint off target');
+    assert.equal(relaxed.target, false);
     await page.mouse.move(400, 250);
     assert.ok(await page.evaluate(() => mouseTest.pump()) > 0.9, 'returning to the target tightens again');
     await page.mouse.up({ button: 'right' });
     assert.ok(await page.evaluate(() => mouseTest.pump()) < 0.1, 'releasing right relaxes the crosshair');
+    const afterRelease = await page.evaluate(() => reticleStats());
+    assert.ok(afterRelease.offset > -1, 'releasing right restores the asset spacing');
     await page.evaluate(() => mouseTest.scene.onExit());
-    assert.equal(await page.locator('canvas').evaluate(c => c.style.cursor), '');
+    assert.equal(await page.locator('body > canvas').evaluate(c => c.style.cursor), '');
     assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), false, 'leaving the scene restores the system cursor');
     assert.equal(await page.evaluate(() => document.querySelector('[data-crosshair="root"]')), null, 'leaving the scene removes the reticle');
     assert.deepEqual(errors, []);

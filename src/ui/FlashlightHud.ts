@@ -1,6 +1,6 @@
-import type { Rect } from "./WeaponHud";
+import type { Rect } from "./HudTypes";
 
-/** 手电胶囊贴在武器卡片上方，右对齐卡片右缘。 */
+/** 手电胶囊贴在武器列表上方，右对齐列表右缘。 */
 export const FLASHLIGHT_HUD = {
   width: 96,
   height: 26,
@@ -17,11 +17,11 @@ const OFF_BORDER = "rgba(116,200,213,0.22)";
 const FONT = '600 11px "Microsoft YaHei", "PingFang SC", sans-serif';
 const KEY_FONT = '600 10px "Microsoft YaHei", "PingFang SC", sans-serif';
 
-/** 由武器卡片矩形得到手电胶囊矩形（逻辑像素）。 */
-export function getFlashlightHudRect(card: Rect): Rect {
+/** 由武器列表区域矩形得到手电胶囊矩形（逻辑像素）。 */
+export function getFlashlightHudRect(anchor: Rect): Rect {
   return {
-    x: card.x + card.width - FLASHLIGHT_HUD.width,
-    y: card.y - FLASHLIGHT_HUD.gap - FLASHLIGHT_HUD.height,
+    x: anchor.x + anchor.width - FLASHLIGHT_HUD.width,
+    y: anchor.y - FLASHLIGHT_HUD.gap - FLASHLIGHT_HUD.height,
     width: FLASHLIGHT_HUD.width,
     height: FLASHLIGHT_HUD.height,
   };

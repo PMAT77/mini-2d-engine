@@ -160,12 +160,7 @@ export class TileMap {
       this.water = new WaterTerrain(width, height, random);
       this.water.clearBase(this.tiles, this.tileHp);
     }
-    // 最后独立替换矿种，不改变基础地形、水域随机序列，也不让特殊矿相邻继承。
-    for (let row = 0; row < height; row++) for (let col = 0; col < width; col++) {
-      if (this.tiles[row][col] === TileTypeId.MINERAL && random() < 0.05) {
-        this.tiles[row][col] = SPECIAL_MINERAL_TYPES[Math.floor(random() * SPECIAL_MINERAL_TYPES.length)];
-      }
-    }
+    // 特殊矿只保留瓦片定义与掉落逻辑，生成流程不再产出：地图上除黄金矿外没有其他掉落增益的地块。
   }
 
   /**

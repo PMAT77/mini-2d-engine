@@ -73,20 +73,23 @@ test('holding left empties the magazine, auto-reloads, and resumes toward the la
   near(p.getBullets().at(-1).velocity.x, 0); near(p.getBullets().at(-1).velocity.y, 2600);
 });
 
-test('R refills the whole magazine, and firing interrupts a reload and clears its progress', () => {
+test('R refills the whole magazine, and firing cannot interrupt a reload', () => {
   const p = makePlayer(); p.applyConfig({ shooting: { fireRate: .05, reloadDuration: .5 } });
   p.setDebugState({ magazineAmmo: 3 });
+  let shots = 0; p.setOnShootCallback(() => shots++);
   p.requestReload();
   assert.equal(p.getIsReloading(), true); near(p.getReloadProgress(), 0);
   assert.equal(p.getMagazineAmmo(), 3);
-  // 左键在换弹中开火：先打断换弹，再消耗一发。
+  // 补弹未完成时开火无效：不发射、不消耗弹药，补弹照常推进。
   p.update(.2, idle, undefined, aim(825, 225));
-  assert.equal(p.getIsReloading(), false); near(p.getReloadProgress(), 0);
-  assert.equal(p.getMagazineAmmo(), 2); assert.equal(p.getBullets().length, 1);
-  p.requestReload();
-  p.update(.5, idle, undefined, aim(825, 225, false, false));
+  assert.equal(p.getIsReloading(), true); near(p.getReloadProgress(), .4);
+  assert.equal(p.getMagazineAmmo(), 3); assert.equal(shots, 0);
+  // 补弹走完后才恢复射击。
+  p.update(.3, idle, undefined, aim(825, 225, false));
   assert.equal(p.getIsReloading(), false);
   assert.equal(p.getMagazineAmmo(), 6); assert.equal(p.getChambered(), true);
+  p.update(.05, idle, undefined, aim(825, 225));
+  assert.equal(shots, 1); assert.equal(p.getMagazineAmmo(), 5);
 });
 
 test('an empty magazine waits for R unless auto reload is enabled', () => {

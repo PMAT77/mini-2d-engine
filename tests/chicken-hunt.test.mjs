@@ -55,7 +55,7 @@ test('terrain closer than the entity consumes the bullet first', () => {
   assert.equal(bullet.getIsDestroyed(), true);
 });
 
-test('shooting a chicken kills it, drops meat after the puff, and collects it', () => {
+test('shooting a chicken kills it, drops meat with the puff, and collects it', () => {
   const scene = new GameScene({ seed: 42, generateWater: false });
   scene.loaded = true;
   // 用一张全干地小地图消除出生点随机墙体的影响，玩家和鸡都放在通路中心。
@@ -85,12 +85,12 @@ test('shooting a chicken kills it, drops meat after the puff, and collects it', 
 
   for (let frame = 0; frame < 24; frame++) scene.update(1 / 60, idle);
   assert.equal(scene.chickens.length, 0, 'the corpse is removed after the death slide');
-  assert.equal(scene.meatPickups.length, 0, 'meat only drops after the death puff');
+  assert.equal(scene.meatPickups.length, 1, 'meat drops on the same frame as the death puff');
   const finalCenter = { x: corpse.x + Chicken.SIZE / 2, y: corpse.y + Chicken.SIZE / 2 };
   assert.ok(finalCenter.x > cx + 25, `the corpse should slide forward, dx=${finalCenter.x - cx}`);
 
   for (let frame = 0; frame < 60; frame++) scene.update(1 / 60, idle);
-  assert.equal(scene.meatPickups.length, 1, 'meat drops after the death puff');
+  assert.equal(scene.meatPickups.length, 1, 'the dropped meat stays until it is picked up');
   const meat = scene.meatPickups[0];
   const meatCenter = { x: meat.x + MeatPickup.SIZE / 2, y: meat.y + MeatPickup.SIZE / 2 };
   // 白烟与肉块都跟随尸体最终位置，而不是死亡当帧的位置。

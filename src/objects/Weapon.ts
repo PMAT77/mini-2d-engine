@@ -27,3 +27,11 @@ export interface WeaponView {
   /** 换弹进度（0-1）；未换弹时为 0。 */
   reloadProgress: number;
 }
+
+/** 右侧武器列表所需的整组快照：当前槽位与三个槽的独立状态。 */
+export interface WeaponLoadoutView {
+  activeSlot: WeaponSlot;
+  primary: WeaponView;
+  secondary: WeaponView;
+  melee: WeaponView;
+}

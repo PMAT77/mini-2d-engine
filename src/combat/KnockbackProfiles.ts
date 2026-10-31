@@ -21,6 +21,9 @@ export const DEFAULT_KNOCKBACK_PROFILE: KnockbackProfile = Object.freeze({
   deathImpulseMultiplier: 1,
   minDeathSeconds: 0.14,
   maxDeathSeconds: 0.45,
+  // 指数阻尼的尾巴很长：最后 12 像素要走 0.2 秒以上，尸体看起来早就停了。
+  // 把这截尾巴直接交给白烟，击杀反馈才不会拖。
+  deathSettleDistance: 12,
   immuneToDisplacement: false,
 });
 
@@ -48,6 +51,7 @@ export function validateKnockbackProfile(profile: KnockbackProfile): KnockbackPr
   assertField(finite(profile.deathImpulseMultiplier) && profile.deathImpulseMultiplier >= 0, "deathImpulseMultiplier", "必须是非负有限数值");
   assertField(finite(profile.minDeathSeconds) && profile.minDeathSeconds >= 0, "minDeathSeconds", "必须是非负有限数值");
   assertField(finite(profile.maxDeathSeconds) && profile.maxDeathSeconds >= profile.minDeathSeconds, "maxDeathSeconds", "必须不小于 minDeathSeconds");
+  assertField(finite(profile.deathSettleDistance) && profile.deathSettleDistance >= 0, "deathSettleDistance", "必须是非负有限数值");
   assertField(typeof profile.immuneToDisplacement === "boolean", "immuneToDisplacement", "必须是布尔值");
   return Object.freeze({ ...profile });
 }

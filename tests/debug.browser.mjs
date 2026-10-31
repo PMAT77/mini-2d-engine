@@ -300,7 +300,7 @@ try {
     await page.keyboard.press('Escape'); assert.equal(await panel.isVisible(), false);
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), true, 'Escape reveals the system cursor');
-    assert.equal(await page.locator('canvas').evaluate(element => getComputedStyle(element).cursor), 'default');
+    assert.equal(await page.locator('body > canvas').evaluate(element => getComputedStyle(element).cursor), 'default');
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), false, 'Escape hides the system cursor again');
     await page.keyboard.press('d');

@@ -59,6 +59,29 @@ test('loading tops up a partial magazine, keeps its rounds and the chambered sta
   assert.equal(player.getWeaponView().isReloading, false);
 });
 
+test('rolling interrupts a reload and keeps the rounds already seated', () => {
+  const player = new Player(200.5, 200.5);
+  player.setDefaultReloadMode('load');
+  for (let i = 0; i < 3; i += 1) {
+    player.shoot(new Vector2(1, 0));
+    step(player, 0.25);
+  }
+  player.requestReload();
+  step(player, 0.6);
+  assert.equal(player.getWeaponView().isReloading, true);
+  const seated = player.getWeaponView().magazineAmmo;
+  assert.ok(seated > 3 && seated < 6, `seated ${seated}`);
+
+  assert.equal(player.requestRoll(idleInput), true);
+  assert.equal(player.getWeaponView().isReloading, false);
+  near(player.getReloadProgress(), 0);
+  assert.equal(player.getWeaponView().magazineAmmo, seated);
+  // 翻滚打断后不会偷偷补完，需要重新按 R。
+  step(player, 2);
+  assert.equal(player.getWeaponView().isReloading, false);
+  assert.equal(player.getWeaponView().magazineAmmo, seated);
+});
+
 test('loading an already full magazine is a no-op', () => {
   const player = new Player(200.5, 200.5);
   player.setDefaultReloadMode('load');

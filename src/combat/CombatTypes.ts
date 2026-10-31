@@ -57,6 +57,11 @@ export interface KnockbackProfile {
   minDeathSeconds: number;
   /** 尸体最长可见时长，秒；超时后保守收尾。 */
   maxDeathSeconds: number;
+  /**
+   * 死亡收尾距离，像素：击退滑行只剩这么远时就开始播放死亡表现（白烟与掉落），
+   * 不必等速度被阻尼拖到完全停下；0 表示必须完全停下，由 maxDeathSeconds 兜底。
+   */
+  deathSettleDistance: number;
   /** 完全免疫位移，但仍会收到受击姿态。 */
   immuneToDisplacement: boolean;
 }
