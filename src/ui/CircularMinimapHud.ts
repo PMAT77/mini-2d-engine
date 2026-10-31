@@ -73,11 +73,11 @@ export interface MinimapHudStats {
 
 /** 每个标记的最小绘制尺寸（CSS 逻辑像素）；资源点刻意比目标点更小更暗。 */
 const MARKER_SIZE: Readonly<Record<MinimapMarkerType, number>> = {
-  mineral: 2.6,
-  gold: 1.7,
-  meat: 1.5,
+  mineral: 3.6,
+  gold: 2.4,
+  meat: 4.5,
   pickup: 1.8,
-  torch: 1.9,
+  torch: 4,
   enemy: 3.1,
   objective: 3.6,
   extraction: 4.2,

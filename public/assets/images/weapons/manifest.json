@@ -1,0 +1,400 @@
+{
+  "name": "weapon-sprites",
+  "version": "1.0.0",
+  "kind": "sprite",
+  "generatedAt": "2026-10-31",
+  "source": {
+    "pack": "枪械素材（本地画集）",
+    "archive": null,
+    "author": null,
+    "url": null,
+    "license": "unknown",
+    "licenseStatus": "unverified",
+    "licenseNote": "原始文件在本地 Pictures/枪械素材 目录，共 8 张枪械/弹药 PNG 加 1 张设计参考图，没有 README、授权文件或下载来源记录。公开分发前必须确认来源与授权，仓库内先按自用素材处理。",
+    "originalFormat": "PNG RGBA，枪械 1254×1254 方形画布；弹药 184×433 / 167×661 原始像素裁切"
+  },
+  "format": {
+    "container": "png",
+    "colorType": "RGBA",
+    "bitDepth": 8,
+    "width": "512（枪械）+ 161～148×414～642（弹药）",
+    "height": "见 sprites[]",
+    "background": "transparent",
+    "appearance": "奶油白枪身（#F1E9DE～#F7EFE2）配深灰枪件（#21211F～#636262）与薄荷绿瞄具点缀；弹药近乎纯白 #F4F8FA，只靠极淡的描边区分形状。",
+    "palette": [
+      "#F2ECE1",
+      "#3B3A3A",
+      "#21211F",
+      "#8FCEA8",
+      "#F4F8FA"
+    ]
+  },
+  "naming": "public/assets/images/weapons/<class>-<model>.png",
+  "url": "/assets/images/weapons/<class>-<model>.png",
+  "total": 9,
+  "processing": {
+    "script": "tmp/import-weapon-assets.py",
+    "steps": [
+      "alpha 归一化：α≤8 归 0，α≥248 归 255。源图枪身大量像素是 α=253/254，不处理会在深色 HUD 上发灰。",
+      "按 alpha 边界裁掉四周透明边距（枪械源图边距 30～100 px）。",
+      "等比缩放：枪械长边 512（Lanczos）；弹药保持原始像素尺寸，不做重采样。"
+    ],
+    "untouched": "绘制内容未改动：没有换色、没有重绘轮廓、没有锐化。",
+    "reversible": "原始 1254×1254 图仍在 Pictures/枪械素材，随时可以用脚本重新导出更大尺寸。"
+  },
+  "geometry": {
+    "note": "各枪长宽比差异很大（霰弹枪/狙击枪约 3.9:1，手枪 1.6:1），不要统一宽度拉满。枪械按目标高度缩放，握把/枪托下沿对齐同一条基线；弹药按高度缩放。弹药是像素画，绘制时关掉 imageSmoothingEnabled 或用整数倍缩放，否则会糊。",
+    "longestSide": 512
+  },
+  "reference": {
+    "file": "docs/images/weapon-select-reference.png",
+    "source": "参考图.png",
+    "note": "武器选择界面效果参考（分辨率为 2151×731，深色背景 + 白色数字）。放在 docs 而不是 public，避免 1.4 MB 打进构建产物。"
+  },
+  "categories": [
+    {
+      "id": "pistols",
+      "label": "手枪",
+      "count": 2,
+      "description": "聚合物枪身与转轮两种布局，射速慢、后坐小"
+    },
+    {
+      "id": "smgs",
+      "label": "冲锋枪",
+      "count": 2,
+      "description": "前握把 + 红点镜的战术型与 MP5 式护木的经典型"
+    },
+    {
+      "id": "rifles",
+      "label": "步枪",
+      "count": 1,
+      "description": "AK 式长枪管布局，弧形弹匣"
+    },
+    {
+      "id": "shotguns",
+      "label": "霰弹枪",
+      "count": 1,
+      "description": "泵动护木，整枪最长一档"
+    },
+    {
+      "id": "snipers",
+      "label": "狙击枪",
+      "count": 1,
+      "description": "栓动 + 高倍镜，枪身细长"
+    },
+    {
+      "id": "ammo",
+      "label": "弹药图标",
+      "count": 2,
+      "description": "圆头手枪弹与尖头步枪弹，HUD 余弹指示用"
+    }
+  ],
+  "sprites": [
+    {
+      "file": "pistol-glock.png",
+      "source": "格洛克.png",
+      "category": "pistols",
+      "label": "格洛克式聚合物手枪",
+      "width": 512,
+      "height": 316,
+      "aspect": 1.62,
+      "sourceSize": [
+        1254,
+        1254
+      ],
+      "alphaBbox": [
+        74,
+        282,
+        1212,
+        984
+      ],
+      "trimmedSize": [
+        1138,
+        702
+      ],
+      "scale": 0.4499,
+      "bytes": 112961,
+      "sha256": "4bbbfa8472c3fc36c188280802de2464a722c36d4e4e91eedd3ecb06b33635a2",
+      "palette": [
+        "#F2ECE1",
+        "#3B3A3A",
+        "#464645",
+        "#302F2F",
+        "#595858",
+        "#FFFAEF"
+      ]
+    },
+    {
+      "file": "pistol-revolver.png",
+      "source": "左轮.png",
+      "category": "pistols",
+      "label": "左轮手枪",
+      "width": 512,
+      "height": 286,
+      "aspect": 1.79,
+      "sourceSize": [
+        1254,
+        1254
+      ],
+      "alphaBbox": [
+        47,
+        324,
+        1226,
+        982
+      ],
+      "trimmedSize": [
+        1179,
+        658
+      ],
+      "scale": 0.4343,
+      "bytes": 93370,
+      "sha256": "2b19f2424bd86ce33f661c416e435404105d3991afb51f3a9ba1744d498059ec",
+      "palette": [
+        "#EDE6DC",
+        "#414040",
+        "#272726",
+        "#636262",
+        "#4D4D4D",
+        "#CCC6BD"
+      ]
+    },
+    {
+      "file": "smg-tactical.png",
+      "source": "冲锋枪.png",
+      "category": "smgs",
+      "label": "战术冲锋枪（前握把 + 红点镜）",
+      "width": 512,
+      "height": 229,
+      "aspect": 2.236,
+      "sourceSize": [
+        1254,
+        1254
+      ],
+      "alphaBbox": [
+        37,
+        377,
+        1219,
+        906
+      ],
+      "trimmedSize": [
+        1182,
+        529
+      ],
+      "scale": 0.4332,
+      "bytes": 82833,
+      "sha256": "fce0f4534fa3c3d78d554dae05db9203bceb942e3aba8788898bbb89876f2384",
+      "palette": [
+        "#F3ECE0",
+        "#353534",
+        "#4F4F4E",
+        "#2A2A29",
+        "#FFFFF7",
+        "#FEF7EB"
+      ]
+    },
+    {
+      "file": "smg-classic.png",
+      "source": "无标题.png",
+      "category": "smgs",
+      "label": "经典冲锋枪（MP5 式护木，无前握把）",
+      "width": 512,
+      "height": 225,
+      "aspect": 2.276,
+      "sourceSize": [
+        1254,
+        1254
+      ],
+      "alphaBbox": [
+        38,
+        376,
+        1216,
+        893
+      ],
+      "trimmedSize": [
+        1178,
+        517
+      ],
+      "scale": 0.4346,
+      "bytes": 75497,
+      "sha256": "ee456c522b8f59d0b8f1a68c3a13aa807c76fda745c28542bf72ac8cc172f856",
+      "palette": [
+        "#F5EFE0",
+        "#373735",
+        "#FFFCEF",
+        "#626161",
+        "#21211F",
+        "#2B2B2A"
+      ]
+    },
+    {
+      "file": "rifle-assault.png",
+      "source": "步枪1.png",
+      "category": "rifles",
+      "label": "突击步枪（AK 式长枪管）",
+      "width": 512,
+      "height": 175,
+      "aspect": 2.926,
+      "sourceSize": [
+        1254,
+        1254
+      ],
+      "alphaBbox": [
+        49,
+        485,
+        1207,
+        880
+      ],
+      "trimmedSize": [
+        1158,
+        395
+      ],
+      "scale": 0.4421,
+      "bytes": 60696,
+      "sha256": "4340c648af1cff2325b9c61bd61e913c7498e030586ceaea0a3cc96781106533",
+      "palette": [
+        "#F3EDE2",
+        "#4B4A4A",
+        "#3F3F3E",
+        "#FFFBF0",
+        "#333333",
+        "#FFFFFF"
+      ]
+    },
+    {
+      "file": "shotgun-pump.png",
+      "source": "w.png",
+      "category": "shotguns",
+      "label": "泵动霰弹枪",
+      "width": 512,
+      "height": 133,
+      "aspect": 3.85,
+      "sourceSize": [
+        1254,
+        1254
+      ],
+      "alphaBbox": [
+        61,
+        512,
+        1195,
+        807
+      ],
+      "trimmedSize": [
+        1134,
+        295
+      ],
+      "scale": 0.4515,
+      "bytes": 46614,
+      "sha256": "77d0e0ffa07b43b051b8e9c0193b992b2e95e1ca087b138f388d7834756591bc",
+      "palette": [
+        "#F1E9DE",
+        "#3B3B3A",
+        "#303231",
+        "#FFF9EF",
+        "#565555",
+        "#202222"
+      ]
+    },
+    {
+      "file": "sniper-bolt.png",
+      "source": "狙击枪.png",
+      "category": "snipers",
+      "label": "栓动狙击枪（带瞄准镜）",
+      "width": 512,
+      "height": 131,
+      "aspect": 3.908,
+      "sourceSize": [
+        1254,
+        1254
+      ],
+      "alphaBbox": [
+        43,
+        491,
+        1219,
+        793
+      ],
+      "trimmedSize": [
+        1176,
+        302
+      ],
+      "scale": 0.4354,
+      "bytes": 52568,
+      "sha256": "a9f07f581277593b54e69498be44f741168bd1c5185eabf2df4e9b75ecf4bc30",
+      "palette": [
+        "#F7EFE2",
+        "#242424",
+        "#3F3F3F",
+        "#2F2E2E",
+        "#FFFCF0",
+        "#141515"
+      ]
+    },
+    {
+      "file": "ammo-pistol-round.png",
+      "source": "ammo-pistol-original-pixel-crop.png",
+      "category": "ammo",
+      "label": "手枪弹（圆头）",
+      "width": 161,
+      "height": 414,
+      "aspect": 0.389,
+      "sourceSize": [
+        184,
+        433
+      ],
+      "alphaBbox": [
+        11,
+        11,
+        172,
+        425
+      ],
+      "trimmedSize": [
+        161,
+        414
+      ],
+      "scale": 1.0,
+      "bytes": 39798,
+      "sha256": "79490530371ea105cce1a0073e702bfc48fe5195f807f3b70026b0a3a52df100",
+      "palette": [
+        "#F4F8FA",
+        "#FFFFFF",
+        "#EAEBED"
+      ]
+    },
+    {
+      "file": "ammo-rifle-round.png",
+      "source": "ammo-rifle-original-pixel-crop.png",
+      "category": "ammo",
+      "label": "步枪弹（尖头）",
+      "width": 148,
+      "height": 642,
+      "aspect": 0.231,
+      "sourceSize": [
+        167,
+        661
+      ],
+      "alphaBbox": [
+        11,
+        10,
+        159,
+        652
+      ],
+      "trimmedSize": [
+        148,
+        642
+      ],
+      "scale": 1.0,
+      "bytes": 50085,
+      "sha256": "2ceca1105a71609ee94a892b034658fcaf1a0f5a76a6613d306f6055a2a64350",
+      "palette": [
+        "#F4F8FA",
+        "#FFFFFF",
+        "#EAECEC"
+      ]
+    }
+  ],
+  "notes": [
+    "枪械图整体等比缩放，弹药图保持原始像素尺寸：两类不要用同一个缩放系数。",
+    "弹药是白色剪影，浅色背景上几乎不可见；HUD 里需要深色底、投影，或给它加描边。",
+    "`alphaBbox` 是源图坐标系下的裁切框，`trimmedSize` 是裁切后的像素尺寸，`scale` 是之后的缩放比，三者可反推原始尺寸。",
+    "参考图（docs/images/weapon-select-reference.png）只描述目标视觉，不是运行期素材。"
+  ]
+}

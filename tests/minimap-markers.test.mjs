@@ -19,6 +19,8 @@ const { collectMineralMarkers } = load('minimap/MinimapMarkerSources');
 
 const layout = computeMinimapLayout(createMinimapConfig(), 1920, 1080);
 const PLAYER = { x: 1000, y: 1000 };
+/** 把屏幕像素换成世界像素，断言按“屏幕上看起来多近”表达，避免被缩放参数影响。 */
+const cssToWorld = css => css / layout.scale;
 
 function marker(type, x, y, overrides = {}) {
   return {
@@ -65,24 +67,25 @@ test('优先级排序：任务目标高于资源，同类按稳定 id 排序', (
 test('相邻普通物资聚合成一个，不会重叠闪烁；任务点豁免聚合', () => {
   const clustered = select([
     marker('gold', PLAYER.x, PLAYER.y),
-    marker('gold', PLAYER.x + 60, PLAYER.y),
-    marker('gold', PLAYER.x + 90, PLAYER.y + 20),
+    marker('gold', PLAYER.x + cssToWorld(4), PLAYER.y),
+    marker('gold', PLAYER.x + cssToWorld(7), PLAYER.y + cssToWorld(3)),
   ]);
   assert.equal(clustered.length, 1);
   assert.equal(clustered[0].type, 'gold');
 
   const objectives = select([
     marker('objective', PLAYER.x, PLAYER.y),
-    marker('objective', PLAYER.x + 30, PLAYER.y),
+    marker('objective', PLAYER.x + cssToWorld(4), PLAYER.y),
   ]);
   assert.equal(objectives.length, 2, '任务目标始终保留，不被物资挤掉');
 });
 
 test('数量上限生效，避免一屏塞满普通资源', () => {
   const markers = [];
+  const ringWorld = (layout.contentRadius - 12) / layout.scale;
   for (let i = 0; i < MINIMAP_MAX_VISIBLE_MARKERS + 12; i++) {
     const angle = (i / (MINIMAP_MAX_VISIBLE_MARKERS + 12)) * Math.PI * 2;
-    markers.push(marker('gold', PLAYER.x + Math.cos(angle) * 800, PLAYER.y + Math.sin(angle) * 800));
+    markers.push(marker('gold', PLAYER.x + Math.cos(angle) * ringWorld, PLAYER.y + Math.sin(angle) * ringWorld));
   }
   const visible = select(markers, { clusterDistance: 0 });
   assert.equal(visible.length, MINIMAP_MAX_VISIBLE_MARKERS);

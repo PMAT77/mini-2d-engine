@@ -17,19 +17,19 @@ const {
 
 const LARGE = { width: 1920, height: 1080 };
 
-test('默认布局：左上角 200px 圆盘，中心、内容圆与缩放正确', () => {
+test('默认布局：左上角 300px 圆盘，中心、内容圆与缩放正确', () => {
   const config = createMinimapConfig();
   const layout = computeMinimapLayout(config, LARGE.width, LARGE.height);
   assert.equal(layout.left, 20);
   assert.equal(layout.top, 20);
-  assert.equal(layout.diameter, 200);
-  assert.equal(layout.radius, 100);
-  assert.equal(layout.contentRadius, 100 - (2 + 6 + 1));
-  assert.equal(layout.centerX, 120);
-  assert.equal(layout.centerY, 120);
-  assert.equal(layout.worldRadius, 1200);
-  assert.equal(layout.scale, 100 / 1200);
-  assert.equal(layout.goldRow, 20 + 200 + 14);
+  assert.equal(layout.diameter, 300);
+  assert.equal(layout.radius, 150);
+  assert.equal(layout.contentRadius, 150 - (2 + 4 + 1));
+  assert.equal(layout.centerX, 170);
+  assert.equal(layout.centerY, 170);
+  assert.equal(layout.worldRadius, 600);
+  assert.equal(layout.scale, 150 / 600);
+  assert.equal(layout.goldRow, 20 + 300 + 14);
   assert.equal(config.diameter, DEFAULT_MINIMAP_CONFIG.diameter);
 });
 
@@ -80,7 +80,7 @@ test('小屏幕按可用空间收缩，黄金行紧跟圆盘下缘', () => {
   const layout = computeMinimapLayout(config, 400, 400);
   assert.equal(layout.diameter, 112);
   assert.equal(layout.radius, 56);
-  assert.equal(layout.contentRadius, 56 - (2 + 6 + 1));
+  assert.equal(layout.contentRadius, 56 - (2 + 4 + 1));
   assert.equal(layout.centerX, 76);
   assert.equal(layout.centerY, 76);
   assert.equal(layout.goldRow, 20 + 112 + config.goldGap);

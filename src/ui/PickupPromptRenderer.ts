@@ -25,9 +25,9 @@ export const PICKUP_ICON_URL =
   "/assets/images/ui/keyboard-mouse/64/Keyboard_E.png";
 
 /** 视觉规范（单位：屏幕 CSS 像素）。 */
-export const PICKUP_ICON_SIZE = 24;
+export const PICKUP_ICON_SIZE = 28;
 /** 键帽与进度框之间的空隙。 */
-export const PICKUP_FRAME_GAP = 1;
+export const PICKUP_FRAME_GAP = 0;
 /** 进度框线宽。 */
 export const PICKUP_FRAME_LINE_WIDTH = 2;
 /** 进度框圆角，与键帽视觉圆角协调。 */

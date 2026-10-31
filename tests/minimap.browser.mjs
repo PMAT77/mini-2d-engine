@@ -91,26 +91,65 @@ try {
         corner: probePixel(1, 1),
         aboveDisk: probePixel(Math.round(layout.centerX), layout.top - 3),
         center: probePixel(Math.round(layout.centerX), Math.round(layout.centerY)),
-        border: probePixel(Math.round(layout.centerX), layout.top),
+        // 采样点放在外圈描边正中间：半径 100.5、2px 描边时描边覆盖 y 20..22，取整行覆盖的 y=21。
+        border: probePixel(Math.round(layout.centerX), layout.top + 1),
       };
 
       // 3) The player arrow follows the real facing direction, tip forward.
       const directions = [
-        { name: 'east', direction: 0, dx: 1, dy: 0 },
-        { name: 'south', direction: Math.PI / 2, dx: 0, dy: 1 },
-        { name: 'west', direction: Math.PI, dx: -1, dy: 0 },
-        { name: 'north', direction: -Math.PI / 2, dx: 0, dy: -1 },
+        { name: 'east', direction: 0 },
+        { name: 'south', direction: Math.PI / 2 },
+        { name: 'west', direction: Math.PI },
+        { name: 'north', direction: -Math.PI / 2 },
       ];
-      const arrows = directions.map(({ name, direction, dx, dy }) => {
+      const unitDirections = [
+        { name: 'east', x: 1, y: 0 },
+        { name: 'south', x: 0, y: 1 },
+        { name: 'west', x: -1, y: 0 },
+        { name: 'north', x: 0, y: -1 },
+      ];
+      const arrows = directions.map(({ name, direction }) => {
         // Player.direction = currentRotation - PI.
         scene.player.currentRotation = direction + Math.PI;
         scene.updateMinimap(1 / 60);
         scene.draw(screen);
         const arrowBox = readBox();
+        // 箭头是圆盘里唯一的白色物体。它前端是窄尖、后端是两侧翼，所以对某个方向 d：
+        // d 前方的亮像素离轴更近（meanLateral 小），后方亮像素离轴更远（翼展开）。
+        // 这个横向宽度差对单像素抗锯齿不敏感，比点采样稳。
+        const stats = {};
+        for (const unit of unitDirections) {
+          stats[unit.name] = { front: [0, 0], rear: [0, 0] };
+        }
+        for (let row = 0; row < 22; row += 1) {
+          for (let column = 0; column < 22; column += 1) {
+            const offsetX = column - 10.5;
+            const offsetY = row - 10.5;
+            if (Math.hypot(offsetX, offsetY) > 10) continue;
+            const pixel = pixelAt(arrowBox, layout.centerX + offsetX, layout.centerY + offsetY);
+            const luminance = Math.min(pixel[0], pixel[1], pixel[2]) / 255;
+            if (luminance < 0.5) continue;
+            for (const unit of unitDirections) {
+              const along = offsetX * unit.x + offsetY * unit.y;
+              const lateral = Math.abs(offsetX * unit.y - offsetY * unit.x);
+              const bucket = stats[unit.name];
+              if (along >= 1.5) {
+                bucket.front[0] += lateral;
+                bucket.front[1] += 1;
+              } else if (along <= -1.5) {
+                bucket.rear[0] += lateral;
+                bucket.rear[1] += 1;
+              }
+            }
+          }
+        }
+        const meanLateral = pair => (pair[1] === 0 ? 0 : pair[0] / pair[1]);
+        const front = meanLateral(stats[name].front);
+        const rear = meanLateral(stats[name].rear);
         return {
           name,
-          forward: bright(pixelAt(arrowBox, layout.centerX + dx * 5, layout.centerY + dy * 5)),
-          backward: bright(pixelAt(arrowBox, layout.centerX - dx * 5, layout.centerY - dy * 5)),
+          front,
+          rear,
           center: bright(pixelAt(arrowBox, layout.centerX, layout.centerY)),
         };
       });
@@ -128,7 +167,7 @@ try {
 
       // 5) The gold counter sits below the minimap instead of under it.
       const goldPixel = [...screen.getImageData(Math.round(28 * devicePixelRatio),
-        Math.round(240 * devicePixelRatio), 1, 1).data];
+        Math.round(241 * devicePixelRatio), 1, 1).data];
       const oldGoldPixel = [...screen.getImageData(Math.round(28 * devicePixelRatio),
         Math.round(30 * devicePixelRatio), 1, 1).data];
 
@@ -163,8 +202,9 @@ try {
     });
 
     assert.deepEqual(errors, []);
-    assert.deepEqual(result.layout, { left: 20, top: 20, diameter: 200, radius: 100,
-      centerX: 120, centerY: 120, goldRow: 234 });
+    // 720p 下短边 720 × maxViewportFraction 0.28 = 201，配置里的 300 会被收窄到这里。
+    assert.deepEqual(result.layout, { left: 20, top: 20, diameter: 201, radius: 100.5,
+      centerX: 120.5, centerY: 120.5, goldRow: 235 });
     assert.ok(result.unknownCells > result.exploredCells * 4,
       `unexplored area must dominate: ${JSON.stringify({ unknown: result.unknownCells, explored: result.exploredCells })}`);
     assert.ok(result.exploredCells > 0, 'spawn area should be explored');
@@ -172,13 +212,15 @@ try {
     assert.equal(result.clip.corner[3], 0, `outside the circle must stay transparent: ${JSON.stringify(result.clip)}`);
     assert.equal(result.clip.aboveDisk[3], 0, 'the disk must be clipped to its circle');
     assert.equal(result.clip.center[3], 255, 'the disk centre must be painted');
-    assert.equal(result.clip.border[3], 255, 'the outer border must be painted');
+    // 奇数直径时圆心在 .5 像素上，描边与像素行错开半个像素，覆盖率 254/255 也算已绘制。
+    assert.ok(result.clip.border[3] >= 250, `the outer border must be painted: ${JSON.stringify(result.clip.border)}`);
     assert.ok(result.clip.border[0] > 60 && result.clip.border[0] < 170,
       `border should be the muted tactical grey: ${JSON.stringify(result.clip.border)}`);
     for (const arrow of result.arrows) {
-      assert.ok(arrow.forward, `${arrow.name}: arrow tip must point forward`);
+      // 前端窄、后端翼宽：正确朝向时前方亮像素的离轴距离明显更小。
+      assert.ok(arrow.front + 0.8 < arrow.rear,
+        `${arrow.name}: arrow must point forward, got ${JSON.stringify(arrow)}`);
       assert.ok(arrow.center, `${arrow.name}: arrow must cover the centre`);
-      assert.equal(arrow.backward, false, `${arrow.name}: arrow must not appear behind the player`);
     }
     assert.ok(result.shakeApplied, 'camera shake should displace the world camera');
     assert.ok(result.minimapStable, 'camera shake must not move the minimap');

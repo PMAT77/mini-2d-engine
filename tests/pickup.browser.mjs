@@ -108,9 +108,11 @@ try {
         draw() { scene.draw(game.renderer.ctx); },
         /** 进度框在 E 图标外 1px 处的左右边缘（图标中心为 box 原点 +12）。 */
         frameEdges(box) {
-          const centerX = box.x + 12;
-          const centerY = box.y + 12;
-          const edge = 14;
+          // 进度框以键帽盒为基准向外扩 PICKUP_FRAME_GAP(0) + 半个线宽(1)。
+          const half = box.width / 2;
+          const centerX = box.x + half;
+          const centerY = box.y + half;
+          const edge = half + 1;
           return {
             right: this.maxBrightness(centerX + edge, centerY, 1),
             left: this.maxBrightness(centerX - edge, centerY, 1),
@@ -179,8 +181,9 @@ try {
     const focusedUi = state.ui;
     const itemPoint = await page.evaluate(() => pickupTest.screen(pickupTest.state().targetX, pickupTest.state().targetY));
     assert.equal(focusedUi.promptSide, 'right', 'the E prompt sits to the right of the item');
-    assert.ok(focusedUi.promptBox.width >= 23.5 && focusedUi.promptBox.width <= 24.5,
-      'the prompt is just the keycap: the 拾取 label was removed');
+    // 提示框宽度 = 键帽宽度（PICKUP_ICON_SIZE = 28），说明只剩键帽、没有“拾取”文字。
+    assert.ok(focusedUi.promptBox.width >= 27.5 && focusedUi.promptBox.width <= 28.5,
+      `the prompt is just the keycap: the 拾取 label was removed (width ${focusedUi.promptBox.width})`);
     assert.ok(focusedUi.promptBox.x >= itemPoint.x + 8, 'the prompt clears the item body');
     assert.ok(focusedUi.promptBox.x + focusedUi.promptBox.width <= 1100 - 8, 'the prompt stays inside the screen');
     assert.ok(focusedUi.promptBox.y + focusedUi.promptBox.height <= 800 - 8, 'the prompt stays inside the screen');

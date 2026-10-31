@@ -186,7 +186,7 @@ lighting.applyLighting(ctx);
 
 左上角的小地图固定北向、以玩家为圆心，只显示已知世界：地形取自 `TerrainMemory` 的观察快照，探索覆盖取自 `ExplorationGrid`，当前观察格由 `PerceptionSystem` 在每个探索节拍（`explorationInterval`，默认 0.25 秒）记录后只读暴露，小地图不自行计算 LOS。未知区域统一铺 `#080D12`，已探索未观察与当前观察各用一档低饱和色；矿石标记只来自记忆中已捕获的可破坏瓦片，黄金、肉块与增益道具只在三层感知的 `identified` 状态下显示，火把在所在位置不为 `unknown` 时作为弱兴趣点保留。玩家箭头固定在圆心，角度直接取 `Player.getVisionState().direction`，与小地图自身的平移解耦，不读相机。
 
-地形按 25 像素探索格缓存为两份 `Uint8Array`（状态与地形类别），只在玩家移动、探索或记忆 revision 变化时重扫「以玩家为中心、半径 1200 世界像素」的窗口；离开窗口的当前观察格降级为记忆色。渲染层 `CircularMinimapHud` 维护一张按 DPR 与 2 倍超采样烘焙的离屏地形图（1280×720、DPR 2 时约 1667×1667），每帧只做一次带圆形裁剪的 `drawImage`、标记与箭头绘制，重烘焙按 0.1 秒节流。1280×720 实测每帧小地图绘制开销低于 1 ms，落在无小地图对照的抖动范围内；强制重烘焙约 15–25 ms，正常游玩时每 60 帧触发 9 次（跟随观察与位移节拍）。配置集中在 `src/minimap/MinimapConfig.ts`，位置、直径（默认 200 CSS 像素）、显示世界半径、调色板与窄屏收缩规则都在这里。圆盘由外圈描边、6 像素暗色间隙和内圈描边三层构成，地形只画在内圈以内（`contentRadius` = 半径 − 外圈 − 间隙 − 内圈），因此标记也不会压到描边上；黄金计数已移到圆盘正下方，不再与新 HUD 重叠。
+地形按 25 像素探索格缓存为两份 `Uint8Array`（状态与地形类别），只在玩家移动、探索或记忆 revision 变化时重扫「以玩家为中心、半径 600 世界像素」的窗口；离开窗口的当前观察格降级为记忆色。渲染层 `CircularMinimapHud` 维护一张按 DPR 与 2 倍超采样烘焙的离屏地形图（受 `maxCacheSize` 限制，最长边 2048 设备像素），每帧只做一次带圆形裁剪的 `drawImage`、标记与箭头绘制，重烘焙按 0.1 秒节流。1280×720 实测每帧小地图绘制开销低于 1 ms，落在无小地图对照的抖动范围内；强制重烘焙约 15–25 ms，正常游玩时每 60 帧触发 9 次（跟随观察与位移节拍）。配置集中在 `src/minimap/MinimapConfig.ts`，位置、直径（默认 300 CSS 像素，视口短边不足时按 `maxViewportFraction` 0.28 收窄）、显示世界半径、调色板与窄屏收缩规则都在这里。圆盘由外圈描边、4 像素暗色间隙和内圈描边三层构成，地形只画在内圈以内（`contentRadius` = 半径 − 外圈 − 间隙 − 内圈），因此标记也不会压到描边上；黄金计数已移到圆盘正下方，不再与新 HUD 重叠。
 
 职责划分：`src/minimap/MinimapTypes.ts` 放数据类型，`MinimapConfig.ts` 放配置、调色板与坐标变换，`MinimapTerrainCache.ts` 管探索格地形缓存，`MinimapMarkerStore.ts` 管标记去重与遮挡，`MinimapMarkerSources.ts` 从记忆快照生成矿物标记，渲染在 `src/ui/CircularMinimapHud.ts`，`GameScene` 只负责取数据、更新与绘制。
 
