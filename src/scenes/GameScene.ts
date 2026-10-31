@@ -7,6 +7,7 @@ import { TileTypeId, getTileType } from "../map/TileType";
 import { Vector2 } from "../math/Vector2";
 import { ParticleSystem } from "../objects/ParticleSystem";
 import { CraterSystem } from "../objects/CraterSystem";
+import { BloodStainSystem } from "../objects/BloodStainSystem";
 import { FootprintSystem } from "../objects/FootprintSystem";
 import { RippleSystem } from "../objects/RippleSystem";
 import { BoundaryRippleSystem } from "../objects/BoundaryRippleSystem";
@@ -241,6 +242,8 @@ export class GameScene extends Scene {  private player!: Player;
   private particleSystem: ParticleSystem;
   // 地面弹坑装饰
   private readonly craterSystem = new CraterSystem();
+  // 地面血迹装饰：小鸡死亡收尾时留在尸体下方
+  private readonly bloodStainSystem = new BloodStainSystem();
   // 地面脚印装饰
   private readonly footprintSystem = new FootprintSystem();
   // 水面涟漪装饰：涉水时替代脚印
@@ -760,8 +763,8 @@ export class GameScene extends Scene {  private player!: Player;
   }
 
   /**
-   * 消费一次性死亡完成事件：在尸体收尾位置同帧生成白烟与肉块，然后移除尸体。
-   * 白烟、肉块与数组移除都只发生在这里，避免和「致命命中」混在同一帧。
+   * 消费一次性死亡完成事件：在尸体收尾位置同帧生成血迹、白烟与肉块，然后移除尸体。
+   * 血迹、白烟、肉块与数组移除都只发生在这里，避免和「致命命中」混在同一帧。
    */
   private flushChickenDeaths(): void {
     const survivors: Chicken[] = [];
@@ -776,9 +779,11 @@ export class GameScene extends Scene {  private player!: Player;
     this.chickens = survivors;
   }
 
-  /** 尸体滑行收尾时的统一表现：白烟与肉块同帧落在收尾位置。 */
+  /** 尸体滑行收尾时的统一表现：血迹、白烟与肉块同帧落在收尾位置。 */
   private resolveDeathPresentation(finished: DeathFinished): void {
     const center = new Vector2(finished.x, finished.y);
+    // 血迹落在尸体收尾的位置，尸体移除后仍在地面上保留几秒再淡出。
+    this.bloodStainSystem.spawn(finished.x, finished.y, this.map);
     // 慢速大颗粒形成白色气团，再补一圈快速白点。
     this.particleSystem.createExplosion(center, 28, 70, 7, 0.9,
       ["#ffffff", "#f7f7f7", "#e8e8e8"]);
@@ -1157,6 +1162,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 更新粒子系统
     this.particleSystem.update(delta);
     this.craterSystem.update(delta);
+    this.bloodStainSystem.update(delta);
     this.footprintSystem.update(delta);
     this.rippleSystem.update(delta);
     // 边界反馈读取原始输入方向：贴墙时速度已被清零，但仍要能判断还在往里推。
@@ -1518,10 +1524,12 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 地形与静态装饰始终可见：地形顶面只受环境光和单位光提亮，不会被视野遮住。
     this.map.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height, this.deltaSinceLastFrame);
-    // 脚印、涟漪与弹坑属于地面装饰：在地图之后、单位层之前绘制，始终可见且受光照。
+    // 脚印、涟漪、弹坑与血迹属于地面装饰：在地图之后、单位层之前绘制，始终可见且受光照。
     this.footprintSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.rippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.craterSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
+    // 血迹压在弹坑之上：后画的斑块不会被弹坑的暗色吃掉。
+    this.bloodStainSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.torches.forEach(torch => torch.draw(ctx, cameraOffset.x, cameraOffset.y));
 
     // 单位层：只有迷雾范围内的单位才绘制，地形不参与裁剪。
