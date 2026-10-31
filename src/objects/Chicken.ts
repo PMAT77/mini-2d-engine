@@ -7,6 +7,15 @@ import { KnockbackMotion } from "../combat/KnockbackMotion";
 import type { KnockbackWorld } from "../combat/KnockbackMotion";
 import { CHICKEN_KNOCKBACK_PROFILE, computeHitIntensity } from "../combat/KnockbackProfiles";
 import { Entities } from "./Entities";
+import { DEFAULT_SENSE_RULES } from "../ai/SenseRules";
+import type { SenseRules } from "../ai/SenseRules";
+import { VisionSensor } from "../ai/VisionSensor";
+import { HearingSensor } from "../ai/HearingSensor";
+import type { SoundStimulus } from "../ai/PerceptionTypes";
+import { ChickenBehavior } from "../ai/ChickenBehavior";
+import type { ChickenAlertState } from "../ai/ChickenBehavior";
+import type { PerceptionLight } from "../vision/VisionTypes";
+import type { NoiseEvent } from "../core/NoiseSystem";
 
 /** 小鸡色板：硬边平涂，保持低多边形的块面感。 */
 const BODY_LIGHT = "#F6D36B";
@@ -25,6 +34,16 @@ const TAIL_DARK = "#6A4220";
 const EYE = "#241C14";
 /** 剪影轮廓的占位色：实际颜色由 GameScene 的 source-in 冷灰覆盖。 */
 const SILHOUETTE_COLOR = "#ffffff";
+
+/** 场景每帧喂给小鸡的感知输入：玩家位置、光源与噪声事件都由场景提供。 */
+export interface ChickenSenses {
+  targetX: number;
+  targetY: number;
+  lights?: readonly PerceptionLight[];
+  noiseEvents?: readonly NoiseEvent[];
+  /** 自己的发声者 id：跳过自己刚发出的叫声，避免自惊。 */
+  soundSourceId?: string;
+}
 
 /**
  * 俯瞰视角的低多边形小鸡。
@@ -78,6 +97,15 @@ export class Chicken extends Entities {
   private stepDistance = 0;
   private onStepCallback?: (x: number, y: number) => void;
   private onCluckCallback?: (x: number, y: number) => void;
+  /** 感知与警觉状态只消费场景给的刺激，不直接读玩家或噪声总线。 */
+  private readonly rules: SenseRules = DEFAULT_SENSE_RULES;
+  private readonly vision = new VisionSensor(DEFAULT_SENSE_RULES);
+  private readonly hearing = new HearingSensor(DEFAULT_SENSE_RULES);
+  private readonly behavior: ChickenBehavior;
+  /** 逃跑时每隔一小段重选一次方向，避免贴墙抽搐。 */
+  private fleeDecisionTimer = 0;
+  /** 普通漫游的加速度，逃跑结束后恢复。 */
+  private walkAcceleration = 240;
 
   constructor(x: number, y: number, random: () => number = Math.random) {
     super(x, y);
@@ -88,7 +116,9 @@ export class Chicken extends Entities {
     // 起步和收尾都留一点时间，避免小鸡像鼠标光标一样瞬移。加速度必须让
     // 第一步就超过 Entities 的 1px/s 静止阈值，否则低速会被反复归零。
     this.accel = 240;
+    this.walkAcceleration = this.accel;
     this.decel = 400;
+    this.behavior = new ChickenBehavior(DEFAULT_SENSE_RULES, random);
     this.rotationSpeed = 10;
     this.currentRotation = random() * Math.PI * 2;
     this.timer = random() * 1.2;
@@ -260,7 +290,7 @@ export class Chicken extends Entities {
     return chickens;
   }
 
-  update(delta: number, input: Input, map?: TileMap): void {
+  update(delta: number, input: Input, map?: TileMap, senses?: ChickenSenses): void {
     if (this.lifeState === "removed" || !Number.isFinite(delta) || delta < 0) return;
     this.hitAge += delta;
     // 死亡后不再跑 AI、不再叫、不再报脚步；只推进独立的击退滑行。
@@ -271,8 +301,12 @@ export class Chicken extends Entities {
     if (!map) return;
     const startX = this.x, startY = this.y;
     this.age += delta;
-    this.timer -= delta;
-    if (this.timer <= 0) this.decide(map);
+    // 感知与状态机先于漫游计时：否则被 decide 的 0.7–3.5 秒门控拖住，惊不起来。
+    this.think(delta, map, senses);
+    if (this.behavior.getState() === "wander") {
+      this.timer -= delta;
+      if (this.timer <= 0) this.decide(map);
+    }
     super.update(delta, input, map);
     this.emitSteps(startX, startY);
     // 非致命命中的滑行与普通移动叠加，但速度状态完全独立。
@@ -421,6 +455,96 @@ export class Chicken extends Entities {
     this.timer = 0.4 + this.random() * 0.8;
   }
 
+  /** 当前警觉状态，供场景调试与测试读取。 */
+  getAlertState(): ChickenAlertState {
+    return this.behavior.getState();
+  }
+
+  /** 逃跑时用更高的有效速度；漫游仍返回原本的随机速度上限。 */
+  protected getMovementSpeed(): number {
+    return this.behavior.getState() === "flee" ? this.rules.fleeSpeed : super.getMovementSpeed();
+  }
+
+  /** 每帧把场景给的刺激转成威胁，再交给状态机；没有感知输入时只推进计时。 */
+  private think(delta: number, map: TileMap, senses?: ChickenSenses): void {
+    if (!senses) {
+      this.behavior.update(delta, null);
+      this.applyAlertState(delta, map);
+      return;
+    }
+    const centerX = this.x + this.size / 2;
+    const centerY = this.y + this.size / 2;
+    const sight = this.vision.sense(delta, map,
+      { x: centerX, y: centerY, facing: this.currentRotation - Math.PI },
+      { x: senses.targetX, y: senses.targetY }, senses.lights ?? []);
+
+    let threat: { x: number; y: number } | null = null;
+    if (sight.visible) threat = { x: senses.targetX, y: senses.targetY };
+    else {
+      const heard = this.hearNoise(map, centerX, centerY, senses);
+      if (heard) threat = { x: heard.x, y: heard.y };
+    }
+    const view = this.behavior.update(delta, threat);
+    // 只从漫游被惊到时叫一声；逃跑途中再看见威胁不重复惊叫。
+    if (view.justStartled) this.onCluckCallback?.(centerX, centerY);
+    this.applyAlertState(delta, map);
+  }
+
+  private hearNoise(map: TileMap, centerX: number, centerY: number, senses: ChickenSenses): SoundStimulus | null {
+    const events = senses.noiseEvents;
+    if (!events || events.length === 0) return null;
+    // 第一版不引发鸡群连锁惊逃：鸡叫不进入小鸡的听觉刺激（自己的声音也一并跳过）。
+    const filtered = events.filter(event => event.kind !== "cluck" && event.sourceId !== senses.soundSourceId);
+    if (filtered.length === 0) return null;
+    const stimuli = this.hearing.poll(map, { x: centerX, y: centerY, threshold: this.rules.hearingThreshold }, filtered);
+    return stimuli[0] ?? null;
+  }
+
+  /** 把状态翻译成运动意图：逃跑时提速并持续重选方向，警觉/恢复时先停住。 */
+  private applyAlertState(delta: number, map: TileMap): void {
+    const state = this.behavior.getState();
+    if (state === "flee") {
+      this.accel = this.rules.fleeAcceleration;
+      this.walking = true;
+      this.fleeDecisionTimer -= delta;
+      // 撞墙立刻重选方向；否则每隔一小段换一次，避免一直贴着同一面墙。
+      if (this.fleeDecisionTimer <= 0 || this.getCollisionContacts().length > 0) {
+        this.chooseFleeDirection(map);
+        this.fleeDecisionTimer = 0.18;
+      }
+      return;
+    }
+    this.accel = this.walkAcceleration;
+    if (state !== "wander") this.walking = false;
+  }
+
+  /**
+   * 逃跑方向：以“背离威胁”为基准左右偏转，优先选真正走得通的一侧。
+   * 不做 A*，但至少不会一头撞墙后原地抽搐。
+   */
+  private chooseFleeDirection(map: TileMap): void {
+    const centerX = this.x + this.size / 2;
+    const centerY = this.y + this.size / 2;
+    const away = Math.atan2(centerY - this.behavior.getThreatY(), centerX - this.behavior.getThreatX());
+    const body = this.getCollider();
+    const offsets = [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4];
+    for (const offset of offsets) {
+      const angle = away + offset;
+      const probe = 52;
+      const hit = map.castShape(body, { x: Math.cos(angle) * probe, y: Math.sin(angle) * probe });
+      const travel = hit ? Math.max(0, hit.fraction * probe - 0.5) : probe;
+      if (travel < this.size) continue;
+      const stepX = Math.cos(angle), stepY = Math.sin(angle);
+      const end = circleCollider(body.pose.x + stepX * travel, body.pose.y + stepY * travel, this.size / 2);
+      const middle = circleCollider(body.pose.x + stepX * travel * 0.5, body.pose.y + stepY * travel * 0.5, this.size / 2);
+      if (!map.isShapeWalkable(end) || map.getShapeSpeedFactor(end) !== 1 || map.getShapeSpeedFactor(middle) !== 1) continue;
+      this.direction.set(stepX, stepY);
+      return;
+    }
+    // 四面都堵时仍朝背离威胁的方向推，让碰撞滑动把身体带出去。
+    this.direction.set(Math.cos(away), Math.sin(away));
+  }
+
   /**
    * 画面位置：单位层使用相机偏移，与金块、子弹和拾取物同一坐标系。
    * 多边形的坐标以身体尺寸为单位，不随呼吸或动画改变碰撞体。
@@ -433,7 +557,7 @@ export class Chicken extends Entities {
 
     const s = this.size;
     const alive = this.lifeState === "alive";
-    const speedRatio = alive ? Math.min(1, this.velocity.length() / Math.max(1, this.maxSpeed)) : 0;
+    const speedRatio = alive ? Math.min(1, this.velocity.length() / Math.max(1, this.getMovementSpeed())) : 0;
     const bob = alive ? Math.sin(this.age * 14) * 0.6 * speedRatio : 0;
     const ambientSquash = alive ? Math.sin(this.age * 28) * 0.02 * speedRatio : 0;
     const cycle = (this.age + this.peckPhase) % Chicken.PECK_SECONDS;
@@ -520,7 +644,7 @@ export class Chicken extends Entities {
 
     const s = this.size;
     const alive = this.lifeState === "alive";
-    const speedRatio = alive ? Math.min(1, this.velocity.length() / Math.max(1, this.maxSpeed)) : 0;
+    const speedRatio = alive ? Math.min(1, this.velocity.length() / Math.max(1, this.getMovementSpeed())) : 0;
     const bob = alive ? Math.sin(this.age * 14) * 0.6 * speedRatio : 0;
     const ambientSquash = alive ? Math.sin(this.age * 28) * 0.02 * speedRatio : 0;
     const cycle = (this.age + this.peckPhase) % Chicken.PECK_SECONDS;

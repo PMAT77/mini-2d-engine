@@ -1360,8 +1360,41 @@ export class GameScene extends Scene {  private player!: Player;
     this.chickenStepDelay = Math.max(0, this.chickenStepDelay - delta);
     this.updateChickenCluckCooldowns(delta);
 
-    // 小鸡只在干地自由游荡，不读取玩家输入。
-    this.chickens.forEach(chicken => chicken.update(delta, input, this.map));
+    // 光照与手电先于小鸡感知结算：否则小鸡看到的是上一帧的灯位、朝向与开关。
+    this.torches.forEach(torch => torch.update(delta));
+    this.lightingSystem.update(delta);
+
+    // 玩家中心位置同时供相机、光源与小鸡感知使用，只在本帧算一次。
+    const playerCenterX = this.player.x + this.player.getSize() / 2;
+    const playerCenterY = this.player.y + this.player.getSize() / 2;
+    this.camera.follow(playerCenterX, playerCenterY, delta);
+    const center = new Vector2(playerCenterX, playerCenterY);
+    this.playerLight.setPosition(center);
+    this.flashlight.setPosition(center);
+    this.flashlight.setDirection(this.player.getVisionState().direction);
+
+    // G 键是开关而不是常亮：只在下沿切换，避免按住时反复翻转。
+    // 提前到感知之前，玩家视野与小鸡视觉才能在同一帧看到同一盏灯。
+    const flashlightDown = input.isKeyDown("g");
+    if (flashlightDown && !this.flashlightHeld) {
+      this.flashlightOn = !this.flashlightOn;
+      this.flashlight.setActive(this.flashlightOn);
+      // 开关共用一声轻响；单声部保证快速连按时只留最后一次的尾音。
+      this.sfx.play(FLASHLIGHT_SWITCH_SOUND, this.volume(this.audio.flashlight.switchVolume), 1, { count: 1 });
+    }
+    this.flashlightHeld = flashlightDown;
+
+    // 小鸡视觉与玩家三层视野共用同一份灯列表，避免两套光照判断漂移。
+    this.rebuildPerceptionLights();
+
+    // 小鸡只在干地自由游荡，不读取玩家输入；感知刺激由场景统一提供。
+    this.chickens.forEach(chicken => chicken.update(delta, input, this.map, {
+      targetX: playerCenterX,
+      targetY: playerCenterY,
+      lights: this.perceptionLights,
+      noiseEvents: this.noiseSystem.getEvents(),
+      soundSourceId: this.getChickenSoundId(chicken),
+    }));
     // 尸体滑行结束的事件在本帧所有小鸡更新完之后统一消费。
     this.flushChickenDeaths();
     // 鸡叫是几秒钟的整段录音：玩家这几秒里的走动要立刻反映到音量上。
@@ -1379,10 +1412,6 @@ export class GameScene extends Scene {  private player!: Player;
       this.map.height * this.map.tileSize);
     this.floatingTexts.update(delta);
 
-    // 更新光照系统
-    this.torches.forEach(torch => torch.update(delta));
-    this.lightingSystem.update(delta);
-
     // 更新属性修改器
     this.modifierManager.update(delta);
     this.debugPanel?.update(delta);
@@ -1396,28 +1425,8 @@ export class GameScene extends Scene {  private player!: Player;
     // 白烟与肉块同帧出现，肉块当帧就开始下落。
     this.updateMeatPickups(delta);
 
-    // 相机跟随玩家中心位置
-    const playerCenterX = this.player.x + this.player.getSize() / 2;
-    const playerCenterY = this.player.y + this.player.getSize() / 2;
-
-    this.camera.follow(playerCenterX, playerCenterY, delta);
-    const center = new Vector2(playerCenterX, playerCenterY);
-    this.playerLight.setPosition(center);
-    this.flashlight.setPosition(center);
-    this.flashlight.setDirection(this.player.getVisionState().direction);
-
     // 感知先于按键与交互结算：拾取系统只使用本帧的可见性结果，不读上一帧。
     this.updatePerception(delta);
-
-    // G 键是开关而不是常亮：只在下沿切换，避免按住时反复翻转。
-    const flashlightDown = input.isKeyDown("g");
-    if (flashlightDown && !this.flashlightHeld) {
-      this.flashlightOn = !this.flashlightOn;
-      this.flashlight.setActive(this.flashlightOn);
-      // 开关共用一声轻响；单声部保证快速连按时只留最后一次的尾音。
-      this.sfx.play(FLASHLIGHT_SWITCH_SOUND, this.volume(this.audio.flashlight.switchVolume), 1, { count: 1 });
-    }
-    this.flashlightHeld = flashlightDown;
 
     // R 键换弹同样只认下沿，按住不会反复起手。
     const reloadDown = input.isKeyDown("r");
@@ -1456,19 +1465,11 @@ export class GameScene extends Scene {  private player!: Player;
   getNoiseSystem(): NoiseSystem { return this.noiseSystem; }
 
   /**
-   * 把所有观察者可见性输入同步给感知系统。
-   * 光源本体与照亮区域分开：playerLight 只做近身补光，不揭示细节。
+   * 重建本帧感知光源：玩家微光、手电与点燃的火把。
+   * 玩家三层视野与小鸡视觉共用这一份结果，避免两套光照判断漂移。
    */
-  private updatePerception(delta: number): void {
-    const perception = this.perception;
-    const observer = this.perceptionObserver;
-    if (!perception || !observer) return;
-
-    const vision = this.player.getVisionState();
-    observer.x = vision.x;
-    observer.y = vision.y;
-    observer.facing = vision.direction;
-
+  private rebuildPerceptionLights(): void {
+    if (!this.playerLight || !this.flashlight) return;
     const lights = this.perceptionLights;
     lights.length = 0;
     const glowPosition = this.playerLight.getPosition();
@@ -1510,6 +1511,25 @@ export class GameScene extends Scene {  private player!: Player;
         kind: "torch",
       });
     }
+  }
+
+  /**
+   * 把所有观察者可见性输入同步给感知系统。
+   * 光源本体与照亮区域分开：playerLight 只做近身补光，不揭示细节。
+   */
+  private updatePerception(delta: number): void {
+    const perception = this.perception;
+    const observer = this.perceptionObserver;
+    if (!perception || !observer) return;
+
+    const vision = this.player.getVisionState();
+    observer.x = vision.x;
+    observer.y = vision.y;
+    observer.facing = vision.direction;
+
+    // 灯列表与小鸡视觉共用同一份重建逻辑，只在本帧刷新一次。
+    this.rebuildPerceptionLights();
+    const lights = this.perceptionLights;
 
     const targets = this.perceptionTargets;
     targets.length = 0;
