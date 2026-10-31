@@ -193,8 +193,11 @@ export class GameScene extends Scene {  private player!: Player;
   private reloadVoice: SoundHandle | null = null;
   /** 小鸡的脚步声与叫声各自计时：叫声稀疏，不能被密集的脚步挤掉。 */
   private chickenStepDelay = 0;
-  private chickenCluckDelay = 0;
-  /** 正在播放的鸡叫：几秒长的整段录音，音量每帧按玩家到鸣叫点的距离重算。 */
+  /** 每只鸡独立的叫声冷却：全局冷却会让一只鸡的叫声吞掉另一只鸡刚被吓到的惊叫。 */
+  private readonly chickenCluckCooldowns = new Map<Chicken, number>();
+  /** 每只鸡稳定的发声者 id：噪声事件在鸡群传播时能区分是谁叫的。 */
+  private readonly chickenSoundIds = new WeakMap<Chicken, string>();
+  private chickenSoundSeq = 0;
   /** 正在响的鸡叫：带上是哪只鸡，鸡被击杀时要立刻把这一声收掉。 */
   private activeClucks: { handle: SoundHandle; chicken: Chicken; x: number; y: number; volume: number }[] = [];
   private loaded: boolean = false;
@@ -255,6 +258,8 @@ export class GameScene extends Scene {  private player!: Player;
   private static readonly GOLD_DROP_THRESHOLDS = [0.9, 0.7, 0.5, 0.3, 0.1];
   /** 出生点周围随机游荡的小鸡数量。 */
   private static readonly CHICKEN_COUNT = 6;
+  /** 同一只鸡两次叫声之间的最短间隔（秒）。 */
+  private static readonly CHICKEN_CLUCK_COOLDOWN = 0.9;
   /** 准星：每秒收紧、回弹速度；外扩/内收幅度见 getCrosshairOffset。 */
   private static readonly CROSSHAIR_TIGHTEN_RATE = 9;
   private static readonly CROSSHAIR_RELEASE_RATE = 9;
@@ -533,10 +538,19 @@ export class GameScene extends Scene {  private player!: Player;
    * 三种鸡叫随机取一种；每段都有 6.7–8.2 秒，所以排三个声部，
    * 0.9 秒内连叫几声时前一声还能继续响，更密的连叫才会复用最早的声部。
    * 录音这几秒里玩家可能已经走远或走近，所以音量交给 updateCluckVolumes 每帧重算。
+   *
+   * 先发布世界噪声事件，再决定放不播放：距离、静音与声部预算都不能让世界上少一声鸡叫。
    */
   private playChickenCluck(chicken: Chicken, x: number, y: number): void {
-    if (this.chickenCluckDelay > 0) return;
-    this.noiseSystem.emit("cluck", x, y, { sourceId: "chicken", loudness: 0.45 });
+    if ((this.chickenCluckCooldowns.get(chicken) ?? 0) > 0) return;
+    this.chickenCluckCooldowns.set(chicken, GameScene.CHICKEN_CLUCK_COOLDOWN);
+
+    this.noiseSystem.emit("cluck", x, y, {
+      sourceId: this.getChickenSoundId(chicken),
+      radius: this.audio.chicken.range,
+      loudness: 0.45,
+    });
+
     const attenuation = this.chickenAttenuation(x, y);
     if (attenuation <= this.audio.chicken.minAttenuation) return;
     const url = CHICKEN_CLUCK_SOUNDS[Math.floor(Math.random() * CHICKEN_CLUCK_SOUNDS.length)];
@@ -544,7 +558,25 @@ export class GameScene extends Scene {  private player!: Player;
     const handle = this.sfx.play(url, this.volume(base * attenuation),
       0.92 + Math.random() * 0.16, { count: 3 });
     if (handle) this.activeClucks.push({ handle, chicken, x, y, volume: base });
-    this.chickenCluckDelay = 0.9;
+  }
+
+  /** 稳定的发声者 id：同一只鸡始终用同一个 id，WeakMap 不会延长它的生命周期。 */
+  private getChickenSoundId(chicken: Chicken): string {
+    let id = this.chickenSoundIds.get(chicken);
+    if (!id) {
+      id = `chicken-${++this.chickenSoundSeq}`;
+      this.chickenSoundIds.set(chicken, id);
+    }
+    return id;
+  }
+
+  /** 推进每只鸡的叫声冷却；归零即删，Map 不会随着死亡个体无限增长。 */
+  private updateChickenCluckCooldowns(delta: number): void {
+    if (this.chickenCluckCooldowns.size === 0) return;
+    for (const [chicken, remaining] of [...this.chickenCluckCooldowns]) {
+      if (remaining <= delta) this.chickenCluckCooldowns.delete(chicken);
+      else this.chickenCluckCooldowns.set(chicken, remaining - delta);
+    }
   }
 
   /**
@@ -1263,6 +1295,8 @@ export class GameScene extends Scene {  private player!: Player;
     // 正在响的鸡叫也失去跟踪对象了，离开场景时硬停，重新进入时从头开始。
     this.activeClucks.forEach(cluck => cluck.handle.stop(0));
     this.activeClucks.length = 0;
+    // 冷却表跟着场景一起丢弃，重进场景时不继承上一局的叫声节奏。
+    this.chickenCluckCooldowns.clear();
     this.game?.input?.setPointerEnabled(false);
     this.game?.input?.clear();
     // 退出场景后 Tab 恢复浏览器默认行为；交互进度与按住状态一并清空。
@@ -1318,7 +1352,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.sfx.update(delta);
     this.noiseSystem.update(delta);
     this.chickenStepDelay = Math.max(0, this.chickenStepDelay - delta);
-    this.chickenCluckDelay = Math.max(0, this.chickenCluckDelay - delta);
+    this.updateChickenCluckCooldowns(delta);
 
     // 小鸡只在干地自由游荡，不读取玩家输入。
     this.chickens.forEach(chicken => chicken.update(delta, input, this.map));
