@@ -299,6 +299,20 @@ try {
     assert.ok(activeAmmo.bright > 20, `选中行应能看见弹药数字，实际 ${activeAmmo.bright}`);
     assert.ok(activeAmmo.bright > inactiveAmmo.bright, '未选中行数字应更暗');
 
+    // 读数顺序是「弹匣余弹 / 备用弹药」：大号白数字在左，小号冷灰数字在右。
+    const ammoText = current.rows[0].ammoBox;
+    const ammoHalf = Math.max(1, (current.rows[0].bullets[0].x - ammoText.x) / 2);
+    const textLeft = await page.evaluate(
+      rect => hudTest.rowStats(rect),
+      { x: ammoText.x, y: ammoText.y, width: ammoHalf, height: ammoText.height },
+    );
+    const textRight = await page.evaluate(
+      rect => hudTest.rowStats(rect),
+      { x: ammoText.x + ammoHalf, y: ammoText.y, width: ammoHalf, height: ammoText.height },
+    );
+    assert.ok(textLeft.bright > textRight.bright * 1.3,
+      `大号弹匣数字应位于斜杠左侧: 左 ${textLeft.bright} vs 右 ${textRight.bright}`);
+
     // 手电胶囊仍在列表上方，且不压住第一行。
     assert.equal(chip.y, list.area.y - 34);
     assert.equal(chip.x, list.area.x + list.area.width - 96);

@@ -274,14 +274,26 @@ test('备用弹药为 null 时显示 ∞，有限时显示真实数字', () => {
         bulletWidth: getBulletWidth(row.view, layout.metrics),
       })),
     );
+    // 读数顺序是「弹匣余弹 / 备用弹药」，所以自右向左依次是
+    // 三枚子弹 → 备用弹药 → 斜杠 → 弹匣余弹 → 枪械。
     const reserveWidth = measureText(formatReserve(views.primary), layout.metrics.reserveFont);
     assert.ok(
-      column.reserveRight - reserveWidth >= column.gunRightX,
-      `备用弹药压到枪械区域: ${reserve} / ${magazine}`,
+      column.magazineLeft >= column.gunRightX,
+      `弹匣数字压到枪械区域: ${reserve} / ${magazine}`,
     );
-    assert.ok(column.slashLeft + column.slashWidth + layout.metrics.slashGap
-      <= column.magazineRight - column.magazineSlotWidth + 1e-6, '斜杠不能压到弹匣数字槽');
-    assert.ok(column.magazineRight <= column.bulletRight - column.bulletBlockWidth + 1e-6);
+    assert.ok(
+      column.magazineRight <= column.slashLeft - layout.metrics.slashGap + 1e-6,
+      '斜杠不能压到弹匣数字',
+    );
+    assert.ok(
+      column.slashRight <= column.reserveLeft - layout.metrics.reserveGap + 1e-6,
+      '备用弹药不能压到斜杠',
+    );
+    assert.ok(
+      column.reserveLeft + reserveWidth <= column.reserveRight + 1e-6,
+      '备用弹药不能溢出自己的槽位',
+    );
+    assert.ok(column.reserveRight <= column.bulletRight - column.bulletBlockWidth + 1e-6);
   }
 });
 
@@ -301,7 +313,7 @@ test('字号、文本宽度与基线对齐符合新规范', () => {
   const metrics = getWeaponListMetrics(1);
   assert.match(metrics.magFont, /34px/);
   assert.match(metrics.reserveFont, /17px/);
-  assert.match(metrics.slashFont, /21px/);
+  assert.match(metrics.slashFont, /18px/);
   assert.ok(estimateTextWidth('∞', metrics.reserveFont) > 0);
   assert.ok(
     estimateTextWidth('120', metrics.reserveFont) > estimateTextWidth('45', metrics.reserveFont),
@@ -322,7 +334,7 @@ test('字号、文本宽度与基线对齐符合新规范', () => {
   const expectedBaseline = row.rect.y + row.rect.height / 2
     + rowMetrics.magFontSize * rowMetrics.baselineRatio;
   const ammoTexts = calls.texts.filter(text => Math.abs(text.y - expectedBaseline) < 1e-6);
-  assert.deepEqual(ammoTexts.map(text => text.text), ['∞', '/', '6']);
+  assert.deepEqual(ammoTexts.map(text => text.text), ['6', '/', '∞']);
   for (const text of ammoTexts) {
     assert.equal(text.baseline, 'alphabetic');
   }
@@ -335,7 +347,9 @@ test('字号、文本宽度与基线对齐符合新规范', () => {
   const reserve = ammoTexts.find(text => text.text === '∞');
   assert.equal(mag.align, 'right');
   assert.equal(slash.align, 'left');
-  assert.equal(reserve.align, 'right');
+  assert.equal(reserve.align, 'left');
+  assert.ok(mag.x < slash.x, '弹匣余弹应在斜杠左侧');
+  assert.ok(slash.x < reserve.x, '备用弹药应在斜杠右侧');
   const fontPx = font => Number(/ (\d+(?:\.\d+)?)px/.exec(font)[1]);
   near(fontPx(mag.font), Math.round(rowMetrics.magFontSize * 10) / 10, 1e-9, '弹匣字号: ');
   near(fontPx(reserve.font), Math.round(rowMetrics.reserveFontSize * 10) / 10, 1e-9, '备弹字号: ');
@@ -348,12 +362,12 @@ test('字号、文本宽度与基线对齐符合新规范', () => {
       { reserve: '∞', magazine: '6', bulletWidth: getBulletWidth(pistolView(), layout.metrics) },
     ],
   );
-  near(reserve.x, column.reserveRight, 1e-6, '∞ 右对齐到备用弹药槽右缘: ');
+  near(reserve.x, column.reserveLeft, 1e-6, '∞ 左对齐到备用弹药槽左缘: ');
   near(slash.x, column.slashLeft, 1e-6, '斜杠落在斜杠槽左缘: ');
   near(mag.x, column.magazineRight, 1e-6, '弹匣数字右对齐: ');
-  assert.ok(column.slashLeft + column.slashWidth <= column.magazineRight);
+  assert.ok(column.slashRight <= column.reserveLeft - layout.metrics.reserveGap + 1e-6);
   assert.ok(
-    column.reserveRight - measureText('∞', layout.metrics.reserveFont) >= column.gunRightX,
+    column.magazineLeft >= column.gunRightX,
     '弹药列整体不越过枪械锚点',
   );
 });

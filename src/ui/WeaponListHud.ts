@@ -31,7 +31,7 @@ export const WEAPON_LIST = {
   paddingRight: 20,
   magFontSize: 34,
   reserveFontSize: 17,
-  slashFontSize: 21,
+  slashFontSize: 18,
   bulletHeight: 32,
   bulletGapRatio: 0.24,
   bulletCount: 3,
@@ -149,10 +149,17 @@ export interface WeaponAmmoColumn {
   readonly bulletGap: number;
   readonly bulletRight: number;
   readonly bulletBlockWidth: number;
+  /** 弹匣余弹（左、大号数字）的右边缘：数字右对齐。 */
   readonly magazineRight: number;
+  /** 弹匣数字槽的左边缘（含个位数预留），枪械锚点由此推出。 */
+  readonly magazineLeft: number;
   readonly magazineSlotWidth: number;
   readonly slashLeft: number;
+  readonly slashRight: number;
   readonly slashWidth: number;
+  /** 备用弹药（右、小号数字）的左边缘：数字左对齐。 */
+  readonly reserveLeft: number;
+  /** 备用弹药槽的右边缘，三枚子弹从它右侧的间距之后开始。 */
   readonly reserveRight: number;
   readonly reserveSlotWidth: number;
   /** 枪械图片右缘的统一锚点：主副武器的右端都停在这条线上。 */
@@ -334,13 +341,10 @@ export function measureWeaponAmmoColumn(
   for (const entry of entries) {
     magazineSlotWidth = Math.max(magazineSlotWidth, measure(entry.magazine, metrics.magFont));
   }
-  const magazineRight = bulletRight - bulletBlockWidth - metrics.magGap;
+  const bulletLeft = bulletRight - bulletBlockWidth;
 
-  const slashWidth = Math.max(1, measure("/", metrics.slashFont));
-  const magazineLeft = magazineRight - magazineSlotWidth;
-  const slashLeft = magazineLeft - metrics.slashGap - slashWidth;
-  const reserveRight = slashLeft - metrics.reserveGap;
-
+  // 读数顺序从左到右是「弹匣余弹 / 备用弹药」，所以从右往左依次落位：
+  // 三枚子弹 → 备用弹药槽 → 斜杠 → 弹匣数字 → 枪械右锚点。
   let reserveSlotWidth = measure("∞", metrics.reserveFont);
   for (const entry of entries) {
     const width = entry.reserve === null
@@ -348,7 +352,16 @@ export function measureWeaponAmmoColumn(
       : Math.max(measure("00", metrics.reserveFont), measure(entry.reserve, metrics.reserveFont));
     reserveSlotWidth = Math.max(reserveSlotWidth, width);
   }
-  const gunRightX = reserveRight - reserveSlotWidth - metrics.gunGap;
+  const reserveRight = bulletLeft - metrics.magGap;
+  const reserveLeft = reserveRight - reserveSlotWidth;
+
+  const slashWidth = Math.max(1, measure("/", metrics.slashFont));
+  const slashRight = reserveLeft - metrics.reserveGap;
+  const slashLeft = slashRight - slashWidth;
+
+  const magazineRight = slashLeft - metrics.slashGap;
+  const magazineLeft = magazineRight - magazineSlotWidth;
+  const gunRightX = magazineLeft - metrics.gunGap;
 
   return {
     bulletCount,
@@ -357,9 +370,12 @@ export function measureWeaponAmmoColumn(
     bulletRight,
     bulletBlockWidth,
     magazineRight,
+    magazineLeft,
     magazineSlotWidth,
     slashLeft,
+    slashRight,
     slashWidth,
+    reserveLeft,
     reserveRight,
     reserveSlotWidth,
     gunRightX,
@@ -432,9 +448,9 @@ export function getWeaponRowLayout(
 
   const ammoBox: Rect | null = view.kind === "firearm"
     ? {
-        x: ammo.reserveRight - ammo.reserveSlotWidth,
+        x: ammo.magazineLeft,
         y: centerY - metrics.bulletHeight * 0.6,
-        width: ammo.bulletRight - (ammo.reserveRight - ammo.reserveSlotWidth),
+        width: ammo.bulletRight - ammo.magazineLeft,
         height: metrics.bulletHeight * 1.2,
       }
     : null;
@@ -734,23 +750,24 @@ function drawWeaponRow(
       ctx.textBaseline = "alphabetic";
       const baselineY = content.ammoBaselineY;
 
-      const reserve = formatReserve(view);
-      if (reserve !== null) {
-        ctx.font = metrics.reserveFont;
-        ctx.textAlign = "right";
-        ctx.fillStyle = RESERVE_INK;
-        ctx.fillText(reserve, ammo.reserveRight, baselineY);
-      }
+      // 读数顺序：弹匣余弹（大）→ 斜杠 → 备用弹药（小）。
+      ctx.font = metrics.magFont;
+      ctx.textAlign = "right";
+      ctx.fillStyle = INK;
+      ctx.fillText(formatMagazine(view), ammo.magazineRight, baselineY);
 
       ctx.font = metrics.slashFont;
       ctx.textAlign = "left";
       ctx.fillStyle = SLASH_INK;
       ctx.fillText("/", ammo.slashLeft, baselineY);
 
-      ctx.font = metrics.magFont;
-      ctx.textAlign = "right";
-      ctx.fillStyle = INK;
-      ctx.fillText(formatMagazine(view), ammo.magazineRight, baselineY);
+      const reserve = formatReserve(view);
+      if (reserve !== null) {
+        ctx.font = metrics.reserveFont;
+        ctx.textAlign = "left";
+        ctx.fillStyle = RESERVE_INK;
+        ctx.fillText(reserve, ammo.reserveLeft, baselineY);
+      }
 
       ctx.globalAlpha = inkAlpha * BULLET_ALPHA_SCALE;
       ctx.fillStyle = INK;
