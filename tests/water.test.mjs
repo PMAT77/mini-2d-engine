@@ -105,7 +105,7 @@ test('four water factors, mixed-depth footprints, buffs and sprint preserve the 
   m.tiles.forEach(row => row.fill('deep_water'));
   const p = new Player(200, 200); p.addModifier('maxSpeed', 0.5, 0, true);
   for (let i = 0; i < 30; i++) p.update(1 / 60, input('d', 'Shift'), m);
-  near(p.getVelocity().length(), 200 * 0.25 * 1.5 * 1.6);
+  near(p.getVelocity().length(), 160 * 0.25 * 1.5 * 1.6);
 });
 
 test('seeded lakes occupy about ten percent, stay separated and have closed nested contours', () => {

@@ -40,14 +40,14 @@ try{
       },fps);
       assert.deepEqual(corridor.initial.bounds,corridor.afterBreathing.bounds,'breathing cannot change the body');
       assert.ok(corridor.penetration<=0.01&&corridor.back.penetration<=0.01);
-      assert.ok(corridor.outward.y>corridor.initial.y+60&&corridor.back.y<corridor.outward.y-60,'player must reverse in the narrow corridor');
+      assert.ok(corridor.outward.y>corridor.initial.y+48&&corridor.back.y<corridor.outward.y-48,'player must reverse in the narrow corridor');
       cases++;
       const corner=await page.evaluate(fps=>{
         const f=window.fixture;f.setup('wall');f.map.tiles.forEach(row=>row.fill('default'));f.map.tiles[4][4]='wall';f.player.x=180;f.player.y=151;
         let penetration=0;for(let i=0;i<Math.ceil(0.75*fps);i++){f.step(1/fps,['d','s']);penetration=Math.max(penetration,f.snapshot().penetration)}
         return{...f.snapshot(),penetration};
       },fps);
-      assert.ok(corner.x>280&&corner.y>200&&corner.penetration<=0.01,'diagonal corner contact must retain sliding movement');
+      assert.ok(corner.x>260&&corner.y>185&&corner.penetration<=0.01,'diagonal corner contact must retain sliding movement');
       cases++;
     }
     const long=await page.evaluate(()=>{const f=window.fixture;f.setup('wall','square');return f.step(0.5,['ArrowUp'])});

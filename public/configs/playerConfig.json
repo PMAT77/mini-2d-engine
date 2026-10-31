@@ -6,7 +6,7 @@
   "base": {
     "maxHealth": 100,
     "size": 49,
-    "maxSpeed": 200,
+    "maxSpeed": 160,
     "rotationSpeed": 12.5664,
     "rotationStrategy": "auto",
     "accel": 4000,

@@ -59,7 +59,7 @@ test('default roll covers about 120px and stays frame-rate independent', () => {
     advance(p, 0.6, input(), undefined, fps);
     assert.equal(p.isRolling(), false);
     distances.push(p.x);
-    assert.ok(Math.abs(p.x - 143) < 0.8, `${fps}fps rolled ${p.x}px`);
+    assert.ok(Math.abs(p.x - 114.4) < 0.64, `${fps}fps rolled ${p.x}px`);
     near(p.getVelocity().length(), 0);
   }
   assert.ok(Math.max(...distances) - Math.min(...distances) < 0.5, distances.join(', '));
@@ -79,8 +79,8 @@ test('holding a direction through a roll keeps moving without a startup pause', 
   // 立刻跑起来，0.1 秒内就要回到常速，而不是卡在原地。
   assert.ok(Math.abs(rollingFrames - 29) <= 1, `roll lasted ${rollingFrames} frames`);
   for (let i = 0; i < 7; i++) p.update(1 / 60, input('d'), map);
-  assert.ok(p.getVelocity().length() > 190, `0.117s after roll: ${p.getVelocity().length()}`);
-  assert.ok(p.x > 143, `kept moving after roll: ${p.x}`);
+  assert.ok(p.getVelocity().length() > 152, `0.117s after roll: ${p.getVelocity().length()}`);
+  assert.ok(p.x > 114.4, `kept moving after roll: ${p.x}`);
 
   // 松开方向时不预热起步曲线，仍然正常停下。
   const released = new Player(0, 0);
@@ -200,7 +200,7 @@ test('roll config defaults, JSON file, validation, snapshot and application stay
   assert.equal(p.requestRoll(input('d')), true);
   near(p.getStamina(), 90);
   advance(p, 0.3);
-  assert.ok(p.x > 75 && p.x < 85, `shortened roll moved ${p.x}px`);
+  assert.ok(p.x > 60 && p.x < 68, `shortened roll moved ${p.x}px`);
 });
 
 // ---------------------------------------------------------------------------
@@ -489,7 +489,7 @@ test('翻滚动画与物理完全解耦：碰撞体、位移和朝向锁定都�
   }
   advance(p, 0.3);
   assert.equal(p.isRolling(), false);
-  assert.ok(Math.abs(p.x - 143) < 1.5, `roll moved ${p.x}px`);
+  assert.ok(Math.abs(p.x - 114.4) < 1.2, `roll moved ${p.x}px`);
 });
 
 test('起滚与收尾混合到真实站立姿态，而不是固定 REST', () => {
@@ -597,7 +597,7 @@ test('长帧跨过翻滚结束点时，物理状态正确且余下时间继续�
   assert.equal(idle.requestRoll(input('d')), true);
   idle.update(0.55, input(), map);
   assert.equal(idle.isRolling(), false);
-  assert.ok(Math.abs(idle.x - 143) < 0.8, `long frame rolled ${idle.x}px`);
+  assert.ok(Math.abs(idle.x - 114.4) < 0.64, `long frame rolled ${idle.x}px`);
   near(idle.getVelocity().length(), 0);
   near(idle.getRollCooldownRemaining(), 0.35, 0.01);
   assert.equal(idle.getRollProgress(), 0);
@@ -607,14 +607,14 @@ test('长帧跨过翻滚结束点时，物理状态正确且余下时间继续�
   moving.update(0.55, input('d'), map);
   assert.equal(moving.isRolling(), false);
   // 0.5s 翻滚 + 0.05s 普通移动，余量不能被丢掉。
-  assert.ok(moving.x > 143 && moving.x < 165, `long frame with input moved ${moving.x}px`);
+  assert.ok(moving.x > 114.4 && moving.x < 132, `long frame with input moved ${moving.x}px`);
   assert.ok(moving.getVelocity().length() > 0);
 
   const exact = new Player(0, 0);
   assert.equal(exact.requestRoll(input('d')), true);
   exact.update(DEFAULT_ROLL.duration, input(), map);
   assert.equal(exact.isRolling(), false);
-  assert.ok(Math.abs(exact.x - 143) < 0.8, `exact end frame moved ${exact.x}px`);
+  assert.ok(Math.abs(exact.x - 114.4) < 0.64, `exact end frame moved ${exact.x}px`);
   exact.update(0.1, input(), map);
   assert.equal(exact.isRolling(), false);
 });

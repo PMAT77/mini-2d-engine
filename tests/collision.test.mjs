@@ -67,7 +67,7 @@ test('invalid shape configurations are rejected before any player field changes'
   for (const collider of invalid) {
     assert.throws(() => parsePlayerConfig({base:{maxSpeed:700},collider}));
     assert.throws(() => p.applyConfig({base:{maxSpeed:700},collider}));
-    assert.equal(p.getMaxSpeed(),200);
+    assert.equal(p.getMaxSpeed(),160);
     assert.equal(p.getCollider().compiled.shape.type,'circle');
   }
   const source = {type:'polygon',vertices:[[0,0],[1,0],[1,1],[0,1]]};
@@ -76,7 +76,7 @@ test('invalid shape configurations are rejected before any player field changes'
   assert.throws(()=>p.setCollider(DEFAULT_SHAPE));
   assert.throws(()=>p.applyConfig({base:{maxSpeed:700},collider:L}));
   assert.throws(()=>p.setCollider({type:'circle',radius:0.5,center:[0.1,0]}));
-  near(p.getMaxSpeed(),200);
+  near(p.getMaxSpeed(),160);
   p.applyConfig({collider:{type:'circle',radius:0.4}});
   assert.equal(p.getCollider().parts[0].type,'circle');
 });
@@ -110,9 +110,9 @@ test('automatic facing cannot prevent walking backward out of a narrow corridor'
   const p=new Player(100.5,200);p.currentRotation=0;
   for(let i=0;i<24;i++){p.update(1/60,input('s'),m);legal(m,p);}
   const outward=p.y;
-  assert.ok(outward>260,`outward movement stopped at ${outward}, angle ${p.currentRotation}`);
+  assert.ok(outward>248,`outward movement stopped at ${outward}, angle ${p.currentRotation}`);
   for(let i=0;i<24;i++){p.update(1/60,input('w'),m);legal(m,p);}
-  assert.ok(p.y<outward-60,`return movement stopped at ${p.y}, angle ${p.currentRotation}`);
+  assert.ok(p.y<outward-48,`return movement stopped at ${p.y}, angle ${p.currentRotation}`);
 });
 
 test('player body stays circular when turning, changing sprites, or overlapping decorative corners', () => {
@@ -151,16 +151,16 @@ test('breathing grows only the artwork and never changes wall contact, slowdown 
     near(p.getCollider().parts[0].radius,24.5);near(m.getShapeSpeedFactor(p.getCollider()),factor);legal(m,p);
   }
   assert.ok(Math.max(...scales)>1.29&&Math.min(...scales)<0.71);
-  p.update(0.4,input('s'),m);const outward=p.y;assert.ok(outward>230);
-  p.update(0.4,input('w'),m);assert.ok(p.y<outward-30);legal(m,p);
+  p.update(0.4,input('s'),m);const outward=p.y;assert.ok(outward>224);
+  p.update(0.4,input('w'),m);assert.ok(p.y<outward-24);legal(m,p);
 });
 
 test('diagonal movement glances along a tile corner instead of losing all movement', () => {
   const m=mapOf();m.tiles[4][4]='wall';
   const p=new Player(180,151);p.currentRotation=0;
   for(let i=0;i<45;i++){p.update(1/60,input('d','s'),m);legal(m,p);}
-  assert.ok(p.x>280,`corner stopped horizontal movement at ${p.x},${p.y}`);
-  assert.ok(p.y>200,`corner stopped vertical movement at ${p.x},${p.y}`);
+  assert.ok(p.x>260,`corner stopped horizontal movement at ${p.x},${p.y}`);
+  assert.ok(p.y>185,`corner stopped vertical movement at ${p.x},${p.y}`);
 });
 
 test('simultaneous wall contacts push both axes and tile seams do not block sliding', () => {
@@ -220,7 +220,7 @@ test('terrain speed caps combine with buffs, update within the frame and respect
   const m=mapOf(); m.tiles.forEach(row=>row.fill('water'));
   const p=new Player(200,200); p.addModifier('maxSpeed',0.5,0,true);
   p.velocity.set(600,0); p.update(0.1,input('d'),m);
-  near(p.getVelocity().length(),150); legal(m,p);
+  near(p.getVelocity().length(),120); legal(m,p);
   const terrain=mapOf(); terrain.terrainMap.get('water').walkable=true;
   const { TILE_TYPES }=load('map/TileType'); const previous=TILE_TYPES.water.speedFactor;
   try { TILE_TYPES.water.speedFactor=0; terrain.tiles.forEach(row=>row.fill('water')); const q=new Player(200,200); q.update(0.1,input('d'),terrain); near(q.x,200); near(q.getVelocity().length(),0); }

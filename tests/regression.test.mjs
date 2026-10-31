@@ -82,15 +82,15 @@ test('same-stat pickup refreshes one stable ID and expires from the latest picku
   manager.update(0.8);
   assert.equal(manager.addModifier({ ...effect, value: 0.3, duration: 5 }), id);
   assert.equal(manager.getModifierCount(), 1);
-  manager.update(0.3); assert.equal(player.getMaxSpeed(), 260);
-  manager.update(4.8); assert.equal(player.getMaxSpeed(), 200);
+  manager.update(0.3); assert.equal(player.getMaxSpeed(), 208);
+  manager.update(4.8); assert.equal(player.getMaxSpeed(), 160);
   assert.equal(manager.getModifierCount(), 0);
 });
 test('independent stats and permanent effects retain their own lifetimes', () => {
   const p = new Player(0, 0), manager = new ModifierManager(p);
   manager.addModifier({ stat: 'maxSpeed', value: 1, duration: 1, isMultiplier: true, description: '' });
   manager.addModifier({ stat: 'bulletSpeed', value: 1, duration: 0, isMultiplier: true, description: '' });
-  manager.update(2); assert.equal(p.getMaxSpeed(), 200); assert.equal(p.getBulletSpeed(), 5200);
+  manager.update(2); assert.equal(p.getMaxSpeed(), 160); assert.equal(p.getBulletSpeed(), 5200);
   assert.throws(() => manager.addModifier({ stat: 'damage', value: NaN, duration: 1 }), /Invalid/);
   manager.clearAllModifiers(); assert.equal(p.getBulletSpeed(), 2600);
 });
@@ -124,7 +124,7 @@ test('configuration validates atomically and applies rotation and magazine capac
   assert.equal(p.getMagazineSize(), 7);
   for (const config of [null, [], { base: { size: 0 } }, { shooting: { fireRate: -1 } }, { base: { rotationStrategy: 'x' } }, { ui: { fadeSpeed: Infinity } }, { unknown: {} }]) assert.throws(() => parsePlayerConfig(config));
   assert.throws(() => p.applyConfig({ base: { maxSpeed: 700 }, shooting: { fireRate: 0 } }));
-  assert.equal(p.getMaxSpeed(), 200);
+  assert.equal(p.getMaxSpeed(), 160);
 });
 test('movement facing takes the shortest wrap and respects forced rotation independently of aim', () => {
   const p = new Player(0, 0); const dir = new Vector2(-1, 0);

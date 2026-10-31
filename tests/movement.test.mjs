@@ -25,17 +25,17 @@ const mapOf = () => {
   return map;
 };
 
-test('startup accelerates continuously from rest to the 200px/s base speed in 80ms', () => {
+test('startup accelerates continuously from rest to the 160px/s base speed in 80ms', () => {
   const json = JSON.parse(readFileSync('public/configs/playerConfig.json', 'utf8'));
   for (const configured of [false, true]) {
     const p = new Player(0, 0);
     if (configured) p.applyConfig(json);
-    near(p.getMaxSpeed(), 200);
+    near(p.getMaxSpeed(), 160);
     p.update(0.000001, input('d')); assert.ok(p.getVelocity().length() < 0.001);
-    p.update(0.019999, input('d')); near(p.getVelocity().length(), 31.25);
-    p.update(0.02, input('d')); near(p.getVelocity().length(), 100);
-    p.update(0.02, input('d')); near(p.getVelocity().length(), 168.75);
-    p.update(0.02, input('d')); near(p.getVelocity().length(), 200);
+    p.update(0.019999, input('d')); near(p.getVelocity().length(), 25);
+    p.update(0.02, input('d')); near(p.getVelocity().length(), 80);
+    p.update(0.02, input('d')); near(p.getVelocity().length(), 135);
+    p.update(0.02, input('d')); near(p.getVelocity().length(), 160);
     advance(p, 0.25);
     near(p.getVelocity().length(), 0);
     p.update(0.000001, input('d')); assert.ok(p.getVelocity().length() < 0.001);
@@ -49,13 +49,13 @@ test('release retains momentum before easing to rest within 200ms, with FPS-inde
     advance(p, 0.2, input('d'), undefined, fps);
     const x = p.x;
     p.update(0.02, input());
-    assert.ok(p.x > x); assert.ok(p.getVelocity().x > 100 && p.getVelocity().x < 200);
+    assert.ok(p.x > x); assert.ok(p.getVelocity().x > 80 && p.getVelocity().x < 160);
     advance(p, 0.03, input(), undefined, fps);
-    near(p.getVelocity().x, 168.75);
+    near(p.getVelocity().x, 135);
     advance(p, 0.15, input(), undefined, fps);
     near(p.getVelocity().length(), 0);
     tails.push(p.x - x);
-    assert.ok(p.x - x > 19 && p.x - x < 21);
+    assert.ok(p.x - x > 15.2 && p.x - x < 16.8);
     const stopped = p.x;
     advance(p, 0.2); near(p.x, stopped);
   }
@@ -93,9 +93,9 @@ test('tap distance follows press duration and repeated taps cannot inherit a sus
       advance(p, duration, input(), undefined, fps);
       near(p.getVelocity().length(), 0);
       assert.ok(p.x > previous, `${duration}s must move farther than a shorter tap`);
-      assert.ok(p.x - heldDistance <= 200 * duration / 2 + 0.1, 'coasting cannot exceed the press-duration budget');
-      if (duration <= 0.02) assert.ok(p.x < 12, `quick tap moved ${p.x}px`);
-      if (duration === 0.04) assert.ok(p.x < 25, `40ms tap moved ${p.x}px`);
+      assert.ok(p.x - heldDistance <= 160 * duration / 2 + 0.1, 'coasting cannot exceed the press-duration budget');
+      if (duration <= 0.02) assert.ok(p.x < 9.6, `quick tap moved ${p.x}px`);
+      if (duration === 0.04) assert.ok(p.x < 20, `40ms tap moved ${p.x}px`);
       previous = p.x;
     }
     const p = new Player(0, 0);
@@ -107,7 +107,7 @@ test('tap distance follows press duration and repeated taps cannot inherit a sus
       advance(p, 0.01, input(), undefined, fps);
     }
     advance(p, 0.2, input(), undefined, fps);
-    assert.ok(p.x - x < 60, 'rapid taps reset their own braking budget');
+    assert.ok(p.x - x < 48, 'rapid taps reset their own braking budget');
     near(p.getVelocity().length(), 0);
   }
 });
@@ -116,13 +116,13 @@ test('turns have tiny damping without losing speed, while reversals and zero dam
   const p = new Player(0, 0);
   p.update(0.04, input('d'));
   p.update(0.01, input('w')); assert.ok(p.getVelocity().x > 0); assert.ok(p.getVelocity().y < 0);
-  assert.ok(p.getVelocity().length() > 100);
-  p.update(0.05, input('w')); assert.ok(Math.abs(p.getVelocity().x) < 5); assert.ok(p.getVelocity().y < -199);
+  assert.ok(p.getVelocity().length() > 80);
+  p.update(0.05, input('w')); assert.ok(Math.abs(p.getVelocity().x) < 5); assert.ok(p.getVelocity().y < -159);
   p.update(0.1, input('d'));
   const x = p.x;
-  p.update(1 / 60, input('a')); near(p.getVelocity().x, -200); near(p.getVelocity().y, 0); assert.ok(p.x < x);
+  p.update(1 / 60, input('a')); near(p.getVelocity().x, -160); near(p.getVelocity().y, 0); assert.ok(p.x < x);
   p.applyConfig({ movement: { turnDamping: 0 } });
-  p.update(0.01, input('w')); near(p.getVelocity().x, 0); near(p.getVelocity().y, -200);
+  p.update(0.01, input('w')); near(p.getVelocity().x, 0); near(p.getVelocity().y, -160);
 });
 
 test('diagonals have equal speed and 30/60/144 FPS keep matching travel and stamina', () => {
@@ -141,10 +141,10 @@ test('diagonals have equal speed and 30/60/144 FPS keep matching travel and stam
     advance(runner, 10, input('d', 'Shift'), undefined, fps);
     sprintPositions.push(runner.x);
     near(runner.getStamina(), 0); assert.equal(runner.getIsSprinting(), false);
-    assert.ok(runner.getVelocity().length() <= 200.00001);
+    assert.ok(runner.getVelocity().length() <= 160.00001);
   }
   assert.ok(Math.max(...positions) - Math.min(...positions) < 0.1, positions.join(', '));
-  near(positions[0], 192, 0.5);
+  near(positions[0], 153.6, 0.5);
   for (const [x, y] of turns) { near(x, turns[0][0], 0.1); near(y, turns[0][1], 0.1); }
   assert.ok(Math.max(...sprintPositions) - Math.min(...sprintPositions) < 0.2, sprintPositions.join(', '));
 });
@@ -154,15 +154,15 @@ test('Shift smoothly reaches sprint speed in 160ms without changing base speed o
   // 本条验证升速曲线本身：固定 0.16 秒升速、25 每秒消耗，避免默认值调整牵连算术。
   p.applyConfig({ sprint: { rampDuration: 0.16, drainPerSecond: 25 } });
   advance(p, 0.1, input('d'));
-  p.update(0.04, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 218.75);
-  p.update(0.04, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 260);
-  p.update(0.08, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 320);
+  p.update(0.04, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 175);
+  p.update(0.04, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 208);
+  p.update(0.08, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 256);
   advance(p, 0.34, input('d', 'Shift', 'MouseLeft'));
-  near(p.getMaxSpeed(), 200); near(p.getVelocity().length(), 320);
+  near(p.getMaxSpeed(), 160); near(p.getVelocity().length(), 256);
   near(p.getStamina(), 87.5); assert.equal(p.getIsSprinting(), true);
   assert.ok(p.getBullets().length >= 2); assert.ok(p.getMagazineAmmo() < p.getMagazineSize());
-  p.update(1 / 60, input('d')); near(p.getVelocity().length(), 200); assert.equal(p.getIsSprinting(), false);
-  p.update(0.01, input('d', 'Shift')); assert.ok(p.getVelocity().length() > 200 && p.getVelocity().length() < 202.5);
+  p.update(1 / 60, input('d')); near(p.getVelocity().length(), 160); assert.equal(p.getIsSprinting(), false);
+  p.update(0.01, input('d', 'Shift')); assert.ok(p.getVelocity().length() > 160 && p.getVelocity().length() < 162);
 });
 
 test('sprint ramp survives turns and reversals, and can be configured to respond instantly', () => {
@@ -170,12 +170,12 @@ test('sprint ramp survives turns and reversals, and can be configured to respond
   // 本条验证升速曲线本身：固定 0.16 秒升速、25 每秒消耗，避免默认值调整牵连算术。
   p.applyConfig({ sprint: { rampDuration: 0.16, drainPerSecond: 25 } });
   advance(p, 0.1, input('d'));
-  p.update(0.08, input('d', 'Shift')); near(p.getVelocity().length(), 260);
-  p.update(0.04, input('w', 'Shift')); near(p.getVelocity().length(), 301.25);
-  p.update(0.04, input('a', 'Shift')); near(p.getVelocity().x, -320); near(p.getVelocity().y, 0);
+  p.update(0.08, input('d', 'Shift')); near(p.getVelocity().length(), 208);
+  p.update(0.04, input('w', 'Shift')); near(p.getVelocity().length(), 241);
+  p.update(0.04, input('a', 'Shift')); near(p.getVelocity().x, -256); near(p.getVelocity().y, 0);
   p.update(0.01, input('d'));
   p.applyConfig({ sprint: { rampDuration: 0 } });
-  p.update(0.01, input('d', 'Shift')); near(p.getVelocity().length(), 320);
+  p.update(0.01, input('d', 'Shift')); near(p.getVelocity().length(), 256);
 });
 
 test('recovery delay crosses frame boundaries precisely and recovers while walking/shooting', () => {
@@ -210,8 +210,8 @@ test('partially depleted stamina splits a long frame instead of granting free sp
   advance(p, 0.1, input('d'));
   const x = p.x;
   p.update(0.3, input('d', 'Shift'));
-  near(p.x - x, 320 * 0.2 + 200 * 0.1, 0.001);
-  near(p.getStamina(), 0); near(p.getVelocity().length(), 200); assert.equal(p.getIsSprinting(), false);
+  near(p.x - x, 256 * 0.2 + 160 * 0.1, 0.001);
+  near(p.getStamina(), 0); near(p.getVelocity().length(), 160); assert.equal(p.getIsSprinting(), false);
 });
 
 test('默认冲刺升速 0.45 秒、每秒消耗 10 点体力', () => {
@@ -221,9 +221,9 @@ test('默认冲刺升速 0.45 秒、每秒消耗 10 点体力', () => {
   advance(p, 0.1, input('d'));
   p.update(0.15, input('d', 'Shift'));
   const mid = p.getVelocity().length();
-  assert.ok(mid > 200 && mid < 320, `150ms 时升速尚未完成: ${mid}`);
+  assert.ok(mid > 160 && mid < 256, `150ms 时升速尚未完成: ${mid}`);
   p.update(0.3, input('d', 'Shift'));
-  near(p.getVelocity().length(), 320);
+  near(p.getVelocity().length(), 256);
   near(p.getStamina(), 95.5);
 });
 
@@ -250,7 +250,7 @@ test('sprint multiplies speed buffs and coverage-based water slowdown', () => {
   const p = new Player(200, 200); p.addModifier('maxSpeed', 0.5, 0, true);
   p.applyConfig({ sprint: { rampDuration: 0.16 } });
   advance(p, 0.2, input('d', 'Shift'), m);
-  near(p.getMaxSpeed(), 300); near(p.getVelocity().length(), 240);
+  near(p.getMaxSpeed(), 240); near(p.getVelocity().length(), 192);
 });
 
 test('sprint trail follows distance, stays sparse, and disappears when stationary', () => {
@@ -269,8 +269,8 @@ test('movement/sprint configuration validates atomically, supports old fields an
   p.applyConfig({ sprint: { drainPerSecond: 25 } });
   advance(p, 1, input('d', 'Shift')); p.applyConfig({ sprint: { maxStamina: 200 } }); near(p.getStamina(), 150);
   p.applyConfig({ base: { accel: 1, decel: 1, nonlinearFactor: 0 } });
-  p.update(0.1, input()); p.update(0.08, input('d')); near(p.getVelocity().length(), 200);
-  p.applyConfig({ movement: { startupDuration: 0 } }); p.update(0.01, input('d')); near(p.getVelocity().length(), 200);
+  p.update(0.1, input()); p.update(0.08, input('d')); near(p.getVelocity().length(), 160);
+  p.applyConfig({ movement: { startupDuration: 0 } }); p.update(0.01, input('d')); near(p.getVelocity().length(), 160);
   for (const config of [
     { movement: { startSpeedRatio: 1.1 } }, { movement: { startupDuration: -1 } },
     { movement: { turnDamping: -1 } },
@@ -281,7 +281,7 @@ test('movement/sprint configuration validates atomically, supports old fields an
     { sprint: { regenDelay: -1 } }, { movement: { unknown: 1 } },
     { sprint: { rampDuration: -1 } }, { sprint: { rampDuration: Infinity } },
   ]) assert.throws(() => p.applyConfig({ base: { maxSpeed: 999 }, ...config }));
-  near(p.getMaxSpeed(), 200);
+  near(p.getMaxSpeed(), 160);
 });
 
 test('physical keys survive Shift case changes, either Shift works, and focus loss clears input', () => {

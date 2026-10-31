@@ -149,7 +149,7 @@ export interface PlayerRenderState {
  * 玩家类 - 处理玩家的移动、射击和状态管理
  */
 export class Player extends Entities {
-  protected maxSpeed = 200;
+  protected maxSpeed = 160;
   public setCollider(shape: ColliderShape): void { super.setCollider(parsePlayerCollider(shape)); }
   protected getBodyRotation(): number { return this.currentRotation - Math.PI / 2; }
   private health = 100;
