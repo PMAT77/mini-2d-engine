@@ -21,6 +21,7 @@ import { WeaponListHud, getWeaponListLayout } from "../ui/WeaponListHud";
 import { drawFlashlightHud, getFlashlightHudRect } from "../ui/FlashlightHud";
 import { CrosshairOverlay, getCrosshairOffset } from "../ui/CrosshairOverlay";
 import { NoiseSystem } from "../core/NoiseSystem";
+import { computeAudibleGain } from "../core/SoundAttenuation";
 
 // 导入光照系统相关类
 import { ConfigLoader } from "../core/ConfigLoader";
@@ -199,7 +200,17 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly chickenSoundIds = new WeakMap<Chicken, string>();
   private chickenSoundSeq = 0;
   /** 正在响的鸡叫：带上是哪只鸡，鸡被击杀时要立刻把这一声收掉。 */
-  private activeClucks: { handle: SoundHandle; chicken: Chicken; x: number; y: number; volume: number }[] = [];
+  private activeClucks: {
+    handle: SoundHandle;
+    chicken: Chicken;
+    x: number;
+    y: number;
+    volume: number;
+    /** 本帧实际使用的增益，逐帧向目标值平滑，避免玩家走动时音量阶跃。 */
+    gain: number;
+  }[] = [];
+  /** 受惊惊叫需要短促收尾：录音整段有 6.7–8.2 秒，不能拖在逃跑后面。 */
+  private pendingCluckStops: { handle: SoundHandle; remaining: number }[] = [];
   private loaded: boolean = false;
   private loadingPromise?: Promise<void>;
   private loadError = "";
@@ -262,6 +273,12 @@ export class GameScene extends Scene {  private player!: Player;
   private static readonly CHICKEN_COUNT = 6;
   /** 同一只鸡两次叫声之间的最短间隔（秒）。 */
   private static readonly CHICKEN_CLUCK_COOLDOWN = 0.9;
+  /** 同时播放的鸡叫上限：六只鸡同时受惊时只留最响的几声，世界事件一条不少。 */
+  private static readonly MAX_CHICKEN_VOICES = 3;
+  /** 鸡叫音量向目标值逼近的速度（每秒比例），避免玩家移动时出现阶跃。 */
+  private static readonly CLUCK_GAIN_RATE = 6;
+  /** 受惊惊叫的截断时长：保留短促的一声，不跟着录音拖满整段。 */
+  private static readonly CHICKEN_SCREAM_SECONDS = 0.55;
   /** 准星：每秒收紧、回弹速度；外扩/内收幅度见 getCrosshairOffset。 */
   private static readonly CROSSHAIR_TIGHTEN_RATE = 9;
   private static readonly CROSSHAIR_RELEASE_RATE = 9;
@@ -414,7 +431,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.chickens = Chicken.spawn(this.map, GameScene.CHICKEN_COUNT, playerCenter);
     for (const chicken of this.chickens) {
       chicken.setOnStepCallback((x, y) => this.playChickenStep(x, y));
-      chicken.setOnCluckCallback((x, y) => this.playChickenCluck(chicken, x, y));
+      chicken.setOnCluckCallback((x, y, startled) => this.playChickenCluck(chicken, x, y, startled === true));
     }
     // 子弹每次位移先查询小鸡和火把，命中单位优先于该点之后的地形。
     this.player.setBulletEntityHitTest((startX, startY, endX, endY, radius, damage, aim) => {
@@ -504,11 +521,11 @@ export class GameScene extends Scene {  private player!: Player;
     this.sfx.loop(DRY_STEP_SOUND, this.volume(base), Math.max(0.95, Math.min(2.05, speed / 156)));
   }
 
-  /** 小鸡发声的距离衰减：默认 450 像素内线性降低，再远就听不见。 */
+  /** 小鸡发声的距离衰减：与听觉传感器共用同一条软化曲线，起播与持续音量不再各算一套。 */
   private chickenAttenuation(x: number, y: number): number {
     const dx = x - this.player.x - this.player.getSize() / 2;
     const dy = y - this.player.y - this.player.getSize() / 2;
-    return 1 - Math.hypot(dx, dy) / this.audio.chicken.range;
+    return computeAudibleGain(Math.hypot(dx, dy), this.audio.chicken.range);
   }
 
   /**
@@ -538,28 +555,53 @@ export class GameScene extends Scene {  private player!: Player;
   /**
    * 叫声：比脚步稀疏得多，单独计时，免得被密集的脚步声挤掉。
    * 三种鸡叫随机取一种；每段都有 6.7–8.2 秒，所以排三个声部，
-   * 0.9 秒内连叫几声时前一声还能继续响，更密的连叫才会复用最早的声部。
+   * 0.9 秒内连叫几声时前一声还能继续响，更密的连叫才会让位给新的叫声。
    * 录音这几秒里玩家可能已经走远或走近，所以音量交给 updateCluckVolumes 每帧重算。
    *
    * 先发布世界噪声事件，再决定放不播放：距离、静音与声部预算都不能让世界上少一声鸡叫。
+   * startled 为 true 表示这是受惊的惊叫：更响、且短促收尾，不拖满整段录音。
    */
-  private playChickenCluck(chicken: Chicken, x: number, y: number): void {
+  private playChickenCluck(chicken: Chicken, x: number, y: number, startled = false): void {
     if ((this.chickenCluckCooldowns.get(chicken) ?? 0) > 0) return;
     this.chickenCluckCooldowns.set(chicken, GameScene.CHICKEN_CLUCK_COOLDOWN);
 
     this.noiseSystem.emit("cluck", x, y, {
       sourceId: this.getChickenSoundId(chicken),
       radius: this.audio.chicken.range,
-      loudness: 0.45,
+      // 受惊的叫声更响，但第一版仍不引发鸡群连锁惊逃。
+      loudness: startled ? 0.55 : 0.45,
     });
 
-    const attenuation = this.chickenAttenuation(x, y);
-    if (attenuation <= this.audio.chicken.minAttenuation) return;
+    const gain = this.chickenAttenuation(x, y);
+    if (gain <= this.audio.chicken.minAttenuation) return;
+
+    this.reserveChickenVoice();
     const url = CHICKEN_CLUCK_SOUNDS[Math.floor(Math.random() * CHICKEN_CLUCK_SOUNDS.length)];
     const base = this.audio.chicken.cluckVolume;
-    const handle = this.sfx.play(url, this.volume(base * attenuation),
+    const handle = this.sfx.play(url, this.volume(base * gain),
       0.92 + Math.random() * 0.16, { count: 3 });
-    if (handle) this.activeClucks.push({ handle, chicken, x, y, volume: base });
+    if (!handle) return;
+    this.activeClucks.push({ handle, chicken, x, y, volume: base, gain });
+    if (startled) this.pendingCluckStops.push({ handle, remaining: GameScene.CHICKEN_SCREAM_SECONDS });
+  }
+
+  /** 同时发声的鸡叫不超过预算：超了就掐掉当前最轻的一声，让新叫声还能被听见。 */
+  private reserveChickenVoice(): void {
+    while (this.activeClucks.length >= GameScene.MAX_CHICKEN_VOICES) {
+      let quietest = 0;
+      for (let i = 1; i < this.activeClucks.length; i++) {
+        if (this.activeClucks[i].gain < this.activeClucks[quietest].gain) quietest = i;
+      }
+      const [dropped] = this.activeClucks.splice(quietest, 1);
+      dropped.handle.stop(0.08);
+      this.forgetPendingCluckStop(dropped.handle);
+    }
+  }
+
+  private forgetPendingCluckStop(handle: SoundHandle): void {
+    for (let i = this.pendingCluckStops.length - 1; i >= 0; i--) {
+      if (this.pendingCluckStops[i].handle === handle) this.pendingCluckStops.splice(i, 1);
+    }
   }
 
   /** 稳定的发声者 id：同一只鸡始终用同一个 id，WeakMap 不会延长它的生命周期。 */
@@ -585,19 +627,44 @@ export class GameScene extends Scene {  private player!: Player;
    * 每帧按玩家当前位置重算正在响的鸡叫音量：走远渐弱、走近渐强，而不是触发时定死。
    * 鸡在录音中途被击杀时，这一声立刻掐掉——录音有 6.7–8.2 秒，不能留在原地继续叫。
    */
-  private updateCluckVolumes(): void {
+  private updateCluckVolumes(delta: number): void {
     const px = this.player.x + this.player.getSize() / 2;
     const py = this.player.y + this.player.getSize() / 2;
+    const rate = Math.min(1, delta * GameScene.CLUCK_GAIN_RATE);
     this.activeClucks = this.activeClucks.filter(cluck => {
       if (!cluck.chicken.isAlive()) {
         cluck.handle.stop();
+        this.forgetPendingCluckStop(cluck.handle);
         return false;
       }
-      if (!cluck.handle.isPlaying()) return false;
-      const attenuation = Math.max(0, 1 - Math.hypot(cluck.x - px, cluck.y - py) / this.audio.chicken.range);
-      cluck.handle.setVolume(this.volume(cluck.volume * attenuation));
+      if (!cluck.handle.isPlaying()) {
+        this.forgetPendingCluckStop(cluck.handle);
+        return false;
+      }
+      // 声音要跟着活鸡走：录音这几秒里鸡可能边叫边跑，不能再用发声瞬间的旧坐标。
+      const cx = cluck.chicken.x + cluck.chicken.getSize() / 2;
+      const cy = cluck.chicken.y + cluck.chicken.getSize() / 2;
+      const target = computeAudibleGain(Math.hypot(cx - px, cy - py), this.audio.chicken.range);
+      cluck.x = cx;
+      cluck.y = cy;
+      cluck.gain += (target - cluck.gain) * rate;
+      if (cluck.gain < 0.01 && target < 0.01) {
+        cluck.handle.stop(0.1);
+        this.forgetPendingCluckStop(cluck.handle);
+        return false;
+      }
+      cluck.handle.setVolume(this.volume(cluck.volume * cluck.gain));
       return true;
     });
+
+    // 受惊惊叫的短促收尾：到点淡出，避免叫声盖过已经跑远的鸡。
+    for (let i = this.pendingCluckStops.length - 1; i >= 0; i--) {
+      const stop = this.pendingCluckStops[i];
+      stop.remaining -= delta;
+      if (stop.remaining > 0) continue;
+      stop.handle.stop(0.15);
+      this.pendingCluckStops.splice(i, 1);
+    }
   }
 
   /** 鸡被击杀的同一帧就把它的叫声收掉，不等下一帧的逐帧音量更新。 */
@@ -605,6 +672,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.activeClucks = this.activeClucks.filter(cluck => {
       if (cluck.chicken !== chicken) return true;
       cluck.handle.stop();
+      this.forgetPendingCluckStop(cluck.handle);
       return false;
     });
   }
@@ -1301,6 +1369,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 正在响的鸡叫也失去跟踪对象了，离开场景时硬停，重新进入时从头开始。
     this.activeClucks.forEach(cluck => cluck.handle.stop(0));
     this.activeClucks.length = 0;
+    this.pendingCluckStops.length = 0;
     // 冷却表跟着场景一起丢弃，重进场景时不继承上一局的叫声节奏。
     this.chickenCluckCooldowns.clear();
     this.game?.input?.setPointerEnabled(false);
@@ -1398,7 +1467,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 尸体滑行结束的事件在本帧所有小鸡更新完之后统一消费。
     this.flushChickenDeaths();
     // 鸡叫是几秒钟的整段录音：玩家这几秒里的走动要立刻反映到音量上。
-    this.updateCluckVolumes();
+    this.updateCluckVolumes(delta);
 
     // 更新粒子系统
     this.particleSystem.update(delta);

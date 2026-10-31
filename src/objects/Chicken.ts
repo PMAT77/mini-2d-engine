@@ -96,7 +96,7 @@ export class Chicken extends Entities {
   private hitLeanSign = 0;
   private stepDistance = 0;
   private onStepCallback?: (x: number, y: number) => void;
-  private onCluckCallback?: (x: number, y: number) => void;
+  private onCluckCallback?: (x: number, y: number, startled?: boolean) => void;
   /** 感知与警觉状态只消费场景给的刺激，不直接读玩家或噪声总线。 */
   private readonly rules: SenseRules = DEFAULT_SENSE_RULES;
   private readonly vision = new VisionSensor(DEFAULT_SENSE_RULES);
@@ -389,8 +389,8 @@ export class Chicken extends Entities {
     this.onStepCallback = callback;
   }
 
-  /** 叫声回调：小鸡停下啄食时偶尔报一次坐标。 */
-  setOnCluckCallback(callback: (x: number, y: number) => void): void {
+  /** 叫声回调：小鸡停下啄食时偶尔报一次坐标；third 参数为 true 表示受惊的惊叫。 */
+  setOnCluckCallback(callback: (x: number, y: number, startled?: boolean) => void): void {
     this.onCluckCallback = callback;
   }
 
@@ -486,7 +486,7 @@ export class Chicken extends Entities {
     }
     const view = this.behavior.update(delta, threat);
     // 只从漫游被惊到时叫一声；逃跑途中再看见威胁不重复惊叫。
-    if (view.justStartled) this.onCluckCallback?.(centerX, centerY);
+    if (view.justStartled) this.onCluckCallback?.(centerX, centerY, true);
     this.applyAlertState(delta, map);
   }
 
