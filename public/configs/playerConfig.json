@@ -21,18 +21,18 @@
   },
   "sprint": {
     "speedMultiplier": 1.6,
-    "rampDuration": 0.16,
+    "rampDuration": 0.45,
     "maxStamina": 100,
-    "drainPerSecond": 25,
+    "drainPerSecond": 10,
     "regenPerSecond": 35,
     "regenDelay": 0.6,
     "restartThreshold": 0.15
   },
   "roll": {
-    "duration": 0.42,
+    "duration": 0.5,
     "speedMultiplier": 2.15,
     "cooldown": 0.4,
-    "staminaCost": 20
+    "staminaCost": 10
   },
   "animation": {
     "breathingAmplitude": 3,

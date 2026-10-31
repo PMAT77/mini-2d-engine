@@ -41,31 +41,45 @@ try {
         const expectedContext = expected.getContext('2d');
         expectedContext.drawImage(worldCanvas, 0, 0, expected.width, expected.height);
         // Below the minimap HUD (circle + gold counter) the screen must be the world composite.
+        // The weapon list HUD is a screen-space overlay pinned to the right edge, so the compared
+        // columns stop left of it instead of assuming every pixel below the minimap is world.
         const hudBottom = 280 * devicePixelRatio;
+        const rows = scene.weaponListHud.getLastStatus()?.rows ?? [];
+        const weaponHudLeft = rows.length
+          ? Math.min(...rows.map(row => row.brushRect.x)) - 8
+          : expected.width;
+        const compareWidth = Math.max(1, Math.min(expected.width, Math.floor(weaponHudLeft)));
         const actualPixels = screen.getImageData(0, hudBottom,
-          expected.width, expected.height - hudBottom).data;
+          compareWidth, expected.height - hudBottom).data;
         const expectedPixels = expectedContext.getImageData(0, hudBottom,
-          expected.width, expected.height - hudBottom).data;
+          compareWidth, expected.height - hudBottom).data;
         const samePixels = actualPixels.every((value, i) => value === expectedPixels[i]);
-        // The gold counter now sits just below the circular minimap.
-        const hud = [...screen.getImageData(28 * devicePixelRatio, 241 * devicePixelRatio, 1, 1).data];
+        // The gold counter sits under the circular minimap, whose size follows the viewport, so
+        // look the marker colour up in the HUD corner instead of sampling one fixed pixel.
+        const hudRegion = screen.getImageData(0, 0, Math.min(screen.canvas.width, 200 * devicePixelRatio),
+          Math.min(screen.canvas.height, 340 * devicePixelRatio)).data;
+        let hudMarkers = 0;
+        for (let i = 0; i < hudRegion.length; i += 4) {
+          if (hudRegion[i] === 255 && hudRegion[i + 1] === 215 && hudRegion[i + 2] === 0) hudMarkers++;
+        }
+        const hud = [hudMarkers];
         const x = camera.x, y = camera.y;
         camera.follow(x + camera.width / 2 + 201, y + camera.height / 2 + 126, 1 / 60);
         const follows = camera.x > x && camera.y > y;
         const transform = screen.getTransform();
-        return { centered, samePixels, hud, follows, colliderSize,
+        return { centered, samePixels, hud, follows, colliderSize, zoom: scene.graphics.camera.zoom,
           viewport: [camera.width, camera.height], world: [worldCanvas.width, worldCanvas.height],
           lighting: [lightingSystem.shadowCanvas.width, lightingSystem.shadowCanvas.height],
           deadZone: [camera.deadZoneWidth, camera.deadZoneHeight],
           transform: [transform.a, transform.d, transform.e, transform.f] };
       });
-      const worldSize = [Math.ceil(Math.floor(viewport.width * dpr) / 0.85), Math.ceil(Math.floor(viewport.height * dpr) / 0.85)];
+      const worldSize = [Math.ceil(Math.floor(viewport.width * dpr) / result.zoom), Math.ceil(Math.floor(viewport.height * dpr) / result.zoom)];
       assert.deepEqual(result.viewport, worldSize);
       assert.deepEqual(result.world, worldSize);
       assert.deepEqual(result.lighting, worldSize);
       assert.deepEqual(result.deadZone, [400, 250]);
       assert.deepEqual(result.transform, [1, 1, 0, 0]);
-      assert.deepEqual(result.hud, [255, 215, 0, 255]);
+      assert.ok(result.hud[0] > 40, `gold counter markers: ${result.hud[0]}`);
       assert.equal(result.colliderSize, 49);
       assert.ok(result.centered && result.samePixels && result.follows, JSON.stringify(result));
     }

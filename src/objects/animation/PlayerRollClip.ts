@@ -38,7 +38,7 @@ function buildTracks(): Record<string, ScalarTrack> {
 
 export const PLAYER_ROLL_CLIP: AnimationClip2D = {
   id: PLAYER_ROLL_CLIP_ID,
-  duration: .42,
+  duration: .5,
   tracks: buildTracks(),
   markers: PLAYER_ROLL_MARKERS,
 };

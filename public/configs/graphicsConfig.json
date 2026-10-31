@@ -1,6 +1,6 @@
 {
   "camera": {
-    "zoom": 0.85
+    "zoom": 1
   },
   "ambient": {
     "color": "#D6E2F0",
@@ -22,7 +22,7 @@
     "color": "#FFF4E8",
     "range": 400,
     "angle": 120,
-    "intensity": 0.8,
+    "intensity": 0.95,
     "softness": 0.35,
     "innerRadius": 30,
     "innerFade": 16

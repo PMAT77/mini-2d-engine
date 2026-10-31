@@ -73,7 +73,7 @@ try {
     await openTab('画面');
     assert.equal(await field('graphics.playerLight.radius').inputValue(), '100', 'glow radius defaults to 100');
     assert.equal(await field('graphics.playerLight.intensity').inputValue(), '0.5', 'glow intensity defaults to 0.5');
-    assert.equal(await field('graphics.flashlight.intensity').inputValue(), '0.8', 'flashlight intensity defaults to 0.8');
+    assert.equal(await field('graphics.flashlight.intensity').inputValue(), '0.95', 'flashlight intensity defaults to 0.95');
 
     await openTab('音效');
     assert.equal(await field('audio.master').inputValue(), '1', 'master volume defaults to 1');
@@ -250,10 +250,10 @@ try {
     await edit('graphics.flashlight.range', 400); await edit('graphics.flashlight.intensity', 0.9);
 
     const zoomBefore = await page.evaluate(() => debugTest.scene.camera.width);
-    await edit('graphics.camera.zoom', 1);
-    assert.equal(await page.evaluate(() => debugTest.scene.graphics.camera.zoom), 1);
+    await edit('graphics.camera.zoom', 1.25);
+    assert.equal(await page.evaluate(() => debugTest.scene.graphics.camera.zoom), 1.25);
     assert.notEqual(await page.evaluate(() => debugTest.scene.camera.width), zoomBefore, 'zoom recalculates the camera viewport');
-    await edit('graphics.camera.zoom', 0.85);
+    await edit('graphics.camera.zoom', 1);
 
     await openTab('角色');
 
@@ -306,10 +306,10 @@ try {
       await page.evaluate(() => debugTest.initialLight));
     assert.equal(await field('graphics.fog.range').inputValue(), '400', 'reset restores the fog radius baseline');
     assert.equal(await field('graphics.flashlight.range').inputValue(), '400', 'reset restores the flashlight range baseline');
-    assert.equal(await field('graphics.flashlight.intensity').inputValue(), '0.8', 'reset restores the flashlight intensity baseline');
-    assert.equal(await field('graphics.camera.zoom').inputValue(), '0.85', 'reset restores the camera zoom baseline');
+    assert.equal(await field('graphics.flashlight.intensity').inputValue(), '0.95', 'reset restores the flashlight intensity baseline');
+    assert.equal(await field('graphics.camera.zoom').inputValue(), '1', 'reset restores the camera zoom baseline');
     assert.equal(await field('audio.master').inputValue(), '1', 'reset restores the master volume baseline');
-    assert.equal(await page.evaluate(() => debugTest.scene.graphics.camera.zoom), 0.85);
+    assert.equal(await page.evaluate(() => debugTest.scene.graphics.camera.zoom), 1);
     assert.equal(await page.evaluate(() => debugTest.scene.audio.master), 1);
     assert.ok((await panel.innerText()).includes(`实际 ${initialSpeed * 1.5}`));
     await panel.locator('.debug-content').evaluate(element => { element.scrollTop = 0; });

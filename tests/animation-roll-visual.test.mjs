@@ -26,7 +26,7 @@ const { createPlayerRenderSnapshot, resetPlayerVisualState } = load('objects/ani
 const { legacyPoseToLocalPose } = load('objects/animation/LegacyPoseAdapter');
 const { drawCharacterShadow } = load('animation2d/render/CharacterCanvasRenderer');
 
-const DURATION = .42;
+const DURATION = .5;
 const SIZE = 49;
 
 function makeRollingPlayer(progress) {

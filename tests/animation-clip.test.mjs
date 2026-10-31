@@ -45,7 +45,7 @@ test('roll clip endpoints return the rest pose exactly', () => {
 
 test('roll clip describes one track per pose field with ordered markers inside its duration', () => {
   assert.equal(PLAYER_ROLL_CLIP.id, 'playerRoll');
-  assert.equal(DURATION, .42);
+  assert.equal(DURATION, .5);
   const tracks = Object.keys(PLAYER_ROLL_CLIP.tracks);
   assert.equal(tracks.length, FIELDS.length);
   for (const field of FIELDS) {

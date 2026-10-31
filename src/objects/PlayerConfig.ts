@@ -63,7 +63,7 @@ export interface PlayerConfig {
 
 export const DEFAULT_MOVEMENT = { startSpeedRatio: 0, startupDuration: 0.08, turnDamping: 0.012, stopDuration: 0.2 };
 export const DEFAULT_SPRINT = {
-  speedMultiplier: 1.6, rampDuration: 0.16, maxStamina: 100, drainPerSecond: 25,
+  speedMultiplier: 1.6, rampDuration: 0.45, maxStamina: 100, drainPerSecond: 10,
   regenPerSecond: 35, regenDelay: 0.6, restartThreshold: 0.15,
 };
 
@@ -78,7 +78,7 @@ export interface RollConfig {
   /** 每次翻滚消耗的体力；0 表示不消耗。 */
   staminaCost: number;
 }
-export const DEFAULT_ROLL: RollConfig = { duration: 0.42, speedMultiplier: 2.15, cooldown: 0.4, staminaCost: 20 };
+export const DEFAULT_ROLL: RollConfig = { duration: 0.5, speedMultiplier: 2.15, cooldown: 0.4, staminaCost: 10 };
 
 /** 每个配置分组允许的字段；调试面板的覆盖检查也读这份清单。 */
 export const PLAYER_CONFIG_GROUPS: Record<string, readonly string[]> = {

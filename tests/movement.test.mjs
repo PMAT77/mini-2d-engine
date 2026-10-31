@@ -138,7 +138,7 @@ test('diagonals have equal speed and 30/60/144 FPS keep matching travel and stam
     advance(p, 0.1, input('w'), undefined, fps);
     turns.push([p.x, p.y]);
     const runner = new Player(0, 0);
-    advance(runner, 4, input('d', 'Shift'), undefined, fps);
+    advance(runner, 10, input('d', 'Shift'), undefined, fps);
     sprintPositions.push(runner.x);
     near(runner.getStamina(), 0); assert.equal(runner.getIsSprinting(), false);
     assert.ok(runner.getVelocity().length() <= 200.00001);
@@ -151,6 +151,8 @@ test('diagonals have equal speed and 30/60/144 FPS keep matching travel and stam
 
 test('Shift smoothly reaches sprint speed in 160ms without changing base speed or shooting', () => {
   const p = new Player(0, 0);
+  // 本条验证升速曲线本身：固定 0.16 秒升速、25 每秒消耗，避免默认值调整牵连算术。
+  p.applyConfig({ sprint: { rampDuration: 0.16, drainPerSecond: 25 } });
   advance(p, 0.1, input('d'));
   p.update(0.04, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 218.75);
   p.update(0.04, input('d', 'Shift', 'MouseLeft'), undefined, mouseAim(p)); near(p.getVelocity().length(), 260);
@@ -165,6 +167,8 @@ test('Shift smoothly reaches sprint speed in 160ms without changing base speed o
 
 test('sprint ramp survives turns and reversals, and can be configured to respond instantly', () => {
   const p = new Player(0, 0);
+  // 本条验证升速曲线本身：固定 0.16 秒升速、25 每秒消耗，避免默认值调整牵连算术。
+  p.applyConfig({ sprint: { rampDuration: 0.16, drainPerSecond: 25 } });
   advance(p, 0.1, input('d'));
   p.update(0.08, input('d', 'Shift')); near(p.getVelocity().length(), 260);
   p.update(0.04, input('w', 'Shift')); near(p.getVelocity().length(), 301.25);
@@ -176,6 +180,8 @@ test('sprint ramp survives turns and reversals, and can be configured to respond
 
 test('recovery delay crosses frame boundaries precisely and recovers while walking/shooting', () => {
   const p = new Player(0, 0);
+  // 本条验证体力收支机制：固定 25 每秒消耗。
+  p.applyConfig({ sprint: { drainPerSecond: 25 } });
   advance(p, 1, input('d', 'Shift')); near(p.getStamina(), 75);
   advance(p, 0.59, input('d', 'MouseLeft')); near(p.getStamina(), 75);
   p.update(0.11, input('d', 'MouseLeft'), undefined, mouseAim(p)); near(p.getStamina(), 78.5);
@@ -184,10 +190,13 @@ test('recovery delay crosses frame boundaries precisely and recovers while walki
 
 test('exhaustion requires a release after depletion and at least 15% recovery', () => {
   const p = new Player(0, 0);
+  // 本条验证体力收支机制：固定 25 每秒消耗。
+  p.applyConfig({ sprint: { drainPerSecond: 25 } });
   advance(p, 4, input('d', 'Shift')); near(p.getStamina(), 0);
   advance(p, 4, input('d', 'Shift')); near(p.getStamina(), 100); assert.equal(p.getIsSprinting(), false);
   p.update(1 / 60, input('d')); p.update(1 / 60, input('d', 'Shift')); assert.equal(p.getIsSprinting(), true);
   const q = new Player(0, 0);
+  q.applyConfig({ sprint: { drainPerSecond: 25 } });
   advance(q, 4, input('d', 'Shift'));
   q.update(0.01, input('d')); // Releasing before recovery also satisfies the release condition.
   advance(q, 0.9, input('d', 'Shift')); assert.equal(q.getIsSprinting(), false); assert.ok(q.getStamina() < 15);
@@ -196,12 +205,26 @@ test('exhaustion requires a release after depletion and at least 15% recovery', 
 
 test('partially depleted stamina splits a long frame instead of granting free sprint time', () => {
   const p = new Player(0, 0);
-  p.applyConfig({ sprint: { maxStamina: 5, rampDuration: 0 } });
+  // 本条验证长帧切分：固定 25 每秒消耗，0.2 秒正好抽干 5 点体力。
+  p.applyConfig({ sprint: { maxStamina: 5, rampDuration: 0, drainPerSecond: 25 } });
   advance(p, 0.1, input('d'));
   const x = p.x;
   p.update(0.3, input('d', 'Shift'));
   near(p.x - x, 320 * 0.2 + 200 * 0.1, 0.001);
   near(p.getStamina(), 0); near(p.getVelocity().length(), 200); assert.equal(p.getIsSprinting(), false);
+});
+
+test('默认冲刺升速 0.45 秒、每秒消耗 10 点体力', () => {
+  assert.equal(DEFAULT_SPRINT.rampDuration, 0.45);
+  assert.equal(DEFAULT_SPRINT.drainPerSecond, 10);
+  const p = new Player(0, 0);
+  advance(p, 0.1, input('d'));
+  p.update(0.15, input('d', 'Shift'));
+  const mid = p.getVelocity().length();
+  assert.ok(mid > 200 && mid < 320, `150ms 时升速尚未完成: ${mid}`);
+  p.update(0.3, input('d', 'Shift'));
+  near(p.getVelocity().length(), 320);
+  near(p.getStamina(), 95.5);
 });
 
 test('standing and blocked sprint never drain stamina; sliding does, and high speeds cannot cross a wall', () => {
@@ -225,6 +248,7 @@ test('standing and blocked sprint never drain stamina; sliding does, and high sp
 test('sprint multiplies speed buffs and coverage-based water slowdown', () => {
   const m = mapOf(); m.tiles.forEach(row => row.fill('water'));
   const p = new Player(200, 200); p.addModifier('maxSpeed', 0.5, 0, true);
+  p.applyConfig({ sprint: { rampDuration: 0.16 } });
   advance(p, 0.2, input('d', 'Shift'), m);
   near(p.getMaxSpeed(), 300); near(p.getVelocity().length(), 240);
 });
@@ -242,6 +266,7 @@ test('movement/sprint configuration validates atomically, supports old fields an
   const json = parsePlayerConfig(JSON.parse(readFileSync('public/configs/playerConfig.json', 'utf8')));
   assert.deepEqual(json.movement, DEFAULT_MOVEMENT); assert.deepEqual(json.sprint, DEFAULT_SPRINT);
   const p = new Player(0, 0);
+  p.applyConfig({ sprint: { drainPerSecond: 25 } });
   advance(p, 1, input('d', 'Shift')); p.applyConfig({ sprint: { maxStamina: 200 } }); near(p.getStamina(), 150);
   p.applyConfig({ base: { accel: 1, decel: 1, nonlinearFactor: 0 } });
   p.update(0.1, input()); p.update(0.08, input('d')); near(p.getVelocity().length(), 200);

@@ -128,7 +128,7 @@ test('keyboard ownership clears held movement and aim and ignores game keys unti
 
 test('graphics and audio configs merge defaults and reject invalid fields', () => {
   assert.deepEqual(parseGraphicsConfig({}), DEFAULT_GRAPHICS_CONFIG);
-  assert.deepEqual(parseGraphicsConfig({}).camera, { zoom: 0.85 });
+  assert.deepEqual(parseGraphicsConfig({}).camera, { zoom: 1 });
   const partial = parseGraphicsConfig({ camera: { zoom: 1.2 }, ambient: { color: '#aabbcc' } });
   assert.equal(partial.camera.zoom, 1.2);
   assert.equal(partial.ambient.color, '#AABBCC', 'colors are normalized');
@@ -152,7 +152,7 @@ test('graphics and audio configs merge defaults and reject invalid fields', () =
 
   const graphics = cloneGraphicsConfig();
   graphics.camera.zoom = 1.5;
-  assert.equal(DEFAULT_GRAPHICS_CONFIG.camera.zoom, 0.85, 'clone does not alias defaults');
+  assert.equal(DEFAULT_GRAPHICS_CONFIG.camera.zoom, 1, 'clone does not alias defaults');
   const audio = cloneAudioConfig();
   audio.master = 0.3;
   assert.equal(DEFAULT_AUDIO_CONFIG.master, 1);

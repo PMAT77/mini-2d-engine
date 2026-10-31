@@ -34,12 +34,12 @@ export interface VisibilityConfig {
 }
 
 export const DEFAULT_GRAPHICS_CONFIG: GraphicsConfig = {
-  camera: { zoom: 0.85 },
+  camera: { zoom: 1 },
   ambient: { color: "#D6E2F0", intensity: 0.35 },
   terrainLight: { color: "#B4C8E0", intensity: 0.06, shadowScale: 0.4, softnessScale: 0.04 },
   playerLight: { color: "#FFF4E8", radius: 100, intensity: 0.5, sourceRadius: 8 },
   flashlight: {
-    color: "#FFF4E8", range: 400, angle: 120, intensity: 0.8, softness: 0.35,
+    color: "#FFF4E8", range: 400, angle: 120, intensity: 0.95, softness: 0.35,
     innerRadius: 30, innerFade: 16,
   },
   fog: { range: 400, feather: 120 },
