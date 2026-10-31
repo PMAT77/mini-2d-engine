@@ -400,6 +400,8 @@ export class GameScene extends Scene {  private player!: Player;
       this.noiseSystem.emit(step.inWater ? "waterStep" : "footstep", step.x, step.y, {
         sourceId: "player",
         loudness: step.inWater ? 0.55 : running ? 0.5 : 0.3,
+        // 冲刺的脚步传得更远：小鸡对慢走与冲刺的警觉距离应该明显不同。
+        ...(!step.inWater && running ? { radius: 220 } : {}),
       });
     });
 

@@ -65,3 +65,18 @@ test('没有威胁时状态机不会自己启动', () => {
     assert.equal(behavior.update(1 / 60, null).state, 'wander');
   }
 });
+
+test('同一段威胁时间在 30/60/144 FPS 下走出相同的状态', () => {
+  const stateAfter = (fps) => {
+    const behavior = new ChickenBehavior(rules, fixedRandom);
+    const step = 1 / fps;
+    const frames = Math.round(0.5 / step);
+    for (let frame = 0; frame < frames; frame++) behavior.update(step, threat);
+    return behavior.getState();
+  };
+
+  const at30 = stateAfter(30);
+  assert.equal(at30, 'flee');
+  assert.equal(stateAfter(60), at30);
+  assert.equal(stateAfter(144), at30);
+});

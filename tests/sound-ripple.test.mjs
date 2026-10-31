@@ -133,3 +133,15 @@ test('已完整识别的鸡不再画声音提示', () => {
   scene.updateSoundRipples(1 / 60);
   assert.equal(scene.soundRippleSystem.getActiveCount(), 0);
 });
+
+test('只看到剪影的鸡仍保留声音提示', () => {
+  const scene = createScene();
+  const chicken = new Chicken(420, 300, seededRandom(44));
+  scene.chickens = [chicken];
+  scene.perception = {};
+  scene.getEntityVisibility = () => 'silhouette';
+
+  scene.playChickenCluck(chicken, chicken.x, chicken.y);
+  scene.updateSoundRipples(1 / 60);
+  assert.equal(scene.soundRippleSystem.getActiveCount(), 1);
+});

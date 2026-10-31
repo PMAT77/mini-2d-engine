@@ -39,6 +39,21 @@ function emitCluck(noise, x, y) {
   noise.emit('cluck', x, y, { radius: OPEN_RANGE });
 }
 
+test('冲刺脚步比慢走听得更远：近距离同样可闻，远距离只有冲刺触发警觉', () => {
+  const heardAt = (distance, loudness, radius) => {
+    const noise = new NoiseSystem();
+    noise.emit('footstep', distance, 0, { loudness, radius });
+    return new HearingSensor().poll(openMap(), { x: 0, y: 0 }, noise.getEvents()).length > 0;
+  };
+
+  // 与 GameScene 的发声参数一致：慢走 0.3/150，冲刺 0.5/220。
+  assert.equal(heardAt(120, 0.3, 150), true);
+  assert.equal(heardAt(120, 0.5, 220), true);
+  // 140 像素处慢走已被距离与淡出吃掉，冲刺仍然可闻。
+  assert.equal(heardAt(160, 0.3, 150), false, '慢走 160px 不应再惊动小鸡');
+  assert.equal(heardAt(160, 0.5, 220), true, '冲刺 160px 仍应触发听觉');
+});
+
 const close = (actual, expected, epsilon = 1e-5) => Math.abs(actual - expected) <= epsilon;
 
 test('可听增益：近场稳定、中距离缓降、边界归零', () => {
