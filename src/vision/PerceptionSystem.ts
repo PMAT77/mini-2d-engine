@@ -38,7 +38,15 @@ interface ObserverState {
   grid: ExplorationGrid;
   memory: TerrainMemory;
   discovery: DiscoveryState;
+  /**
+   * 最近一次探索扫描确认“此刻可见/可辨识”的格索引（row * grid.cols + col）。
+   * 只作为只读观察日志供 HUD 区分 observed / remembered，不参与任何玩法判定。
+   */
+  observed: Set<number>;
+  observedRevision: number;
 }
+
+const EMPTY_CELLS: ReadonlySet<number> = new Set<number>();
 
 /**
  * 纯逻辑感知入口：每帧更新目标显隐，低频更新探索/记忆，不依赖 Canvas。
@@ -128,6 +136,21 @@ export class PerceptionSystem {
     return this.states.get(observerId)?.grid ?? null;
   }
 
+  /**
+   * 最近一次探索扫描的可见格集合（整体被 replace，不要长期持有）。
+   *
+   * 这是一份只读观察日志：用真实 LOS 与光照算出的结果，供小地图分档，
+   * 不改变感知、探索或玩法语义。
+   */
+  getObservedCells(observerId: string): ReadonlySet<number> {
+    return this.states.get(observerId)?.observed ?? EMPTY_CELLS;
+  }
+
+  /** 观察格集合的版本号，每次探索扫描结束 +1。 */
+  getObservedRevision(observerId: string): number {
+    return this.states.get(observerId)?.observedRevision ?? 0;
+  }
+
   getTerrainMemory(observerId: string): TerrainMemory | null {
     return this.states.get(observerId)?.memory ?? null;
   }
@@ -159,7 +182,9 @@ export class PerceptionSystem {
         views: new Map(),
         grid: new ExplorationGrid(this.worldWidth, this.worldHeight, this.rules.explorationCellSize),
         memory: new TerrainMemory(this.terrain),
-        discovery: { elapsed: 0, lastX: observer.x, lastY: observer.y, initialized: false }
+        discovery: { elapsed: 0, lastX: observer.x, lastY: observer.y, initialized: false },
+        observed: new Set<number>(),
+        observedRevision: 0
       };
       this.states.set(observer.id, state);
     }
@@ -269,6 +294,8 @@ export class PerceptionSystem {
     const tileHeight = this.terrain.height;
     const candidates = new Set<number>();
     const wallTiles = new Set<number>();
+    const observedCells = state.observed;
+    observedCells.clear();
 
     const collect = (minX: number, minY: number, maxX: number, maxY: number): void => {
       const startCol = Math.max(0, Math.floor(minX / cell));
@@ -318,6 +345,7 @@ export class PerceptionSystem {
 
       if (!grid.isExploredCell(col, row)) grid.markCell(col, row);
       state.memory.captureWorld(cx, cy);
+      observedCells.add(index);
 
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
@@ -337,6 +365,7 @@ export class PerceptionSystem {
     }
 
     if (wallTiles.size > 0) this.captureObservedWalls(state, wallTiles);
+    state.observedRevision += 1;
   }
 
   /**
@@ -392,7 +421,12 @@ export class PerceptionSystem {
             continue;
           }
           captured = true;
-          grid.markCell(Math.floor(sampleX / grid.cellSize), Math.floor(sampleY / grid.cellSize));
+          const sampleCol = Math.floor(sampleX / grid.cellSize);
+          const sampleRow = Math.floor(sampleY / grid.cellSize);
+          grid.markCell(sampleCol, sampleRow);
+          if (sampleCol >= 0 && sampleRow >= 0 && sampleCol < grid.cols && sampleRow < grid.rows) {
+            state.observed.add(sampleRow * grid.cols + sampleCol);
+          }
         }
       }
       if (captured) memory.capture(col, row);

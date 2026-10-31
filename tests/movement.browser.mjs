@@ -32,6 +32,8 @@ try {
       const scene = game.sceneManager.getCurrentScene(), sprite = scene.player.sprite;
       const Player = scene.player.constructor, Vector2 = scene.player.getVelocity().constructor;
       scene.update = () => {};
+      // 换弹圆环靠近屏幕左上角时会落在小地图 HUD 下面；这里只验证世界层渲染，小地图自身由 minimap.browser.mjs 覆盖。
+      scene.minimap.draw = () => {};
       scene.map = new scene.map.constructor(100, 100, { generateWater: false });
       scene.map.tiles.forEach(row => row.fill('default'));
       scene.map.tileHighlight.forEach(row => row.fill(0));

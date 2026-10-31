@@ -58,6 +58,10 @@ import {
 import { resolvePickupVisibility, type PickupVisibilityDecision } from "../interaction/PickupVisibilityPolicy";
 import type { PickupConfig, PickupMarker } from "../interaction/PickupTypes";
 import { PickupPromptRenderer } from "../ui/PickupPromptRenderer";
+import { CircularMinimapHud } from "../ui/CircularMinimapHud";
+import { collectMineralMarkers } from "../minimap/MinimapMarkerSources";
+import { entityMarkerId } from "../minimap/MinimapMarkerStore";
+import type { MinimapMarkerSpec } from "../minimap/MinimapTypes";
 import { hasLineOfSight } from "../vision/SightGeometry";
 import type { BulletEntityHit } from "../objects/Bullet";
 import type { BulletImpact, DeathFinished } from "../combat/CombatTypes";
@@ -313,6 +317,15 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly floatingTexts = new FloatingTextSystem();
   // 右侧武器列表 HUD：当前手持枪械在上，切换时与副武器交换位置
   private readonly weaponListHud = new WeaponListHud();
+  /**
+   * 左上角圆形战术小地图：只是“玩家已知世界”的可视化，不参与碰撞、感知或掉落。
+   * 地形来自探索/记忆，标记来自感知授权，GameScene 只负责组织数据。
+   */
+  private readonly minimap = new CircularMinimapHud();
+  /** 矿石标记来自记忆快照，按记忆 revision 重建，避免每帧扫描全部瓦片。 */
+  private minimapMineralRevision = -1;
+  private readonly minimapMarkerSpecs: MinimapMarkerSpec[] = [];
+  private minimapMineralMarkers: MinimapMarkerSpec[] = [];
   // 光照系统
   private lightingSystem: LightingSystem;
   private visibilitySystem = new VisibilitySystem();
@@ -769,7 +782,14 @@ export class GameScene extends Scene {  private player!: Player;
     this.displayedView = undefined;
     this.viewportCache = null;
     this.resizeCamera();
+    this.resizeMinimap();
     this.initLightingSystem();
+  }
+
+  /** 小地图布局与 DPR 变化：重算圆形范围、黄金计数位置与缓存分辨率。 */
+  private resizeMinimap(): void {
+    const dpr = window.devicePixelRatio || 1;
+    this.minimap.resize(this.game.renderer.width / dpr, this.game.renderer.height / dpr, dpr);
   }
 
   private scatterGold(col: number, row: number, earned: number, destroyed: boolean): void {
@@ -1366,6 +1386,7 @@ export class GameScene extends Scene {  private player!: Player;
       await this.load();
       if (!this.active) return;
       this.resizeCamera();
+      this.resizeMinimap();
       this.initLightingSystem();
       this.game.input.setPointerEnabled(true);
       // Tab 交给游戏切枪；只在场景有效时拦截浏览器默认的焦点导航。
@@ -1429,6 +1450,8 @@ export class GameScene extends Scene {  private player!: Player;
     if (this.game?.input) this.game.input.onPointerMove = undefined;
     this.crosshairOverlay?.dispose();
     this.crosshairOverlay = undefined;
+    // 小地图离屏纹理随场景一起释放，重进游戏不会残留上一局的地形缓存。
+    this.minimap.dispose();
     this.displayedView = undefined;
     this.viewportCache = null;
     this.debugPanel?.dispose();
@@ -1540,6 +1563,8 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 感知先于按键与交互结算：拾取系统只使用本帧的可见性结果，不读上一帧。
     this.updatePerception(delta);
+    // 小地图消费同一份感知结果：观察格/记忆刚更新过，当帧就能反映。
+    this.updateMinimap(delta);
     // 声音提示只消费世界噪声事件，不参与感知，也不会被感知遮罩擦掉。
     this.updateSoundRipples(delta);
 
@@ -1689,6 +1714,93 @@ export class GameScene extends Scene {  private player!: Player;
     }
 
     perception.update(delta, [observer], lights, targets);
+  }
+
+  /**
+   * 把小地图需要的“已知世界状态”喂给左下角 HUD 之外的数据层。
+   * 这里只做数据搬运：地形与探索来自 PerceptionSystem 的 grid / memory（与三层视野同一份权威数据），
+   * 观察格来自本轮真实 LOS/光照结果，用来区分 observed / remembered。
+   */
+  private updateMinimap(delta: number): void {
+    const perception = this.perception;
+    if (!perception) return;
+    const memory = perception.getTerrainMemory("player");
+    const grid = perception.getExplorationGrid("player");
+    if (!memory || !grid) return;
+
+    // 矿石标记只来自记忆快照，按记忆 revision 重建，避免每帧全量扫描瓦片。
+    if (memory.revision !== this.minimapMineralRevision) {
+      this.minimapMineralRevision = memory.revision;
+      this.minimapMineralMarkers = collectMineralMarkers(memory, this.minimapMineralMarkers);
+    }
+    this.minimap.setMarkers(this.buildMinimapMarkers());
+
+    const vision = this.player.getVisionState();
+    this.minimap.update({
+      dt: delta,
+      memory,
+      grid,
+      observedCells: perception.getObservedCells("player"),
+      observedRevision: perception.getObservedRevision("player"),
+      water: this.map.water,
+      playerX: vision.x,
+      playerY: vision.y,
+      direction: vision.direction,
+    });
+  }
+
+  /**
+   * 组装资源标记。visible 一律来自感知授权，而不是“对象还在数组里”：
+   * 金块/肉块/增益道具要求 identified（完整辨识），火把要求该点已被记忆。
+   * 矿物标记直接复用记忆快照，故被破坏后只要没再观察就仍保留最后已知位置。
+   */
+  private buildMinimapMarkers(): readonly MinimapMarkerSpec[] {
+    const specs = this.minimapMarkerSpecs;
+    specs.length = 0;
+    for (const mineral of this.minimapMineralMarkers) specs.push(mineral);
+    for (const gold of this.goldPickups) {
+      specs.push({
+        id: entityMarkerId("gold", this.getPerceptionId(gold)),
+        type: "gold",
+        x: gold.x + GoldPickup.SIZE / 2,
+        y: gold.y + GoldPickup.SIZE / 2,
+        visible: this.getEntityVisibility(gold) === "identified",
+      });
+    }
+    for (const meat of this.meatPickups) {
+      const anchor = meat.getPickupAnchor();
+      specs.push({
+        id: entityMarkerId("meat", this.getPerceptionId(meat)),
+        type: "meat",
+        x: anchor.x,
+        y: anchor.y,
+        visible: this.getEntityVisibility(meat) === "identified",
+      });
+    }
+    for (const pickup of this.pickupItems) {
+      const size = pickup.getSize();
+      specs.push({
+        id: entityMarkerId("pickup", this.getPerceptionId(pickup)),
+        type: "pickup",
+        x: pickup.x + size / 2,
+        y: pickup.y + size / 2,
+        visible: this.getEntityVisibility(pickup) === "identified",
+      });
+    }
+    const perception = this.perception;
+    for (const torch of this.torches) {
+      // 火把不是感知 target，用“该点是否已被探索/记忆”授权，避免照亮轮廓即被标记。
+      const recall = perception ? perception.getTerrainRecall("player", torch.x, torch.y) : "unknown";
+      specs.push({
+        id: entityMarkerId("torch", this.getPerceptionId(torch)),
+        type: "torch",
+        x: torch.x,
+        y: torch.y,
+        visible: recall !== "unknown",
+        state: torch.isLit() ? "lit" : "dark",
+      });
+    }
+    return specs;
   }
 
   private getPerceptionId(target: object): string {
@@ -2151,16 +2263,23 @@ export class GameScene extends Scene {  private player!: Player;
     this.floatingTexts.draw(ctx, cameraOffset.x, cameraOffset.y,
       (screenContext.canvas.width / textDpr) / this.camera.width);
     ctx.restore();
-    // 黄金计数在 HUD 之前，保持原有层级。
+    // 左上角圆形小地图：世界合成之后的屏幕 HUD 阶段，用逻辑像素绘制。
+    ctx.save();
+    const minimapDpr = window.devicePixelRatio || 1;
+    ctx.scale(minimapDpr, minimapDpr);
+    this.minimap.draw(ctx);
+    ctx.restore();
+    // 黄金计数紧贴小地图下缘：不再与圆形小地图抢左上角，也不盖住它。
+    const goldRect = this.minimap.getGoldRect();
     ctx.save();
     const dpr = window.devicePixelRatio || 1;
     ctx.scale(dpr, dpr);
     ctx.fillStyle = "#ffd700";
-    ctx.fillRect(24, 26, 12, 12);
-    ctx.font = "18px sans-serif";
+    ctx.fillRect(goldRect.iconX, goldRect.iconY, goldRect.iconSize, goldRect.iconSize);
+    ctx.font = goldRect.font;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText(`黄金 ${this.player.getGold()}`, 46, 32);
+    ctx.fillText(`黄金 ${this.player.getGold()}`, goldRect.textX, goldRect.textY);
     ctx.restore();
     // 屏幕层 HUD：右侧武器列表与手电胶囊；生命/体力条仍在角色脚边。
     // 单独按 dpr 缩放成逻辑像素，避免继承资源栏的 transform。
