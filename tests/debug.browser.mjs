@@ -192,6 +192,24 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.getAutoReload()), false);
     await page.getByRole('button', { name: '补满弹匣', exact: true }).click();
 
+    // Tab 在面板内必须保持正常的焦点导航，不能切枪。
+    await tab('角色').focus();
+    const slotBeforePanelTab = await page.evaluate(() => debugTest.scene.player.getActiveWeaponSlot());
+    await page.evaluate(() => { window.__focusStart = document.activeElement; });
+    await page.keyboard.down('Tab');
+    await page.evaluate(() => debugTest.tick(0));
+    const panelTab = await page.evaluate(() => ({
+      inside: !!document.activeElement?.closest('[data-player-debug]'),
+      moved: document.activeElement !== window.__focusStart,
+      slot: debugTest.scene.player.getActiveWeaponSlot(),
+    }));
+    await page.keyboard.up('Tab');
+    await page.evaluate(() => debugTest.tick(0));
+    assert.equal(panelTab.inside, true, 'Tab keeps focus inside the debug panel');
+    assert.equal(panelTab.moved, true, 'Tab still performs normal focus navigation inside the debug panel');
+    assert.equal(panelTab.slot, slotBeforePanelTab, 'Tab inside the debug panel must not cycle firearms');
+    assert.equal(await panel.isVisible(), true, 'Tab does not close the debug panel');
+
     await openTab('画面');
     await edit('graphics.playerLight.radius', 80); await edit('graphics.playerLight.intensity', 1);
     const smallLight = await page.evaluate(() => debugTest.brightness());
@@ -298,6 +316,18 @@ try {
     await page.screenshot({ path: join(output, `debug-panel-dpr-${dpr}.png`) });
 
     await page.keyboard.press('Escape'); assert.equal(await panel.isVisible(), false);
+    await page.evaluate(() => {
+      window.__tabPrevented = null;
+      window.addEventListener('keydown', event => { if (event.key === 'Tab') window.__tabPrevented = event.defaultPrevented; });
+    });
+    const slotBeforeGameplayTab = await page.evaluate(() => debugTest.scene.player.getActiveWeaponSlot());
+    await page.keyboard.down('Tab');
+    await page.evaluate(() => debugTest.tick(0));
+    const slotAfterGameplayTab = await page.evaluate(() => debugTest.scene.player.getActiveWeaponSlot());
+    await page.keyboard.up('Tab');
+    await page.evaluate(() => debugTest.tick(0));
+    assert.notEqual(slotAfterGameplayTab, slotBeforeGameplayTab, 'Tab cycles the two firearms during gameplay');
+    assert.equal(await page.evaluate(() => window.__tabPrevented), true, 'gameplay Tab is captured instead of moving browser focus');
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), true, 'Escape reveals the system cursor');
     assert.equal(await page.locator('body > canvas').evaluate(element => getComputedStyle(element).cursor), 'default');

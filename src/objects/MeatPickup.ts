@@ -1,4 +1,5 @@
 import { Collider, circleCollider, collide } from "../physics/Collider";
+import { MEAT_PICKUP_CONFIG, type PickupConfig } from "../interaction/PickupTypes";
 
 const MEAT_LIGHT = "#F58A8A";
 const MEAT_MID = "#E05A5A";
@@ -13,9 +14,16 @@ const BONE_SHADE = "#D8C8A6";
 export class MeatPickup {
   static readonly SIZE = 16;
   static readonly FALL_SECONDS = 0.28;
+  private static nextId = 1;
+
+  /** 稳定 id：多个肉块距离相同时，交互目标选择结果仍然确定。 */
+  readonly id = MeatPickup.nextId++;
+  /** 拾取配置：按住 E 0.5 秒完成交互。 */
+  readonly pickupConfig: Readonly<PickupConfig> = MEAT_PICKUP_CONFIG;
 
   private age = 0;
   private readonly phase = Math.random() * Math.PI * 2;
+  private collected = false;
 
   constructor(readonly x: number, readonly y: number) {}
 
@@ -24,8 +32,30 @@ export class MeatPickup {
     this.age += delta;
   }
 
+  /** 下落动画结束（落地）。 */
   isReady(): boolean {
     return this.age >= MeatPickup.FALL_SECONDS;
+  }
+
+  /** 交互锚点：肉块中心（世界坐标）。 */
+  getPickupAnchor(): { x: number; y: number } {
+    return { x: this.x + MeatPickup.SIZE / 2, y: this.y + MeatPickup.SIZE / 2 };
+  }
+
+  /** 可以成为交互候选：已落地且尚未结算。 */
+  isPickupReady(): boolean {
+    return this.isReady() && !this.collected;
+  }
+
+  isCollected(): boolean {
+    return this.collected;
+  }
+
+  /** 一次性结算标记：返回 false 表示这块肉已经被拾取过。 */
+  markCollected(): boolean {
+    if (this.collected) return false;
+    this.collected = true;
+    return true;
   }
 
   getCollider(): Collider {

@@ -143,11 +143,16 @@ try {
       'melee row has no ammo count or cartridge icons');
     await page.screenshot({ path: `${output}/weapon-list-unarmed-dpr${dpr}.png` });
 
-    // E 回到手枪，再按 E 切到冲锋枪；切枪时两行纵向交换。
+    // Tab 回到手枪，再按 Tab 切到冲锋枪；切枪时两行纵向交换。
+    // Q/E 不再切枪：先确认这两个键不会改变当前枪械。
+    await press('q');
     await press('e');
+    assert.equal((await page.evaluate(() => hudTest.activeSlot())), 'melee',
+      'Q and E must not switch firearms any more');
+    await press('Tab');
     await page.evaluate(() => hudTest.step(0.3));
     assert.equal((await page.evaluate(() => hudTest.listStatus())).rows[0].slot, 'secondary');
-    await press('e');
+    await press('Tab');
     const mid = await page.evaluate(() => hudTest.listStatus());
     assert.ok(mid.swapProgress > 0 && mid.swapProgress < 1, `expected a running swap, got ${mid.swapProgress}`);
     const midPrimary = mid.rows.find(row => row.slot === 'primary');
@@ -168,8 +173,8 @@ try {
       'SMG row shows its count and cartridge icon');
     await page.screenshot({ path: `${output}/weapon-list-smg-dpr${dpr}.png` });
 
-    // Q 回到手枪：列表再次把手枪放到第一行，弹匣数字随槽位独立保留。
-    await press('q');
+    // Tab 回到手枪：列表再次把手枪放到第一行，弹匣数字随槽位独立保留。
+    await press('Tab');
     await page.evaluate(() => hudTest.step(0.3));
     const back = await page.evaluate(() => hudTest.listStatus());
     assert.deepEqual(back.rows.map(row => row.slot), ['secondary', 'primary']);

@@ -2,6 +2,7 @@ import { GameObject } from "../core/GameObject";
 import { Input } from "../core/Input";
 import { Modifier } from "../core/ModifierManager";
 import { Collider, circleCollider, collide, rectangleCollider } from "../physics/Collider";
+import { ITEM_PICKUP_CONFIG, type PickupConfig } from "../interaction/PickupTypes";
 
 /**
  * 道具类型枚举
@@ -28,6 +29,8 @@ export const PICKUP_ICONS: Record<PickupType, string> = {
  */
 export class PickupItem extends GameObject {
   public static DEFAULT_SIZE: number = 40;
+  /** 拾取配置：特殊增益道具沿用原有碰撞拾取，不额外显示发现标记。 */
+  readonly pickupConfig: Readonly<PickupConfig> = ITEM_PICKUP_CONFIG;
 
   private type: PickupType;  // 道具类型
   private size: number = PickupItem.DEFAULT_SIZE;  // 道具大小

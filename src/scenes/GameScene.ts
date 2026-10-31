@@ -46,6 +46,20 @@ import {
 import { PickupItem, PickupType } from "../objects/PickupItem";
 import { GoldPickup } from "../objects/GoldPickup";
 import { MeatPickup } from "../objects/MeatPickup";
+import { InteractionController } from "../interaction/InteractionController";
+import type { InteractionSnapshot } from "../interaction/InteractionController";
+import {
+  createPickupCandidate,
+  type PickupCandidate,
+} from "../interaction/PickupTargetResolver";
+import { resolvePickupVisibility, type PickupVisibilityDecision } from "../interaction/PickupVisibilityPolicy";
+import {
+  INTERACTION_PROMPT_LABEL,
+  type PickupConfig,
+  type PickupMarker,
+} from "../interaction/PickupTypes";
+import { PickupPromptRenderer } from "../ui/PickupPromptRenderer";
+import { hasLineOfSight } from "../vision/SightGeometry";
 import type { BulletEntityHit } from "../objects/Bullet";
 import type { BulletImpact, DeathFinished } from "../combat/CombatTypes";
 import { Torch } from "../objects/Torch";
@@ -213,10 +227,23 @@ export class GameScene extends Scene {  private player!: Player;
   private flashlightOn = true;
   private flashlightHeld = false;
   private reloadHeld = false;
-  private qHeld = false;
-  private eHeld = false;
+  /** Tab 只在按下沿切枪；Q 不再绑定额外功能。 */
+  private tabHeld = false;
   private cHeld = false;
   private spaceHeld = false;
+  /** 按键拾取控制器：只接管 INTERACT 物品，AUTO 仍走各自碰撞流程。 */
+  private readonly interaction = new InteractionController<MeatPickup>();
+  /** 本帧通过可见性过滤的交互候选与可绘制标记（世界坐标）。 */
+  private pickupCandidates: PickupCandidate<MeatPickup>[] = [];
+  private pickupMarkers: { marker: PickupMarker; target: MeatPickup | GoldPickup }[] = [];
+  /** 拾取提示纯视觉层；不参与按键判断与结算。 */
+  private readonly pickupPrompt = new PickupPromptRenderer();
+  private promptTime = 0;
+  /** 本帧开火/切枪：与翻滚一起作为交互取消信号。 */
+  private shotThisFrame = false;
+  private weaponSwitchedThisFrame = false;
+  /** 场景刚退出的那一帧不允许再结算，避免幽灵拾取；进入场景后重新打开。 */
+  private interactionEnabled = true;
   /** 准星收缩进度：0 = 未瞄准，1 = 完全收紧。 */
   private crosshairTighten = 0;
   /** 独立于世界帧的准星图层；位置由鼠标事件直接驱动。 */
@@ -237,6 +264,8 @@ export class GameScene extends Scene {  private player!: Player;
   private goldDroppedByTile = new Map<number, number>();
   /** 小鸡死亡后掉落的肉块，落地后才可收集。 */
   private meatPickups: MeatPickup[] = [];
+  /** 与未捡走的肉块绑定的血迹：肉块还在时血迹一直保留，被捡走后才开始淡出。 */
+  private sustainedBlood = new Map<MeatPickup, () => void>();
 
   // 粒子系统
   private particleSystem: ParticleSystem;
@@ -394,6 +423,8 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 设置射击回调，配置震动参数
     this.player.setOnShootCallback((shootDir?: Vector2) => {
+      // 开火会打断正在进行中的拾取；同帧标记，结算前消费。
+      this.shotThisFrame = true;
       this.noiseSystem.emit("gunshot", this.player.x + this.player.getSize() / 2,
         this.player.y + this.player.getSize() / 2, { sourceId: "player" });
       // 根据射速调整震动幅度，射速越高震动越小
@@ -782,34 +813,154 @@ export class GameScene extends Scene {  private player!: Player;
   /** 尸体滑行收尾时的统一表现：血迹、白烟与肉块同帧落在收尾位置。 */
   private resolveDeathPresentation(finished: DeathFinished): void {
     const center = new Vector2(finished.x, finished.y);
-    // 血迹落在尸体收尾的位置，尸体移除后仍在地面上保留几秒再淡出。
-    this.bloodStainSystem.spawn(finished.x, finished.y, this.map);
+    // 血迹落在尸体收尾的位置：肉块没被捡走前一直保留，捡走后恢复正常的保留与淡出。
+    const releaseBlood = this.bloodStainSystem.spawnSustained(finished.x, finished.y, this.map);
     // 慢速大颗粒形成白色气团，再补一圈快速白点。
     this.particleSystem.createExplosion(center, 28, 70, 7, 0.9,
       ["#ffffff", "#f7f7f7", "#e8e8e8"]);
     this.particleSystem.createExplosion(center, 8, 150, 4, 0.32, ["#ffffff"]);
     // 肉块与白烟同帧出现：击杀反馈要跟着击退收尾一起到，而不是再等烟散。
-    this.meatPickups.push(new MeatPickup(finished.x - MeatPickup.SIZE / 2, finished.y - MeatPickup.SIZE / 2));
+    const meat = new MeatPickup(finished.x - MeatPickup.SIZE / 2, finished.y - MeatPickup.SIZE / 2);
+    this.meatPickups.push(meat);
+    if (releaseBlood) this.sustainedBlood.set(meat, releaseBlood);
   }
 
+  /** 只推进肉块的下落动画；拾取由交互控制器在感知更新之后判定。 */
   private updateMeatPickups(delta: number): void {
-    const body = this.player.getCollider();
-    let collected = 0;
-    this.meatPickups = this.meatPickups.filter(pickup => {
-      pickup.update(delta);
-      if (!pickup.isCollidingWithShape(body)) return true;
-      // 每块肉直接回血，不再进入背包或单独计数。
-      this.player.heal(GameScene.MEAT_HEAL);
-      collected++;
-      this.particleSystem.createExplosion(
-        new Vector2(pickup.x + MeatPickup.SIZE / 2, pickup.y + MeatPickup.SIZE / 2),
-        8, 50, 3, 0.25, ["#ff9b9b", "#ffd6d6", "#ffffff"]);
-      return false;
+    for (const pickup of this.meatPickups) pickup.update(delta);
+  }
+
+  /**
+   * 肉块拾取的一次性结算：回血、粒子、音效、飘字都只发生一次。
+   * 重复调用会被 markCollected 拦下，保证同一块肉不会结算两次。
+   */
+  private collectMeatPickup(meat: MeatPickup): void {
+    if (!meat.markCollected()) return;
+    this.meatPickups = this.meatPickups.filter(pickup => pickup !== meat);
+    this.player.heal(GameScene.MEAT_HEAL);
+    this.particleSystem.createExplosion(
+      new Vector2(meat.x + MeatPickup.SIZE / 2, meat.y + MeatPickup.SIZE / 2),
+      8, 50, 3, 0.25, ["#ff9b9b", "#ffd6d6", "#ffffff"]);
+    this.sfx.play(MEAT_PICKUP_SOUND, this.volume(this.audio.pickups.meatVolume));
+    this.showPickupText(`HP+${GameScene.MEAT_HEAL}`);
+  }
+
+  /**
+   * 感知更新之后运行：本帧决定候选、E 进度与结算。
+   * 固定顺序为“感知 → 目标 → 按键计时 → 结算”，不读取上一帧的可见性。
+   */
+  private updateInteraction(delta: number, input: Input): void {
+    this.promptTime += delta;
+    this.pickupCandidates = [];
+    this.pickupMarkers = [];
+
+    if (!this.interactionEnabled) {
+      // 场景已退出：清空进度，不处理任何按键，也不产生结算。
+      this.interaction.update({ delta: 0, pressed: false, blocked: true, candidates: [] });
+      return;
+    }
+
+    const vision = this.player.getVisionState();
+    const playerAnchor = { x: vision.x, y: vision.y };
+    const threeLayer = this.visionMode === "three-layer" && !!this.perception;
+
+    for (const meat of this.meatPickups) {
+      if (!meat.isPickupReady()) continue;
+      const anchor = meat.getPickupAnchor();
+      const distance = Math.hypot(anchor.x - playerAnchor.x, anchor.y - playerAnchor.y);
+      const config = meat.pickupConfig;
+      // 超出发现范围且不可能交互的肉块不必查询感知。
+      const reach = Math.max(config.discoveryRadius, config.interactionRadius);
+      if (distance > reach) continue;
+
+      const view = threeLayer ? this.getEntityVisibility(meat) : "identified";
+      const decision = this.resolvePickupDecision(config, view, distance, anchor, playerAnchor, vision.range);
+      if (decision.marker) {
+        this.pickupMarkers.push({
+          marker: { x: anchor.x, y: anchor.y, style: config.markerStyle },
+          target: meat,
+        });
+      }
+      if (decision.prompt) {
+        this.pickupCandidates.push(
+          createPickupCandidate(meat, `meat-${meat.id}`, anchor, playerAnchor, config));
+      }
+    }
+
+    // 金块只提供金色发现点，永不进入按键交互状态机。
+    for (const gold of this.goldPickups) {
+      const config = gold.pickupConfig;
+      const anchor = {
+        x: gold.x + GoldPickup.SIZE / 2,
+        y: gold.y + GoldPickup.SIZE / 2,
+      };
+      const distance = Math.hypot(anchor.x - playerAnchor.x, anchor.y - playerAnchor.y);
+      if (distance > config.discoveryRadius) continue;
+      const view = threeLayer ? this.getEntityVisibility(gold) : "identified";
+      const decision = this.resolvePickupDecision(config, view, distance, anchor, playerAnchor, vision.range);
+      if (decision.marker) {
+        this.pickupMarkers.push({
+          marker: { x: anchor.x, y: anchor.y, style: config.markerStyle },
+          target: gold,
+        });
+      }
+    }
+
+    const result = this.interaction.update({
+      delta,
+      pressed: input.isKeyDown("e"),
+      blocked: input.isBlocked?.() === true,
+      interrupted: this.shotThisFrame || this.player.isRolling() || this.weaponSwitchedThisFrame,
+      candidates: this.pickupCandidates,
     });
-    // 与金块同理：一次跨到好几块肉上，只播一次音、合并成一条回血飘字。
-    if (collected > 0) {
-      this.sfx.play(MEAT_PICKUP_SOUND, this.volume(this.audio.pickups.meatVolume));
-      this.showPickupText(`HP+${GameScene.MEAT_HEAL * collected}`);
+    if (result.completed) {
+      const completed = result.completed;
+      this.collectMeatPickup(completed);
+      // 同一帧完成拾取后，该物品不能再留下候选或高亮点。
+      this.pickupCandidates = this.pickupCandidates.filter(c => c.target !== completed);
+      this.pickupMarkers = this.pickupMarkers.filter(entry => entry.target !== completed);
+    }
+  }
+
+  /**
+   * 单帧可见性判定。identified/silhouette 由三层感知给出；legacy 走视野半径 + LOS。
+   * 只有剪影的近身触觉拾取才额外查一次墙体遮挡。
+   */
+  private resolvePickupDecision(
+    config: PickupConfig,
+    view: EntityVisibility,
+    distance: number,
+    anchor: { x: number; y: number },
+    playerAnchor: { x: number; y: number },
+    legacyRange: number,
+  ): PickupVisibilityDecision {
+    const needsLineOfSight =
+      this.visionMode === "legacy" ||
+      (view === "silhouette" && distance <= config.interactionRadius);
+    const lineOfSight = needsLineOfSight
+      ? hasLineOfSight(this.map, playerAnchor.x, playerAnchor.y, anchor.x, anchor.y)
+      : false;
+    return resolvePickupVisibility({
+      config,
+      view,
+      distance,
+      lineOfSight,
+      nearSense: distance <= this.visionRules.nearSenseRadius,
+      visionMode: this.visionMode,
+      legacyRange,
+    });
+  }
+
+
+  /**
+   * 肉块被捡走（或不再存在于场景里）后才释放绑定的血迹，
+   * 让血迹从完整显示开始重新走 4 秒保留＋1.6 秒淡出。
+   */
+  private releasePickedUpBlood(): void {
+    for (const [pickup, release] of this.sustainedBlood) {
+      if (this.meatPickups.includes(pickup)) continue;
+      release();
+      this.sustainedBlood.delete(pickup);
     }
   }
 
@@ -1070,6 +1221,12 @@ export class GameScene extends Scene {  private player!: Player;
       this.resizeCamera();
       this.initLightingSystem();
       this.game.input.setPointerEnabled(true);
+      // Tab 交给游戏切枪；只在场景有效时拦截浏览器默认的焦点导航。
+      this.game.input.setCapturedKeys?.(["Tab"]);
+      this.interactionEnabled = true;
+      this.interaction.reset();
+      this.pickupPrompt.preload();
+      this.tabHeld = false;
       // 准星改成独立图层：鼠标一动就更新，不必等这一帧的世界渲染。
       if (typeof document !== 'undefined') {
         this.crosshairOverlay ??= new CrosshairOverlay();
@@ -1108,6 +1265,13 @@ export class GameScene extends Scene {  private player!: Player;
     this.activeClucks.length = 0;
     this.game?.input?.setPointerEnabled(false);
     this.game?.input?.clear();
+    // 退出场景后 Tab 恢复浏览器默认行为；交互进度与按住状态一并清空。
+    this.game?.input?.setCapturedKeys?.([]);
+    this.interactionEnabled = false;
+    this.interaction.reset();
+    this.pickupCandidates = [];
+    this.pickupMarkers = [];
+    this.tabHeld = false;
     this.spaceHeld = false;
     if (this.game?.input) this.game.input.onPointerMove = undefined;
     this.crosshairOverlay?.dispose();
@@ -1131,6 +1295,10 @@ export class GameScene extends Scene {  private player!: Player;
     this.deltaSinceLastFrame = delta;
 
     if (!this.loaded) return;
+
+    // 开火/切枪都只在本帧有效：交互取消只消费当帧信号。
+    this.shotThisFrame = false;
+    this.weaponSwitchedThisFrame = false;
 
     // 更新玩家状态
     const prevX = this.player.x, prevY = this.player.y;
@@ -1198,6 +1366,9 @@ export class GameScene extends Scene {  private player!: Player;
     this.flashlight.setPosition(center);
     this.flashlight.setDirection(this.player.getVisionState().direction);
 
+    // 感知先于按键与交互结算：拾取系统只使用本帧的可见性结果，不读上一帧。
+    this.updatePerception(delta);
+
     // G 键是开关而不是常亮：只在下沿切换，避免按住时反复翻转。
     const flashlightDown = input.isKeyDown("g");
     if (flashlightDown && !this.flashlightHeld) {
@@ -1213,15 +1384,18 @@ export class GameScene extends Scene {  private player!: Player;
     if (reloadDown && !this.reloadHeld) this.player.requestReload();
     this.reloadHeld = reloadDown;
 
-    // Q/E 在两把枪之间循环，C 收枪/空手；都只认下沿。
-    const qDown = input.isKeyDown("q");
-    if (qDown && !this.qHeld) this.player.cycleFirearm(-1);
-    this.qHeld = qDown;
-    const eDown = input.isKeyDown("e");
-    if (eDown && !this.eHeld) this.player.cycleFirearm(1);
-    this.eHeld = eDown;
+    // Tab 在主副枪械之间切换（Q 不再绑定），C 收枪/空手；都只认下沿。
+    const tabDown = input.isKeyDown("Tab");
+    if (tabDown && !this.tabHeld) {
+      this.player.cycleFirearm(1);
+      this.weaponSwitchedThisFrame = true;
+    }
+    this.tabHeld = tabDown;
     const cDown = input.isKeyDown("c");
-    if (cDown && !this.cHeld) this.player.toggleMelee();
+    if (cDown && !this.cHeld) {
+      this.player.toggleMelee();
+      this.weaponSwitchedThisFrame = true;
+    }
     this.cHeld = cDown;
 
     // 空格翻滚只认下沿：按住不会连续起滚，连滚需要松开再按。
@@ -1231,7 +1405,11 @@ export class GameScene extends Scene {  private player!: Player;
         this.player.y + this.player.getSize() / 2, { sourceId: "player" });
     }
     this.spaceHeld = spaceDown;
-    this.updatePerception(delta);
+
+    // 拾取放在所有可能打断它的动作之后：本帧的开火/切枪/翻滚会立即取消进度。
+    this.updateInteraction(delta, input);
+    // 肉块本帧被移除后，绑定的血迹从下一帧开始走正常的保留与淡出。
+    this.releasePickedUpBlood();
   }
 
   /** 供敌人听觉、调试面板与测试读取的噪声总线（只读用途，写入仍由场景负责）。 */
@@ -1793,6 +1971,8 @@ export class GameScene extends Scene {  private player!: Player;
     this.floatingTexts.draw(ctx, cameraOffset.x, cameraOffset.y,
       (screenContext.canvas.width / textDpr) / this.camera.width);
     ctx.restore();
+    // 拾取标记与 E 提示：屏幕层、含震动的相机偏移、CSS 逻辑像素。
+    this.drawPickupPrompts(screenContext, cameraOffset);
     ctx.save();
     const dpr = window.devicePixelRatio || 1;
     ctx.scale(dpr, dpr);
@@ -1816,6 +1996,62 @@ export class GameScene extends Scene {  private player!: Player;
     drawFlashlightHud(ctx, getFlashlightHudRect(getWeaponListLayout(hudWidth, hudHeight).area), this.flashlightOn);
     ctx.restore();
     this.updateCrosshair();
+  }
+
+  /**
+   * 高亮点、E 图标与进度环统一画在屏幕层；尺寸用 CSS 逻辑像素，
+   * 位置用含震动的相机偏移换算。显示权限已在 updateInteraction 里按感知过滤。
+   */
+  private drawPickupPrompts(
+    ctx: CanvasRenderingContext2D,
+    cameraOffset: { x: number; y: number },
+  ): void {
+    const dpr = window.devicePixelRatio || 1;
+    const scale = (ctx.canvas.width / dpr) / this.camera.width;
+    const snapshot = this.interaction.getSnapshot();
+
+    const markers = this.pickupMarkers.map(entry => ({
+      x: (entry.marker.x - cameraOffset.x) * scale,
+      y: (entry.marker.y - cameraOffset.y) * scale,
+      style: entry.marker.style,
+    }));
+
+    let prompt = null;
+    if (snapshot.target && (snapshot.state === "focused" || snapshot.state === "holding")) {
+      const anchor = snapshot.target.getPickupAnchor();
+      prompt = {
+        x: (anchor.x - cameraOffset.x) * scale,
+        y: (anchor.y - cameraOffset.y) * scale,
+        progress: snapshot.progress,
+        holding: snapshot.state === "holding",
+        label: INTERACTION_PROMPT_LABEL,
+        // V1 提示本身就是通用“拾取”；剪影触觉拾取更不允许带物品信息。
+        named: false,
+      };
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    this.pickupPrompt.draw(ctx, { markers, prompt }, this.promptTime);
+    ctx.restore();
+  }
+
+  /** 供浏览器验收与调试读取的拾取快照（只读用途）。 */
+  getPickupDebugState() {
+    const snapshot: InteractionSnapshot<MeatPickup> = this.interaction.getSnapshot();
+    return {
+      state: snapshot.state,
+      progress: snapshot.progress,
+      targetId: snapshot.targetId,
+      targetX: snapshot.target ? snapshot.target.getPickupAnchor().x : null,
+      targetY: snapshot.target ? snapshot.target.getPickupAnchor().y : null,
+      markerCount: this.pickupMarkers.length,
+      markers: this.pickupMarkers.map(entry => ({ ...entry.marker })),
+      candidateCount: this.pickupCandidates.length,
+      meatCount: this.meatPickups.length,
+      promptTime: this.promptTime,
+      interactionEnabled: this.interactionEnabled,
+    };
   }
 
   /** Invert the last displayed world transform, including zoom, DPR and camera shake. */

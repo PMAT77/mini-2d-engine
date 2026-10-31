@@ -12,7 +12,7 @@ const { Vector2 } = load('math/Vector2');
 const idleInput = { isKeyDown: () => false };
 const step = (player, seconds) => player.update(seconds, idleInput);
 
-test('the pistol is equipped by default and Q/E cycles the two firearms', () => {
+test('the pistol is equipped by default and cycleFirearm swaps the two firearms', () => {
   const player = new Player(200.5, 200.5);
   assert.equal(player.getActiveWeaponSlot(), 'secondary');
   assert.equal(player.getWeaponView().name, '格洛克手枪');
@@ -71,7 +71,7 @@ test('C holsters the gun; empty hands cannot shoot or reload', () => {
   assert.equal(player.getActiveWeaponSlot(), 'secondary');
   assert.equal(player.isArmed(), true);
 
-  // 空手时 Q/E 也能直接拔枪。
+  // 空手时按 Tab 也能直接拔枪：cycleFirearm 恢复最近使用过的枪。
   player.toggleMelee();
   player.cycleFirearm(1);
   assert.equal(player.getActiveWeaponSlot(), 'secondary');

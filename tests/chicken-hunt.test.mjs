@@ -60,6 +60,8 @@ test('shooting a chicken kills it, drops meat with the puff, and collects it', (
   scene.loaded = true;
   // 用一张全干地小地图消除出生点随机墙体的影响，玩家和鸡都放在通路中心。
   scene.map = dryMap();
+  // 单测只验证拾取流程；三层视野的显隐由 pickup.browser 验收覆盖。
+  scene.perception = undefined;
   scene.player.x = 500;
   scene.player.y = 500;
   scene.player.applyConfig({ shooting: {
@@ -100,8 +102,13 @@ test('shooting a chicken kills it, drops meat with the puff, and collects it', (
 
   scene.player.x = meatCenter.x - scene.player.getSize() / 2;
   scene.player.y = meatCenter.y - scene.player.getSize() / 2;
-  for (let frame = 0; frame < 5; frame++) scene.update(1 / 60, idle);
-  assert.equal(scene.player.getHealth(), 55, 'each meat restores five health');
+  // 肉块改成按住 E 0.5 秒的交互拾取：29 帧只到 96.7%，第 30 帧才够时长。
+  const holdingE = { isKeyDown: key => key === 'e' };
+  for (let frame = 0; frame < 29; frame++) scene.update(1 / 60, holdingE);
+  assert.equal(scene.player.getHealth(), 50, 'a short hold does not collect the meat');
+  assert.equal(scene.meatPickups.length, 1);
+  scene.update(1 / 60, holdingE);
+  assert.equal(scene.player.getHealth(), 55, 'each meat restores five health after a 0.5s hold');
   assert.equal(scene.meatPickups.length, 0);
   assert.ok(scene.floatingTexts.getTexts().some(text => text.text === 'HP+5'));
 });

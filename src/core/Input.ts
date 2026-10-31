@@ -13,6 +13,8 @@ export class Input {
   private blocked = false;
   private pointerEnabled = false;
   private previousCursor = '';
+  /** 需要拦截浏览器默认行为、交给游戏处理的键（例如场景里的 Tab）。 */
+  private capturedKeys = new Set<string>();
   private pointer: PointerState = { clientX: 0, clientY: 0, active: false, leftDown: false, rightDown: false, leftPressed: false };
   /** 指针位置变化时的同步回调：准星等 UI 直接跟随，不必等下一帧渲染。 */
   onPointerMove?: (clientX: number, clientY: number) => void;
@@ -21,8 +23,10 @@ export class Input {
     this.previousCursor = canvas?.style.cursor ?? '';
     window.addEventListener('keydown', (event: KeyboardEvent) => {
       if (this.blocked || event.defaultPrevented) return;
-      this.keys.add(event.code || this.keyCode(event.key));
-      if (event.code === 'Space') event.preventDefault();
+      const code = event.code || this.keyCode(event.key);
+      this.keys.add(code);
+      // 只拦截游戏实际使用的特殊键，不无条件吞掉整页的键盘默认行为。
+      if (code === 'Space' || this.capturedKeys.has(code)) event.preventDefault();
     });
     window.addEventListener('keyup', (event: KeyboardEvent) => this.keys.delete(event.code || this.keyCode(event.key)));
     window.addEventListener('blur', () => this.clear());
@@ -78,6 +82,13 @@ export class Input {
     this.blocked = blocked;
     this.clear();
   }
+
+  /** 仅对游戏真正使用的浏览器特殊键（如 Tab）执行 preventDefault；退出场景时清空。 */
+  setCapturedKeys(keys: Iterable<string>): void {
+    this.capturedKeys = new Set(keys);
+  }
+
+  isBlocked(): boolean { return this.blocked; }
 
   clear(): void { this.keys.clear(); this.clearPointer(); }
 

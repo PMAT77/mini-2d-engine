@@ -1,11 +1,15 @@
 import { GameObject } from "../core/GameObject";
 import { GOLD_FRAGMENT_SIZE } from "../map/TileType";
 import { Collider, Point, collide, rectangleCollider } from "../physics/Collider";
+import { GOLD_PICKUP_CONFIG, type PickupConfig } from "../interaction/PickupTypes";
 
 /** 黄金碎块沿安全路径散落，落地后一直保留，直到被玩家拾取。 */
 export class GoldPickup extends GameObject {
   static readonly SIZE = GOLD_FRAGMENT_SIZE;
   static readonly SCATTER_DURATION = 0.45;
+  /** 拾取配置：保持碰撞自动拾取，只额外提供金色发现点。 */
+  readonly pickupConfig: Readonly<PickupConfig> = GOLD_PICKUP_CONFIG;
+
   private age = 0;
   private glowPhase = Math.random() * Math.PI * 2;
 

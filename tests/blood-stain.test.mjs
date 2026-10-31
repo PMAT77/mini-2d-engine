@@ -13,7 +13,7 @@ const { GameScene } = load('scenes/GameScene');
 const { TileMap } = load('map/TileMap');
 const { seededRandom } = load('map/WaterTerrain');
 const near = (a, b, epsilon = 1e-7) => assert.ok(Math.abs(a - b) <= epsilon, `${a} != ${b}`);
-const idle = { isKeyDown: () => false };
+const idle = { isKeyDown: () => false, isBlocked: () => false };
 globalThis.window = { innerWidth: 1200, innerHeight: 800, devicePixelRatio: 1 };
 
 const ground = (width = 64, height = 32) => {
@@ -127,7 +127,27 @@ test('even the smallest blood pool is wider than the meat chunk dropped on it', 
     `pool diameter ${BLOOD_MIN_RADIUS * 2} must exceed meat size ${MeatPickup.SIZE}`);
 });
 
-test('a chicken death leaves blood under the corpse that fades away later', () => {
+test('blood under an uncollected meat chunk stays until the chunk is gone', () => {
+  const blood = new BloodStainSystem(() => .5);
+  const release = blood.spawnSustained(225, 225, ground());
+  assert.ok(release, 'a sustained splatter reports how to release it');
+
+  // 肉块一直没捡：远超正常寿命后血迹仍原样留在原地。
+  for (let second = 0; second < 60; second++) blood.update(1);
+  assert.equal(blood.getActiveCount(), 1);
+  assert.equal(blood.getStains()[0].alpha, 1);
+
+  // 肉块被捡走后才重新开始 4 秒保留，再平滑淡出。
+  release();
+  blood.update(BLOOD_HOLD_SECONDS - .01);
+  assert.equal(blood.getStains()[0].alpha, 1);
+  blood.update(.02);
+  assert.ok(blood.getStains()[0].alpha < 1);
+  blood.update(BLOOD_FADE_SECONDS);
+  assert.equal(blood.getActiveCount(), 0);
+});
+
+test('a chicken death leaves blood under the corpse until the meat chunk is picked up', () => {
   const scene = new GameScene({ seed: 42, generateWater: false });
   scene.loaded = true;
   scene.map = ground();
@@ -156,9 +176,25 @@ test('a chicken death leaves blood under the corpse that fades away later', () =
   assert.ok(Math.hypot(stain.x - cx, stain.y - cy) < 120);
 
   for (let frame = 0; frame < 60 * (BLOOD_HOLD_SECONDS - 0.5); frame++) scene.update(1 / 60, idle);
-  assert.equal(blood.getActiveCount(), 1, 'blood still marks the spot after a few seconds');
+  assert.equal(blood.getActiveCount(), 1, 'blood still marks the spot while the meat lies there');
   assert.equal(blood.getStains()[0].alpha, 1);
 
+  // 肉块一直没捡，血迹就该一直在：远超 4＋1.6 秒也不消失。
+  for (let frame = 0; frame < 60 * 4; frame++) scene.update(1 / 60, idle);
+  assert.equal(scene.meatPickups.length, 1, 'the chunk is still waiting on the ground');
+  assert.equal(blood.getActiveCount(), 1, 'blood waits with the uncollected chunk');
+  assert.equal(blood.getStains()[0].alpha, 1);
+
+  // 捡走肉块（按键交互本身由拾取系统的单测覆盖），血迹这时才开始正常的保留与淡出。
+  const meat = scene.meatPickups[0];
+  scene.collectMeatPickup(meat);
+  assert.equal(scene.meatPickups.length, 0, 'the chunk is collected');
+  scene.update(1 / 60, idle);
+  assert.equal(blood.getActiveCount(), 1, 'the blood is released, not dropped');
+  assert.equal(blood.getStains()[0].alpha, 1);
+
+  for (let frame = 0; frame < 60 * (BLOOD_HOLD_SECONDS - 0.5); frame++) scene.update(1 / 60, idle);
+  assert.equal(blood.getStains()[0].alpha, 1, 'the hold restarts after the pickup');
   for (let frame = 0; frame < 60 * (BLOOD_FADE_SECONDS + 1); frame++) scene.update(1 / 60, idle);
-  assert.equal(blood.getActiveCount(), 0, 'blood fades out of the world on its own');
+  assert.equal(blood.getActiveCount(), 0, 'blood fades out once the chunk is gone');
 });
