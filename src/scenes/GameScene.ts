@@ -10,6 +10,7 @@ import { CraterSystem } from "../objects/CraterSystem";
 import { BloodStainSystem } from "../objects/BloodStainSystem";
 import { FootprintSystem } from "../objects/FootprintSystem";
 import { RippleSystem } from "../objects/RippleSystem";
+import { SoundRippleSystem } from "../objects/SoundRippleSystem";
 import { BoundaryRippleSystem } from "../objects/BoundaryRippleSystem";
 import { MapBoundaryOverlay } from "../map/MapBoundaryOverlay";
 import { Player, PlayerAimInput } from "../objects/Player";
@@ -30,6 +31,7 @@ import { ConeLight } from "../core/ConeLight";
 import { LightingSystem } from "../core/LightingSystem";
 import { VisibilitySystem } from "../core/VisibilitySystem";
 import { PerceptionSystem } from "../vision/PerceptionSystem";
+import { HearingSensor } from "../ai/HearingSensor";
 import { PerceptionRenderer } from "../vision/PerceptionRenderer";
 import { createVisionRules } from "../vision/VisionRules";
 import type {
@@ -305,6 +307,10 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly boundaryRippleSystem = new BoundaryRippleSystem();
   // 世界噪声总线：脚步、涉水、翻滚、枪声与小鸡叫声都记录成可查询事件。
   private readonly noiseSystem = new NoiseSystem();
+  // 听觉位置提示：只把“玩家听见了”的声音画成短暂弧线，不揭示目标本体。
+  private readonly soundRippleSystem = new SoundRippleSystem();
+  // 玩家自己的听觉判定与敌人共用同一套传感器；每个事件只消费一次。
+  private readonly playerHearing = new HearingSensor();
   // 地图外的毛玻璃与“无法通行”水印
   private readonly boundaryOverlay = new MapBoundaryOverlay();
   // 拾取飘字：在角色身边蹦出 "金块+N" / "HP+5"，1 秒后淡出
@@ -675,6 +681,43 @@ export class GameScene extends Scene {  private player!: Player;
       this.forgetPendingCluckStop(cluck.handle);
       return false;
     });
+  }
+
+  /**
+   * 玩家听得见的声音变成迷雾上的短暂提示：听见不等于看见。
+   * 位置经过轻微模糊，玩家能判断大致方向，但不能靠弧心精确射击黑暗里的目标。
+   */
+  private updateSoundRipples(delta: number): void {
+    this.soundRippleSystem.update(delta);
+    const px = this.player.x + this.player.getSize() / 2;
+    const py = this.player.y + this.player.getSize() / 2;
+    const heard = this.playerHearing.poll(this.map, { id: "player", x: px, y: py },
+      this.noiseSystem.getEvents());
+    for (const stimulus of heard) {
+      // 自己的脚步与枪声不需要提示：位置本来就知道。
+      if (stimulus.sourceId === "player") continue;
+      const chicken = this.findChickenBySoundId(stimulus.sourceId);
+      // 已完整看见的目标不再重复画声音提示；只看见剪影时仍保留，避免信息突然断档。
+      if (chicken && this.perception && this.getEntityVisibility(chicken) === "identified") continue;
+      const cue = SoundRippleSystem.resolveCue(stimulus.x, stimulus.y,
+        stimulus.distance, stimulus.occluded, stimulus.eventId);
+      this.soundRippleSystem.spawn({
+        x: cue.x,
+        y: cue.y,
+        strength: stimulus.strength,
+        distance: stimulus.distance,
+        occluded: stimulus.occluded,
+        eventId: stimulus.eventId,
+      });
+    }
+  }
+
+  private findChickenBySoundId(sourceId: string | undefined): Chicken | undefined {
+    if (!sourceId) return undefined;
+    for (const chicken of this.chickens) {
+      if (this.getChickenSoundId(chicken) === sourceId) return chicken;
+    }
+    return undefined;
   }
 
   /**
@@ -1370,6 +1413,9 @@ export class GameScene extends Scene {  private player!: Player;
     this.activeClucks.forEach(cluck => cluck.handle.stop(0));
     this.activeClucks.length = 0;
     this.pendingCluckStops.length = 0;
+    // 声音提示与听觉水位都是本局状态：重进场景不继承上一局的弧线与去重表。
+    this.soundRippleSystem.clear();
+    this.playerHearing.reset();
     // 冷却表跟着场景一起丢弃，重进场景时不继承上一局的叫声节奏。
     this.chickenCluckCooldowns.clear();
     this.game?.input?.setPointerEnabled(false);
@@ -1496,6 +1542,8 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 感知先于按键与交互结算：拾取系统只使用本帧的可见性结果，不读上一帧。
     this.updatePerception(delta);
+    // 声音提示只消费世界噪声事件，不参与感知，也不会被感知遮罩擦掉。
+    this.updateSoundRipples(delta);
 
     // R 键换弹同样只认下沿，按住不会反复起手。
     const reloadDown = input.isKeyDown("r");
@@ -2043,6 +2091,8 @@ export class GameScene extends Scene {  private player!: Player;
     // 三层模式下它会被感知遮罩压暗，所以移到遮蔽之后绘制。
     if (!threeLayer) {
       this.boundaryRippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
+      // 声音提示画在迷雾与光照之后，作为“听见了但没看见”的玩家信息，不擦除迷雾。
+      this.soundRippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     }
     // 枪口火焰在光照之后绘制：它本身是光源，不能陪场景一起被乘暗。
     this.player.drawMuzzleFlash(ctx, cameraOffset.x, cameraOffset.y);
@@ -2088,6 +2138,9 @@ export class GameScene extends Scene {  private player!: Player;
       }
       // 边界反馈是玩法信号，放在遮蔽之后，避免在未探索区域被压黑。
       this.boundaryRippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y,
+        ctx.canvas.width, ctx.canvas.height);
+      // 声音提示同样在迷雾合成之后绘制：黑暗里只给出方向与大致距离，不揭示目标。
+      this.soundRippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y,
         ctx.canvas.width, ctx.canvas.height);
     }
     this.player.drawUI(ctx, cameraOffset.x, cameraOffset.y);

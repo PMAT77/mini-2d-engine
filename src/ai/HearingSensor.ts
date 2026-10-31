@@ -45,9 +45,8 @@ export class HearingSensor {
       let gain = computeAudibleGain(distance, event.radius);
       if (gain <= 0) continue;
 
-      if (map && !hasLineOfSight(map, listener.x, listener.y, event.x, event.y)) {
-        gain *= this.rules.wallAttenuation;
-      }
+      const occluded = !!map && !hasLineOfSight(map, listener.x, listener.y, event.x, event.y);
+      if (occluded) gain *= this.rules.wallAttenuation;
 
       const strength = event.loudness * gain;
       if (strength < threshold) continue;
@@ -62,6 +61,7 @@ export class HearingSensor {
         noiseKind: event.kind,
         distance,
         gain,
+        occluded,
         age: event.age,
       });
       // 只有真正可闻的事件才推进水位：后进入听觉范围的事件仍能被消费。

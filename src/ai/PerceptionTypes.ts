@@ -22,6 +22,8 @@ export interface SoundStimulus extends Stimulus {
   readonly distance: number;
   /** 经过距离与墙体衰减后的增益（0–1），不含原始响度。 */
   readonly gain: number;
+  /** 声源与监听者之间是否被墙挡住：玩家提示据此放大位置不确定性。 */
+  readonly occluded: boolean;
   /** 事件已存在的时间（秒）。 */
   readonly age: number;
 }
