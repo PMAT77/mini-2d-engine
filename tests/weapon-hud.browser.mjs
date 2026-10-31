@@ -20,6 +20,15 @@ async function openGame({ dpr = 1, width = 1100, height = 800, failImages = fals
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  // 记录所有真正播放过的音频地址：切枪/手电的咔嗒声要能在浏览器里验到。
+  await page.addInitScript(() => {
+    window.__sfxPlays = [];
+    const original = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function patchedPlay(...args) {
+      try { window.__sfxPlays.push(this.src || ''); } catch { /* 忽略读取失败 */ }
+      return original.apply(this, args);
+    };
+  });
   if (failImages) {
     // 素材故障：让 HUD 的可选装饰图全部 404，验证矢量回退与布局不依赖加载结果。
     await page.route('**/assets/images/weapons/*.png', route => route.abort());
@@ -123,6 +132,8 @@ async function openGame({ dpr = 1, width = 1100, height = 800, failImages = fals
       },
       setAmmo(magazineAmmo, chambered) { scene.player.setDebugState({ magazineAmmo, chambered }); },
       reload() { scene.player.requestReload(); },
+      plays() { return (window.__sfxPlays || []).slice(); },
+      clearPlays() { window.__sfxPlays = []; },
       listLayout() {
         const { width, height } = this.size();
         return window.hudModules.list.getWeaponListLayout(width, height);
@@ -368,8 +379,13 @@ try {
     assert.equal(await page.evaluate(() => hudTest.activeSlot()), 'melee', 'Q/E 不得切枪');
 
     // Tab 回到手枪，再 Tab 切到冲锋枪；切枪第一帧就要用新顺序且从对面出发。
+    await page.evaluate(() => hudTest.clearPlays());
     await press('Tab', 0.3);
     assert.equal((await status()).rows[0].slot, 'secondary');
+    assert.ok(
+      (await page.evaluate(() => hudTest.plays())).some(url => url.endsWith('/audio/flashlight/switch.mp3')),
+      'Tab 切枪应播放机械咔嗒声',
+    );
     await page.keyboard.down('Tab');
     await page.evaluate(() => hudTest.step(1 / 60));
     await page.keyboard.up('Tab');
@@ -438,6 +454,7 @@ try {
       '/audio/weapons/Fire/01_Pistol_Type1_Fire.wav',
       '/audio/weapons/Reload/Type_5/Pistol_Reload_Type_5_Full.wav',
       '/audio/weapons/Reload/Type_1/Pistol_Reload_Type_1_Full.wav',
+      '/audio/flashlight/switch.mp3',
     ]) {
       const ok = await page.evaluate(url => fetch(url).then(response => response.status), sound);
       assert.equal(ok, 200, `${sound} should be served`);

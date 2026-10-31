@@ -91,8 +91,8 @@ const CHICKEN_CLUCK_SOUNDS = [
 /** 拾取：肉块只留入口的第一口撕咬（采样已裁到 0.75 秒），金块是一声硬币落袋的清脆响。 */
 const MEAT_PICKUP_SOUND = "/audio/pickups/meat.wav";
 const GOLD_PICKUP_SOUND = "/audio/pickups/gold.wav";
-/** 手电筒开关的机械轻响，开灯和关灯都播这一声。 */
-const FLASHLIGHT_SWITCH_SOUND = "/audio/flashlight/switch.mp3";
+/** 机械咔嗒声：手电开关（开灯、关灯都播）与 Tab 切枪共用同一段采样。 */
+const SWITCH_CLICK_SOUND = "/audio/flashlight/switch.mp3";
 
 
 
@@ -1518,7 +1518,7 @@ export class GameScene extends Scene {  private player!: Player;
       this.flashlightOn = !this.flashlightOn;
       this.flashlight.setActive(this.flashlightOn);
       // 开关共用一声轻响；单声部保证快速连按时只留最后一次的尾音。
-      this.sfx.play(FLASHLIGHT_SWITCH_SOUND, this.volume(this.audio.flashlight.switchVolume), 1, { count: 1 });
+      this.sfx.play(SWITCH_CLICK_SOUND, this.volume(this.audio.flashlight.switchVolume), 1, { count: 1 });
     }
     this.flashlightHeld = flashlightDown;
 
@@ -1580,6 +1580,8 @@ export class GameScene extends Scene {  private player!: Player;
     if (tabDown && !this.tabHeld) {
       this.player.cycleFirearm(1);
       this.weaponSwitchedThisFrame = true;
+      // 与手电开关同一声轻响；单声部保证快速连按时只留最后一次的尾音。
+      this.sfx.play(SWITCH_CLICK_SOUND, this.volume(this.audio.weapon.switchVolume), 1, { count: 1 });
     }
     this.tabHeld = tabDown;
     const cDown = input.isKeyDown("c");

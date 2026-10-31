@@ -1,7 +1,7 @@
 /** 音效配置：音量 0–1，master 作为全局倍率乘到所有播放上。 */
 export interface AudioConfig {
   master: number;
-  weapon: { secondaryVolume: number; primaryVolume: number; reloadVolume: number };
+  weapon: { secondaryVolume: number; primaryVolume: number; reloadVolume: number; switchVolume: number };
   footsteps: { waterVolume: number; dryVolume: number };
   pickups: { goldVolume: number; meatVolume: number };
   flashlight: { switchVolume: number };
@@ -10,7 +10,7 @@ export interface AudioConfig {
 
 export const DEFAULT_AUDIO_CONFIG: AudioConfig = {
   master: 1,
-  weapon: { secondaryVolume: 0.6, primaryVolume: 0.55, reloadVolume: 0.5 },
+  weapon: { secondaryVolume: 0.6, primaryVolume: 0.55, reloadVolume: 0.5, switchVolume: 0.5 },
   footsteps: { waterVolume: 0.45, dryVolume: 0.45 },
   pickups: { goldVolume: 0.4, meatVolume: 0.5 },
   flashlight: { switchVolume: 0.5 },
@@ -63,10 +63,11 @@ export function parseAudioConfig(value: unknown): AudioConfig {
   if (value.master !== undefined) result.master = volume(value.master, "master");
 
   const weapon = group(value, "weapon");
-  rejectUnknown(weapon, "weapon.", ["secondaryVolume", "primaryVolume", "reloadVolume"]);
+  rejectUnknown(weapon, "weapon.", ["secondaryVolume", "primaryVolume", "reloadVolume", "switchVolume"]);
   if (weapon.secondaryVolume !== undefined) result.weapon.secondaryVolume = volume(weapon.secondaryVolume, "weapon.secondaryVolume");
   if (weapon.primaryVolume !== undefined) result.weapon.primaryVolume = volume(weapon.primaryVolume, "weapon.primaryVolume");
   if (weapon.reloadVolume !== undefined) result.weapon.reloadVolume = volume(weapon.reloadVolume, "weapon.reloadVolume");
+  if (weapon.switchVolume !== undefined) result.weapon.switchVolume = volume(weapon.switchVolume, "weapon.switchVolume");
 
   const footsteps = group(value, "footsteps");
   rejectUnknown(footsteps, "footsteps.", ["waterVolume", "dryVolume"]);

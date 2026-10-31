@@ -177,6 +177,7 @@ export const CONFIG_CONTROLS: ConfigControl[] = [
   audioNumber("weapon", "secondaryVolume", "weapon", "格洛克枪声", 0, 0.05, { max: 1 }),
   audioNumber("weapon", "primaryVolume", "weapon", "冲锋枪枪声", 0, 0.05, { max: 1 }),
   audioNumber("weapon", "reloadVolume", "weapon", "换弹声", 0, 0.05, { max: 1 }),
+  audioNumber("weapon", "switchVolume", "weapon", "切枪声", 0, 0.05, { max: 1 }),
   audioNumber("footsteps", "waterVolume", "footsteps", "涉水脚步", 0, 0.05, { max: 1 }),
   audioNumber("footsteps", "dryVolume", "footsteps", "干地脚步", 0, 0.05, { max: 1 }),
   audioNumber("pickups", "goldVolume", "pickups", "金块拾取", 0, 0.05, { max: 1 }),

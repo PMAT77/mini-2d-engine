@@ -3,7 +3,8 @@
   "weapon": {
     "secondaryVolume": 0.6,
     "primaryVolume": 0.55,
-    "reloadVolume": 0.5
+    "reloadVolume": 0.5,
+    "switchVolume": 0.5
   },
   "footsteps": {
     "waterVolume": 0.45,
