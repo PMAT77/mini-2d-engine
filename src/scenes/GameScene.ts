@@ -242,6 +242,8 @@ export class GameScene extends Scene {  private player!: Player;
   /** 拾取提示纯视觉层；不参与按键判断与结算。 */
   private readonly pickupPrompt = new PickupPromptRenderer();
   private promptTime = 0;
+  /** 本帧完成拾取的屏幕反馈锚点（世界坐标），只用于很短的完成动画。 */
+  private completedPickupFeedback: { x: number; y: number } | null = null;
   /** 本帧开火/切枪：与翻滚一起作为交互取消信号。 */
   private shotThisFrame = false;
   private weaponSwitchedThisFrame = false;
@@ -885,6 +887,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.promptTime += delta;
     this.pickupCandidates = [];
     this.pickupMarkers = [];
+    this.completedPickupFeedback = null;
 
     if (!this.interactionEnabled) {
       // 场景已退出：清空进度，不处理任何按键，也不产生结算。
@@ -947,6 +950,9 @@ export class GameScene extends Scene {  private player!: Player;
     });
     if (result.completed) {
       const completed = result.completed;
+      const anchor = completed.getPickupAnchor();
+      // 完成反馈只读取锚点，不延迟移除与结算。
+      this.completedPickupFeedback = { x: anchor.x, y: anchor.y };
       this.collectMeatPickup(completed);
       // 同一帧完成拾取后，该物品不能再留下候选或高亮点。
       this.pickupCandidates = this.pickupCandidates.filter(c => c.target !== completed);
@@ -2005,8 +2011,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.floatingTexts.draw(ctx, cameraOffset.x, cameraOffset.y,
       (screenContext.canvas.width / textDpr) / this.camera.width);
     ctx.restore();
-    // 拾取标记与 E 提示：屏幕层、含震动的相机偏移、CSS 逻辑像素。
-    this.drawPickupPrompts(screenContext, cameraOffset);
+    // 黄金计数在 HUD 之前，保持原有层级。
     ctx.save();
     const dpr = window.devicePixelRatio || 1;
     ctx.scale(dpr, dpr);
@@ -2029,11 +2034,13 @@ export class GameScene extends Scene {  private player!: Player;
     // 手电胶囊贴在武器列表上方，与列表右缘对齐。
     drawFlashlightHud(ctx, getFlashlightHudRect(getWeaponListLayout(hudWidth, hudHeight).area), this.flashlightOn);
     ctx.restore();
+    // 拾取标记与 E 提示放在 HUD 之后：交互提示优先于静态信息，且布局已避让 HUD 区域。
+    this.drawPickupPrompts(screenContext, cameraOffset);
     this.updateCrosshair();
   }
 
   /**
-   * 高亮点、E 图标与进度环统一画在屏幕层；尺寸用 CSS 逻辑像素，
+   * 高亮点、E 横向提示与圆角矩形进度框统一画在屏幕层；尺寸用 CSS 逻辑像素，
    * 位置用含震动的相机偏移换算。显示权限已在 updateInteraction 里按感知过滤。
    */
   private drawPickupPrompts(
@@ -2042,31 +2049,87 @@ export class GameScene extends Scene {  private player!: Player;
   ): void {
     const dpr = window.devicePixelRatio || 1;
     const scale = (ctx.canvas.width / dpr) / this.camera.width;
+    const viewport = {
+      width: ctx.canvas.width / dpr,
+      height: ctx.canvas.height / dpr,
+    };
     const snapshot = this.interaction.getSnapshot();
 
-    const markers = this.pickupMarkers.map(entry => ({
-      x: (entry.marker.x - cameraOffset.x) * scale,
-      y: (entry.marker.y - cameraOffset.y) * scale,
-      style: entry.marker.style,
-    }));
+    const hud = getWeaponListLayout(viewport.width, viewport.height).area;
+    const flashlight = getFlashlightHudRect(hud);
+    const pad = (
+      rect: { x: number; y: number; width: number; height: number },
+      amount: number,
+    ) => ({
+      x: rect.x - amount,
+      y: rect.y - amount,
+      width: rect.width + amount * 2,
+      height: rect.height + amount * 2,
+    });
+    const obstacles = [pad(hud, 6), pad(flashlight, 4)];
+    // 提示也不该盖住角色本体：角色始终在物品附近，是稳定的避让对象。
+    const playerView = this.player.getVisionState();
+    const playerHalf = (GameScene.PLAYER_SIZE / 2) * scale + 2;
+    const playerX = (playerView.x - cameraOffset.x) * scale;
+    const playerY = (playerView.y - cameraOffset.y) * scale;
+    obstacles.push({
+      x: playerX - playerHalf,
+      y: playerY - playerHalf,
+      width: playerHalf * 2,
+      height: playerHalf * 2,
+    });
+
+    const markers = this.pickupMarkers.map(entry => {
+      const halfSize = (entry.target instanceof MeatPickup ? MeatPickup.SIZE : GoldPickup.SIZE) / 2;
+      return {
+        x: (entry.marker.x - cameraOffset.x) * scale,
+        y: (entry.marker.y - cameraOffset.y) * scale,
+        style: entry.marker.style,
+        halfHeight: halfSize * scale,
+        target: entry.target === snapshot.target,
+      };
+    });
 
     let prompt = null;
     if (snapshot.target && (snapshot.state === "focused" || snapshot.state === "holding")) {
       const anchor = snapshot.target.getPickupAnchor();
+      const halfSize = MeatPickup.SIZE / 2 * scale;
       prompt = {
         x: (anchor.x - cameraOffset.x) * scale,
         y: (anchor.y - cameraOffset.y) * scale,
+        halfWidth: halfSize,
+        halfHeight: halfSize,
         progress: snapshot.progress,
         holding: snapshot.state === "holding",
         label: INTERACTION_PROMPT_LABEL,
         // V1 提示本身就是通用“拾取”；剪影触觉拾取更不允许带物品信息。
         named: false,
+        key: snapshot.targetId ?? undefined,
       };
     }
 
+    const feedback = this.completedPickupFeedback
+      ? {
+        x: (this.completedPickupFeedback.x - cameraOffset.x) * scale,
+        y: (this.completedPickupFeedback.y - cameraOffset.y) * scale,
+      }
+      : null;
+
     ctx.save();
     ctx.scale(dpr, dpr);
-    this.pickupPrompt.draw(ctx, { markers, prompt }, this.promptTime);
+    this.pickupPrompt.draw(
+      ctx,
+      {
+        markers,
+        prompt,
+        feedback,
+        // 只在“刚完成拾取、物品已移除”时淡出；感知/墙体导致的消失没有淡出。
+        fadeOut: !!this.completedPickupFeedback,
+        viewport,
+        obstacles,
+      },
+      this.promptTime,
+    );
     ctx.restore();
   }
 
@@ -2085,6 +2148,7 @@ export class GameScene extends Scene {  private player!: Player;
       meatCount: this.meatPickups.length,
       promptTime: this.promptTime,
       interactionEnabled: this.interactionEnabled,
+      ui: this.pickupPrompt.getDebugState(),
     };
   }
 

@@ -38,6 +38,8 @@ try {
       // 固定地图与感知，避免种子生成的水/墙/火把随机影响采样。
       scene.map = new scene.map.constructor(60, 40, { generateWater: false });
       scene.map.tiles.forEach(row => row.fill('default'));
+      // 截图验收需要能看清肉块本体：交给环境光，不影响感知与交互判定。
+      scene.setAmbientLight('rgba(255, 255, 255, 0.45)');
       scene.perception = new scene.perception.constructor({
         map: scene.map,
         terrain: scene.map,
@@ -60,7 +62,11 @@ try {
         state() { return scene.getPickupDebugState(); },
         center() { const vision = scene.player.getVisionState(); return { x: vision.x, y: vision.y }; },
         health() { return scene.player.getHealth(); },
-        reset() { scene.meatPickups.length = 0; scene.goldPickups.length = 0; },
+        reset() {
+          scene.meatPickups.length = 0;
+          scene.goldPickups.length = 0;
+          scene.floatingTexts = new scene.floatingTexts.constructor();
+        },
         spawnMeat(worldX, worldY) {
           const meat = new window.meatModule.MeatPickup(worldX - 8, worldY - 8);
           scene.meatPickups.push(meat);
@@ -98,13 +104,16 @@ try {
           }
           return count;
         },
-        /** 进度环所在半径 23px 处四个轴向上的最大亮度（避开键帽四角）。 */
-        ringAxes(centerX, centerY) {
+        /** 只重绘，不推进游戏逻辑：用于验证相机偏移变化时的提示布局。 */
+        draw() { scene.draw(game.renderer.ctx); },
+        /** 进度框在 E 图标外 1.5px 处的左右边缘（图标中心为 box 原点 +12）。 */
+        frameEdges(box) {
+          const centerX = box.x + 12;
+          const centerY = box.y + 12;
+          const edge = 14.5;
           return {
-            right: this.maxBrightness(centerX + 23, centerY, 1),
-            left: this.maxBrightness(centerX - 23, centerY, 1),
-            top: this.maxBrightness(centerX, centerY - 23, 1),
-            bottom: this.maxBrightness(centerX, centerY + 23, 1),
+            right: this.maxBrightness(centerX + edge, centerY, 1),
+            left: this.maxBrightness(centerX - edge, centerY, 1),
           };
         },
       };
@@ -148,10 +157,10 @@ try {
     state = await page.evaluate(() => pickupTest.state());
     assert.equal(state.markerCount, 1, 'identified loot inside discoveryRadius shows a marker');
     assert.equal(state.candidateCount, 0, 'loot outside interactionRadius is not interactable');
-    let markerPoint = await page.evaluate(([x, y]) => {
-      const point = pickupTest.screen(x, y);
-      return { x: point.x, y: point.y - 18 };
-    }, [state.markers[0].x, state.markers[0].y]);
+    let markerPoint = await page.evaluate(() => {
+      const marker = pickupTest.state().ui.markers[0];
+      return { x: marker.x, y: marker.y };
+    });
     let markerBrightness = await page.evaluate(([x, y]) => pickupTest.maxBrightness(x, y, 3), [markerPoint.x, markerPoint.y]);
     assert.ok(markerBrightness > brightness([150, 150, 150]), `the white dot should be drawn, got ${markerBrightness}`);
     await page.screenshot({ path: `${output}/pickup-marker-dpr${dpr}.png` });
@@ -164,33 +173,43 @@ try {
     assert.equal(state.state, 'focused');
     assert.equal(state.candidateCount, 1);
     assert.equal(state.markerCount, 1);
-    const promptWorld = await page.evaluate(() => {
-      const markers = pickupTest.state().markers;
-      return { x: markers[0].x, y: markers[0].y };
-    });
-    const iconPoint = await page.evaluate(([x, y]) => {
-      const point = pickupTest.screen(x, y);
-      return { x: point.x, y: point.y - 34 };
-    }, [promptWorld.x, promptWorld.y]);
-    const iconPixels = await page.evaluate(([x, y]) => pickupTest.brightCount(x - 20, y - 20, 40, 40, 170), [iconPoint.x, iconPoint.y]);
+    // 提示有 0.13s 淡入：等它完全出现后再采样像素，避免把淡入误判成缺失。
+    await step(8);
+    state = await page.evaluate(() => pickupTest.state());
+    const focusedUi = state.ui;
+    const itemPoint = await page.evaluate(() => pickupTest.screen(pickupTest.state().targetX, pickupTest.state().targetY));
+    assert.equal(focusedUi.promptSide, 'right', 'the E prompt prefers the right side of the item');
+    assert.ok(focusedUi.promptBox.width > 26, 'the prompt box contains the keycap and the 拾取 text');
+    assert.ok(focusedUi.promptBox.x >= itemPoint.x + 8, 'the prompt clears the item body');
+    assert.ok(focusedUi.promptBox.x + focusedUi.promptBox.width <= 1100 - 8, 'the prompt stays inside the screen');
+    assert.ok(focusedUi.promptBox.y + focusedUi.promptBox.height <= 800 - 8, 'the prompt stays inside the screen');
+    assert.ok(focusedUi.textCenter.x > focusedUi.promptBox.x + 26, 'the text follows the keycap horizontally');
+    const dotPoint = { x: focusedUi.markers[0].x, y: focusedUi.markers[0].y };
+    const dotInsidePrompt = dotPoint.x >= focusedUi.promptBox.x
+      && dotPoint.x <= focusedUi.promptBox.x + focusedUi.promptBox.width
+      && dotPoint.y >= focusedUi.promptBox.y
+      && dotPoint.y <= focusedUi.promptBox.y + focusedUi.promptBox.height;
+    assert.equal(dotInsidePrompt, false, 'the prompt must not cover the highlight dot');
+    const iconPixels = await page.evaluate(
+      ([box]) => pickupTest.brightCount(box.x + 2, box.y + 2, 22, 22, 170),
+      [focusedUi.promptBox],
+    );
     assert.ok(iconPixels > 100, `the E keycap should be drawn, got ${iconPixels} bright pixels`);
-    const ringIdle = await page.evaluate(([x, y]) => pickupTest.ringAxes(x, y), [iconPoint.x, iconPoint.y]);
+    const frameIdle = await page.evaluate(([box]) => pickupTest.frameEdges(box), [focusedUi.promptBox]);
     await page.screenshot({ path: `${output}/pickup-prompt-dpr${dpr}.png` });
 
-    // 4) 按住 0.25s：进度 50%，白色环从 12 点方向顺时针出现。
+    // 4) 按住 0.25s：进度 50%，白色描边沿键帽外圆角矩形从顶部中点半圈推进。
     await page.keyboard.down('e');
     await step(15);
     state = await page.evaluate(() => pickupTest.state());
     assert.equal(state.state, 'holding');
     assert.ok(Math.abs(state.progress - 0.5) < 0.02, `expected 50% progress, got ${state.progress}`);
-    const ringHold = await page.evaluate(([x, y]) => pickupTest.ringAxes(x, y), [iconPoint.x, iconPoint.y]);
-    for (const axis of ['right', 'top']) {
-      assert.ok(ringHold[axis] > ringIdle[axis] + 8,
-        `the white arc should brighten the ${axis} side (${ringIdle[axis]} -> ${ringHold[axis]})`);
-    }
-    assert.ok(ringHold.right > 240, `the arc should be pure white at the right side, got ${ringHold.right}`);
-    assert.ok(ringHold.right > ringHold.left + 10,
-      `only the right half is filled at 50% (right ${ringHold.right}, left ${ringHold.left})`);
+    const frameHold = await page.evaluate(([box]) => pickupTest.frameEdges(box), [state.ui.promptBox]);
+    assert.ok(frameHold.right > frameIdle.right + 30,
+      `the filled edge should brighten versus the idle frame (${frameIdle.right} -> ${frameHold.right})`);
+    assert.ok(frameHold.right > 200, `the progress stroke should be near white, got ${frameHold.right}`);
+    assert.ok(frameHold.right > frameHold.left + 20,
+      `only the right half is filled at 50% (right ${frameHold.right}, left ${frameHold.left})`);
     await page.screenshot({ path: `${output}/pickup-ring-half-dpr${dpr}.png` });
 
     // 5) 相机震动后标记仍跟物品对齐（位置换算必须使用含震动的 getOffset）。
@@ -203,9 +222,16 @@ try {
     assert.equal(state.candidateCount, 0, 'a collected item must not leave a prompt candidate');
     const healthAfter = await page.evaluate(() => pickupTest.health());
     assert.equal(healthAfter, healthBefore + 5, `meat heals 5 HP, ${healthBefore} -> ${healthAfter}`);
+    // 完成拾取后提示短暂淡出，而不是硬切。
+    const fading = await page.evaluate(() => pickupTest.state());
+    assert.ok(fading.ui.promptBox, 'the prompt starts fading out instead of vanishing instantly');
+    assert.ok(fading.ui.promptFade < 1, 'the fading prompt is already partially transparent');
     await page.keyboard.up('e');
     await step(1);
     await page.screenshot({ path: `${output}/pickup-collected-dpr${dpr}.png` });
+    await step(10);
+    const faded = await page.evaluate(() => pickupTest.state());
+    assert.equal(faded.ui.promptBox, null, 'the prompt is fully gone after the fade');
 
     // 6) 提前松开取消进度，且松开当帧仍保留提示。
     await page.evaluate(([cx, cy]) => pickupTest.spawnMeat(cx + 50, cy), [origin.x, origin.y]);
@@ -258,10 +284,10 @@ try {
     state = await page.evaluate(() => pickupTest.state());
     assert.equal(state.markerCount, 1, 'gold still shows its calm gold marker');
     assert.equal(state.candidateCount, 0, 'gold never enters the E interaction candidates');
-    const goldMarkerPoint = await page.evaluate(([x, y]) => {
-      const point = pickupTest.screen(x, y);
-      return { x: point.x, y: point.y - 18 };
-    }, [state.markers[0].x, state.markers[0].y]);
+    const goldMarkerPoint = await page.evaluate(() => {
+      const marker = pickupTest.state().ui.markers[0];
+      return { x: marker.x, y: marker.y };
+    });
     assert.ok(await page.evaluate(([x, y]) => pickupTest.maxBrightness(x, y, 3), [goldMarkerPoint.x, goldMarkerPoint.y]) > 100);
     // 换一块直接落在玩家身上的黄金：散落动画结束后由碰撞自动收集，不需要按 E。
     await page.evaluate(([cx, cy]) => {
@@ -284,8 +310,8 @@ try {
       const state = pickupTest.state();
       const offset = pickupTest.scene.camera.getOffset();
       const camera = pickupTest.scene.camera;
-      const point = pickupTest.screen(state.markers[0].x, state.markers[0].y);
-      return { x: point.x, y: point.y - 18, offsetX: offset.x - camera.x, offsetY: offset.y - camera.y };
+      const point = pickupTest.state().ui.markers[0];
+      return { x: point.x, y: point.y, offsetX: offset.x - camera.x, offsetY: offset.y - camera.y };
     });
     assert.ok(Math.hypot(shaken.offsetX, shaken.offsetY) > 3,
       `camera shake should be active, got ${shaken.offsetX},${shaken.offsetY}`);
@@ -315,6 +341,79 @@ try {
         `${fps} FPS: pickup took ${elapsed.toFixed(3)}s, expected 0.5s ± one frame`);
       await page.evaluate(() => pickupTest.reset());
     }
+
+    // 12) 提示淡入：首次锁定目标时从透明平滑出现，而不是硬切。
+    await page.evaluate(([cx, cy]) => {
+      pickupTest.reset();
+      pickupTest.spawnMeat(cx + 50, cy);
+    }, [origin.x, origin.y]);
+    let firstFocused = null;
+    for (let frame = 0; frame < 40 && !firstFocused; frame += 1) {
+      await step(1);
+      const snapshot = await page.evaluate(() => pickupTest.state());
+      if (snapshot.state === 'focused') firstFocused = snapshot;
+    }
+    assert.ok(firstFocused, 'the meat should become focused after landing');
+    assert.ok(firstFocused.ui.promptFade > 0 && firstFocused.ui.promptFade < 0.6,
+      `the prompt should fade in, got ${firstFocused.ui.promptFade}`);
+    await step(10);
+    const settledPrompt = await page.evaluate(() => pickupTest.state());
+    assert.ok(settledPrompt.ui.promptFade >= 0.99, 'the prompt reaches full opacity');
+    assert.equal(settledPrompt.ui.promptSide, 'right');
+    await page.evaluate(() => pickupTest.reset());
+
+    // 13) 密集掉落：高亮点保留但重叠的弱化，完整 E 提示仍然只有一个。
+    await page.evaluate(([cx, cy]) => {
+      pickupTest.reset();
+      pickupTest.spawnMeat(cx + 50, cy);
+      pickupTest.spawnMeat(cx + 56, cy);
+    }, [origin.x, origin.y]);
+    await step(20);
+    // 淡入结束后再截图，避免把 0.13s 的过渡当成最终视觉。
+    await step(8);
+    state = await page.evaluate(() => pickupTest.state());
+    assert.equal(state.markerCount, 2, 'both drops keep a highlight dot');
+    assert.ok(state.candidateCount >= 1, 'the nearby drops are interactable candidates');
+    const weakMarkers = state.ui.markers.filter(marker => marker.secondary).length;
+    assert.ok(weakMarkers >= 1, 'overlapping dots are weakened instead of stacking into one bright blob');
+    assert.equal(state.ui.markers.filter(marker => marker.target).length, 1,
+      'exactly one drop is the locked target');
+    assert.ok(state.ui.promptBox, 'exactly one full E prompt is drawn');
+    await page.screenshot({ path: `${output}/pickup-cluster-dpr${dpr}.png` });
+
+    // 14) 贴边自适应：目标靠近右缘时提示翻到左侧并留在屏幕内，方向保持稳定。
+    await page.evaluate(([cx, cy]) => {
+      pickupTest.reset();
+      pickupTest.spawnMeat(cx + 50, cy);
+    }, [origin.x, origin.y]);
+    await step(20);
+    await step(8);
+    const edgeState = await page.evaluate(() => {
+      const scene = pickupTest.scene;
+      const camera = scene.camera;
+      const d = window.devicePixelRatio || 1;
+      const canvas = window.pickupGame.renderer.ctx.canvas;
+      const scale = (canvas.width / d) / camera.width;
+      const snapshot = pickupTest.state();
+      const anchor = pickupTest.screen(snapshot.targetX, snapshot.targetY);
+      // 目标放到右下角：右侧出界，左侧会压住角色，布局应回退到上方。
+      camera.x += (anchor.x - 1055) / scale;
+      camera.y += (anchor.y - 660) / scale;
+      pickupTest.draw();
+      return pickupTest.state();
+    });
+    assert.equal(edgeState.ui.promptSide, 'above',
+      'both horizontal sides blocked: the prompt falls back above the item');
+    assert.ok(edgeState.ui.promptBox.x >= 8, 'the flipped prompt stays inside the screen');
+    assert.ok(edgeState.ui.promptBox.x + edgeState.ui.promptBox.width <= 1092);
+    assert.ok(edgeState.ui.promptBox.y >= 8);
+    assert.ok(edgeState.ui.promptBox.y + edgeState.ui.promptBox.height <= 792);
+    const stableSide = await page.evaluate(() => {
+      pickupTest.draw();
+      return pickupTest.state().ui.promptSide;
+    });
+    assert.equal(stableSide, 'above', 'the prompt keeps its side while the target is locked');
+    await page.screenshot({ path: `${output}/pickup-edge-dpr${dpr}.png` });
 
     assert.deepEqual(errors, [], `page errors: ${errors.join('; ')}`);
     scenarios += 1;
