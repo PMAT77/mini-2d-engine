@@ -3,6 +3,7 @@ import { Input } from "../core/Input";
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { Collider, ColliderShape, Contact, DEFAULT_SHAPE, Point, compileShape, isRotationInvariant, transformCollider } from "../physics/Collider";
+import type { MotionResult } from "../physics/Motion";
 
 const defaultCollider = compileShape(DEFAULT_SHAPE);
 const normalizeAngle = (angle: number) => ((angle + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
@@ -12,6 +13,8 @@ const normalizeAngle = (angle: number) => ((angle + Math.PI) % (2 * Math.PI) + 2
  * 包含移动、旋转、碰撞检测等核心功能
  */
 export abstract class Entities extends GameObject {
+  private motionResolver?: (body: Collider, movement: Point, rotation: number) => MotionResult;
+  public setMotionResolver(resolver?: (body: Collider, movement: Point, rotation: number) => MotionResult): void { this.motionResolver = resolver; }
   private colliderShape = defaultCollider;
   private collisionContacts: Contact[] = [];
   /** Last legal pose's terrain factor, independent of sprint and stat modifiers. */
@@ -241,7 +244,7 @@ export abstract class Entities extends GameObject {
 
   protected moveAndRotate(movement: Point, angle: number, map?: TileMap): void {
     if (!map) { this.x += movement.x; this.y += movement.y; this.currentRotation = normalizeAngle(this.currentRotation + angle); return; }
-    const before = this.getCollider(), result = map.resolveMotion(before, movement, angle);
+    const before = this.getCollider(), result = this.motionResolver?.(before, movement, angle) ?? map.resolveMotion(before, movement, angle);
     this.x = result.collider.pose.x - this.size / 2;
     this.y = result.collider.pose.y - this.size / 2;
     this.currentRotation = normalizeAngle(this.currentRotation + result.collider.pose.rotation - before.pose.rotation);

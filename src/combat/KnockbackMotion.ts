@@ -53,7 +53,8 @@ export class KnockbackMotion {
   private active = false;
   private lastAppliedSpeed = 0;
 
-  constructor(private readonly host: KnockbackHost, private readonly world: KnockbackWorld, profile: KnockbackProfile) {
+  constructor(private readonly host: KnockbackHost, private readonly world: KnockbackWorld, profile: KnockbackProfile,
+    private readonly canOccupy?: (collider: Collider) => boolean) {
     this.profile = validateKnockbackProfile(profile);
     const size = host.getSize();
     if (!Number.isFinite(size) || size <= 0) throw new Error("无效击退宿主: 尺寸必须是正有限数值");
@@ -201,6 +202,7 @@ export class KnockbackMotion {
   }
 
   private isDry(collider: Collider): boolean {
+    if (this.canOccupy) return this.canOccupy(collider);
     const factor = this.world.getShapeSpeedFactor(collider);
     return Number.isFinite(factor) && Math.abs(factor - 1) <= DRY_TOLERANCE;
   }

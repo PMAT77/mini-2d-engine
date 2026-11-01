@@ -3,6 +3,7 @@ import { Input } from "../core/Input";
 import { Scene } from "../core/Scene";
 import { MenuScene } from "./MenuScene";
 import { resolveFirstDamageableHit } from "../combat/HitTargetResolver";
+import { ActorCollisionWorld } from "../physics/ActorCollisionWorld";
 import { TileMap, TileMapOptions } from "../map/TileMap";
 // 世界几何（实心地形轮廓）由 TileMap 统一提供，绘制时不再直接遍历多边形。
 import { TileTypeId, getTileType } from "../map/TileType";
@@ -159,7 +160,15 @@ function resolveVisionDebugLayer(): VisionDebugLayer | null {
 /**
  * 游戏主场景类，负责管理游戏的核心逻辑、渲染和交互
  */
+export interface GameSceneOptions extends TileMapOptions {
+  map?: TileMap;
+  /** Top-left player position, applied before radius-safe encounter generation. */
+  playerSpawn?: { x: number; y: number };
+  encounters?: { shambler?: number; runner?: number; vaccines?: number };
+}
+
 export class GameScene extends Scene {  private player!: Player;
+  private readonly actorWorld: ActorCollisionWorld;
   private deathAcknowledged = false;
   private deathEnterHeld = true;
   private chickens: Chicken[] = [];
@@ -348,13 +357,14 @@ export class GameScene extends Scene {  private player!: Player;
   /**
    * 构造函数
    */
-  constructor(mapOptions?: TileMapOptions) {
+  constructor(private readonly sceneOptions: GameSceneOptions = {}) {
     super();
     this.visionMode = resolveVisionMode();
     this.visionDebugLayer = resolveVisionDebugLayer();
 
     // 100×100 个瓦片，每格 50 像素
-    this.map = new TileMap(100, 100, mapOptions);
+    this.map = sceneOptions.map ?? new TileMap(100, 100, sceneOptions);
+    this.actorWorld = new ActorCollisionWorld(this.map);
     if (this.visionMode === "three-layer") {
       this.perception = new PerceptionSystem({
         map: this.map,
@@ -404,7 +414,9 @@ export class GameScene extends Scene {  private player!: Player;
       Math.max(0, Math.min(deadZoneTop, this.map.height * this.map.tileSize - deadZoneHeight)),
       Math.min(deadZoneWidth, this.map.width * this.map.tileSize),
       Math.min(deadZoneHeight, this.map.height * this.map.tileSize), GameScene.PLAYER_SIZE, { type: "circle", radius: 0.5 });
-    this.player = new Player(spawn.x, spawn.y, undefined, this.particleSystem);
+    this.player = new Player(sceneOptions.playerSpawn?.x ?? spawn.x, sceneOptions.playerSpawn?.y ?? spawn.y, undefined, this.particleSystem);
+    this.actorWorld.register("player", this.player);
+    this.player.setMotionResolver((body, move, rotation) => this.actorWorld.resolve("player", body, move, rotation));
     // 子弹自然落地时尝试在干燥地面留下弹坑。
     this.player.setOnBulletLanded((x, y) => this.craterSystem.spawn(x, y, this.map));
     // 移动时在干燥地面留下脚印；涉水时改写为朝行进反方向扩散的涟漪。
@@ -448,7 +460,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.flashlight.setInnerRadius(torch.innerRadius, torch.innerFade);
     this.lightingSystem.addLightSource(this.flashlight);
 
-    this.torches = Torch.generate(this.map, mapOptions?.seed === undefined ? Math.random : seededRandom(mapOptions.seed ^ 0x746f7263));
+    this.torches = Torch.generate(this.map, sceneOptions.seed === undefined ? Math.random : seededRandom(sceneOptions.seed ^ 0x746f7263));
     this.torches.forEach(torch => this.lightingSystem.addLightSource(torch.light));
 
     // 小鸡围绕出生点随机生成，平时只在干地上自由活动；属于单位层，会被迷雾裁剪。
@@ -1420,6 +1432,7 @@ export class GameScene extends Scene {  private player!: Player;
 
   onExit(): void {
     this.active = false;
+    this.actorWorld.clear();
     // 循环音效不会自己停，离开场景时立即收掉，免得声音跟着残留。
     this.sfx.stopLoops();
     // 换弹声也要跟着停，否则重进场景后还会响到采样结束。
@@ -1488,6 +1501,7 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 更新玩家状态
     const prevX = this.player.x, prevY = this.player.y;
+    this.actorWorld.sync();
     this.player.update(delta, input, this.map, this.getPointerAim(input));
     // 换弹完成、被翻滚打断或切走时收掉没放完的换弹声，别压到下面那声枪响。
     if (this.reloadVoice && !this.player.getWeaponView().isReloading) {

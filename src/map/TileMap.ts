@@ -63,6 +63,10 @@ interface TerrainConfig {
  * 管理游戏中的地图数据、碰撞检测、渲染等功能
  */
 export class TileMap {
+  private navigationRevision = 0;
+  getNavigationRevision(): number { return this.navigationRevision; }
+  /** Call after directly editing tiles, tileSize or terrain movement costs. */
+  invalidateNavigation(): void { this.navigationRevision++; }
   readonly water?: WaterTerrain;
   tileSize = 50;                    // 瓦片大小（像素）
   width: number;                    // 地图宽度（瓦片数）
@@ -857,7 +861,8 @@ export class TileMap {
   breakTile(col: number, row: number) {
     if (row >= 0 && col >= 0 && row < this.height && col < this.width) {
       const type = this.tiles[row][col];
-      this.tiles[row][col] = TileTypeId.DEFAULT;
+    this.tiles[row][col] = TileTypeId.DEFAULT;
+    this.invalidateNavigation();
       this.tileHp[row][col] = 0; // 血量清零
       this.tileHighlight[row][col] = 0;
       this.mineralDamage.delete(row * this.width + col);
