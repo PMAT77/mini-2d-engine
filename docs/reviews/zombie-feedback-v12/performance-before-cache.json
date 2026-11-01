@@ -1,0 +1,1646 @@
+{
+  "environment": {
+    "os": "win32 10.0.22631",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12600KF",
+    "logicalCpus": 16,
+    "memoryGiB": 31.9,
+    "node": "v24.19.0",
+    "browser": "156.0.8078.4",
+    "viewport": "1280x720",
+    "seed": 424242
+  },
+  "sourceCommit": "9063d75f961d3179dcc58b22b34ef8a5149e155c",
+  "method": "Fixed map/seed and 6 chickens. 1s warmup + 10s wall-clock rAF sampling; fixed 1/60 simulation steps, repeatable WASD square and player gunshot noise every .75 simulated seconds; full scene rendering. A common .7s initial game step precedes warmup. Settled100 pre-generates 100 deaths and lands their 600 parts before warmup; burst100 generates and kills 100 enemies inside the first measured update, including spawn/death cost. Player maxHealth=1000000 only in the harness so death cannot reduce stress workload.",
+  "goals": {
+    "aiAndNavigationMs": 2,
+    "frameMs": 16.67
+  },
+  "gpuMs": null,
+  "gcMs": null,
+  "cases": [
+    {
+      "count": 0,
+      "dpr": 1,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 0,
+      "samples": 547,
+      "samplingMs": 10020.3,
+      "interval": {
+        "mean": 18.281,
+        "p50": 16.7,
+        "p95": 33.3,
+        "max": 50
+      },
+      "update": {
+        "mean": 1.516,
+        "p50": 0.6,
+        "p95": 5.6,
+        "max": 11.7
+      },
+      "draw": {
+        "mean": 14.661,
+        "p50": 14.4,
+        "p95": 16.9,
+        "max": 23.4
+      },
+      "frameCpu": {
+        "mean": 16.176,
+        "p50": 15.3,
+        "p95": 21.2,
+        "max": 35.1
+      },
+      "enemyPerception": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "navigation": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "movement": {
+        "mean": 0.006,
+        "p50": 0,
+        "p95": 0,
+        "max": 2
+      },
+      "playerPerception": {
+        "mean": 1.139,
+        "p50": 0.2,
+        "p95": 5.1,
+        "max": 8.7
+      },
+      "goreUpdate": {
+        "mean": 0.004,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.005,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.015,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.3
+      },
+      "aiAndNavigation": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 0,
+        "startedDuringSample": 0,
+        "peakExpandedPerTick": 0,
+        "peakWorkPerTick": 0,
+        "peakStartsPerTick": 0,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0
+      },
+      "objects": {
+        "enemies": 0,
+        "actors": 1,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 66,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 17,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 4,
+      "dpr": 1,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 4,
+      "samples": 544,
+      "samplingMs": 10003.3,
+      "interval": {
+        "mean": 18.382,
+        "p50": 16.7,
+        "p95": 33.3,
+        "max": 33.5
+      },
+      "update": {
+        "mean": 1.796,
+        "p50": 0.9,
+        "p95": 5.6,
+        "max": 9.6
+      },
+      "draw": {
+        "mean": 14.526,
+        "p50": 14.4,
+        "p95": 16.4,
+        "max": 19.7
+      },
+      "frameCpu": {
+        "mean": 16.322,
+        "p50": 15.7,
+        "p95": 20.7,
+        "max": 24.7
+      },
+      "enemyPerception": {
+        "mean": 0.149,
+        "p50": 0.1,
+        "p95": 0.3,
+        "max": 0.9
+      },
+      "navigation": {
+        "mean": 0.019,
+        "p50": 0,
+        "p95": 0,
+        "max": 1.9
+      },
+      "movement": {
+        "mean": 0.072,
+        "p50": 0.1,
+        "p95": 0.2,
+        "max": 0.8
+      },
+      "playerPerception": {
+        "mean": 1.205,
+        "p50": 0.3,
+        "p95": 4.9,
+        "max": 8.4
+      },
+      "goreUpdate": {
+        "mean": 0.006,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.2
+      },
+      "goreDraw": {
+        "mean": 0.004,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.013,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "aiAndNavigation": {
+        "mean": 0.168,
+        "p50": 0.1,
+        "p95": 0.3,
+        "max": 2
+      },
+      "scheduler": {
+        "expandedDuringSample": 524,
+        "startedDuringSample": 16,
+        "peakExpandedPerTick": 107,
+        "peakWorkPerTick": 170,
+        "peakStartsPerTick": 1,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0.06666666666666667
+      },
+      "objects": {
+        "enemies": 4,
+        "actors": 5,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 88,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 15,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 20,
+      "dpr": 1,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 20,
+      "samples": 497,
+      "samplingMs": 10008.8,
+      "interval": {
+        "mean": 20.153,
+        "p50": 16.7,
+        "p95": 33.4,
+        "max": 33.4
+      },
+      "update": {
+        "mean": 3.186,
+        "p50": 2.3,
+        "p95": 7.2,
+        "max": 11.4
+      },
+      "draw": {
+        "mean": 14.821,
+        "p50": 14.6,
+        "p95": 17.1,
+        "max": 20.3
+      },
+      "frameCpu": {
+        "mean": 18.006,
+        "p50": 17.3,
+        "p95": 22.8,
+        "max": 31.7
+      },
+      "enemyPerception": {
+        "mean": 0.58,
+        "p50": 0.5,
+        "p95": 1,
+        "max": 1.5
+      },
+      "navigation": {
+        "mean": 0.044,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 3.6
+      },
+      "movement": {
+        "mean": 0.271,
+        "p50": 0.2,
+        "p95": 0.5,
+        "max": 0.8
+      },
+      "playerPerception": {
+        "mean": 1.878,
+        "p50": 1,
+        "p95": 5.8,
+        "max": 9.2
+      },
+      "goreUpdate": {
+        "mean": 0.006,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.004,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.011,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "aiAndNavigation": {
+        "mean": 0.625,
+        "p50": 0.5,
+        "p95": 1.2,
+        "max": 4
+      },
+      "scheduler": {
+        "expandedDuringSample": 1153,
+        "startedDuringSample": 61,
+        "peakExpandedPerTick": 122,
+        "peakWorkPerTick": 205,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 4,
+        "maximumQueueWaitSeconds": 0.3333333333333333
+      },
+      "objects": {
+        "enemies": 20,
+        "actors": 21,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 173,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 33,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 50,
+      "dpr": 1,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 50,
+      "samples": 450,
+      "samplingMs": 10032.3,
+      "interval": {
+        "mean": 22.221,
+        "p50": 16.7,
+        "p95": 33.4,
+        "max": 33.4
+      },
+      "update": {
+        "mean": 5.136,
+        "p50": 4.3,
+        "p95": 9.2,
+        "max": 17.4
+      },
+      "draw": {
+        "mean": 14.616,
+        "p50": 14.4,
+        "p95": 16.7,
+        "max": 19.1
+      },
+      "frameCpu": {
+        "mean": 19.752,
+        "p50": 19,
+        "p95": 24.2,
+        "max": 31.6
+      },
+      "enemyPerception": {
+        "mean": 1.288,
+        "p50": 1.2,
+        "p95": 2,
+        "max": 2.9
+      },
+      "navigation": {
+        "mean": 0.082,
+        "p50": 0,
+        "p95": 0.2,
+        "max": 3.7
+      },
+      "movement": {
+        "mean": 0.578,
+        "p50": 0.5,
+        "p95": 0.9,
+        "max": 1.3
+      },
+      "playerPerception": {
+        "mean": 2.719,
+        "p50": 1.9,
+        "p95": 6.6,
+        "max": 13.5
+      },
+      "goreUpdate": {
+        "mean": 0.005,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.006,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.013,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "aiAndNavigation": {
+        "mean": 1.37,
+        "p50": 1.2,
+        "p95": 2.3,
+        "max": 4.8
+      },
+      "scheduler": {
+        "expandedDuringSample": 1568,
+        "startedDuringSample": 147,
+        "peakExpandedPerTick": 167,
+        "peakWorkPerTick": 277,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 16,
+        "maximumQueueWaitSeconds": 0.8333333333333334
+      },
+      "objects": {
+        "enemies": 50,
+        "actors": 51,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 294,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 53,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 100,
+      "dpr": 1,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 100,
+      "samples": 391,
+      "samplingMs": 10025.2,
+      "interval": {
+        "mean": 25.574,
+        "p50": 33.2,
+        "p95": 33.4,
+        "max": 50
+      },
+      "update": {
+        "mean": 8.755,
+        "p50": 7.9,
+        "p95": 13,
+        "max": 18.8
+      },
+      "draw": {
+        "mean": 14.774,
+        "p50": 14.6,
+        "p95": 16.5,
+        "max": 19.4
+      },
+      "frameCpu": {
+        "mean": 23.529,
+        "p50": 22.8,
+        "p95": 28.3,
+        "max": 34.2
+      },
+      "enemyPerception": {
+        "mean": 2.219,
+        "p50": 2.1,
+        "p95": 3.2,
+        "max": 4.2
+      },
+      "navigation": {
+        "mean": 0.099,
+        "p50": 0,
+        "p95": 0.7,
+        "max": 2.6
+      },
+      "movement": {
+        "mean": 1.364,
+        "p50": 1.3,
+        "p95": 2.1,
+        "max": 2.8
+      },
+      "playerPerception": {
+        "mean": 4.563,
+        "p50": 3.8,
+        "p95": 8.6,
+        "max": 13.2
+      },
+      "goreUpdate": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.004,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.01,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "aiAndNavigation": {
+        "mean": 2.318,
+        "p50": 2.2,
+        "p95": 3.6,
+        "max": 4.7
+      },
+      "scheduler": {
+        "expandedDuringSample": 1625,
+        "startedDuringSample": 227,
+        "peakExpandedPerTick": 180,
+        "peakWorkPerTick": 303,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 25,
+        "maximumQueueWaitSeconds": 1.6666666666666667
+      },
+      "objects": {
+        "enemies": 100,
+        "actors": 101,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 405,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 84,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 0,
+      "dpr": 1,
+      "workload": "settled100",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 0,
+      "samples": 456,
+      "samplingMs": 10010.9,
+      "interval": {
+        "mean": 21.929,
+        "p50": 16.7,
+        "p95": 33.4,
+        "max": 33.5
+      },
+      "update": {
+        "mean": 1.492,
+        "p50": 0.6,
+        "p95": 5.4,
+        "max": 7.9
+      },
+      "draw": {
+        "mean": 18.395,
+        "p50": 17.9,
+        "p95": 22.6,
+        "max": 27.3
+      },
+      "frameCpu": {
+        "mean": 19.887,
+        "p50": 19.2,
+        "p95": 25.5,
+        "max": 32.3
+      },
+      "enemyPerception": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "navigation": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "movement": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.2
+      },
+      "playerPerception": {
+        "mean": 1.113,
+        "p50": 0.2,
+        "p95": 5,
+        "max": 7.5
+      },
+      "goreUpdate": {
+        "mean": 0.004,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 2.41,
+        "p50": 2.2,
+        "p95": 3.8,
+        "max": 6.2
+      },
+      "bloodDraw": {
+        "mean": 0.448,
+        "p50": 0.4,
+        "p95": 0.8,
+        "max": 2.4
+      },
+      "aiAndNavigation": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 0,
+        "startedDuringSample": 0,
+        "peakExpandedPerTick": 0,
+        "peakWorkPerTick": 0,
+        "peakStartsPerTick": 0,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0
+      },
+      "objects": {
+        "enemies": 0,
+        "actors": 1,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 66,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 600,
+        "physicsSteps": 0,
+        "drawCandidates": 600,
+        "blood": 100,
+        "bloodDrawCandidates": 100,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 600
+      },
+      "longFrames33ms": 51,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 0,
+      "dpr": 1,
+      "workload": "burst100",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 0,
+      "samples": 457,
+      "samplingMs": 10008.6,
+      "interval": {
+        "mean": 21.881,
+        "p50": 16.7,
+        "p95": 33.4,
+        "max": 33.5
+      },
+      "update": {
+        "mean": 1.547,
+        "p50": 0.6,
+        "p95": 5.9,
+        "max": 19.3
+      },
+      "draw": {
+        "mean": 18.26,
+        "p50": 18,
+        "p95": 22.2,
+        "max": 25.7
+      },
+      "frameCpu": {
+        "mean": 19.807,
+        "p50": 19.3,
+        "p95": 25,
+        "max": 38.3
+      },
+      "enemyPerception": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "navigation": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "movement": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.2
+      },
+      "playerPerception": {
+        "mean": 1.115,
+        "p50": 0.2,
+        "p95": 5.2,
+        "max": 8.9
+      },
+      "goreUpdate": {
+        "mean": 0.029,
+        "p50": 0,
+        "p95": 0.2,
+        "max": 0.8
+      },
+      "goreDraw": {
+        "mean": 2.395,
+        "p50": 2.2,
+        "p95": 3.7,
+        "max": 5.9
+      },
+      "bloodDraw": {
+        "mean": 0.447,
+        "p50": 0.4,
+        "p95": 0.8,
+        "max": 1.8
+      },
+      "aiAndNavigation": {
+        "mean": 0.005,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 0,
+        "startedDuringSample": 0,
+        "peakExpandedPerTick": 0,
+        "peakWorkPerTick": 0,
+        "peakStartsPerTick": 0,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0
+      },
+      "objects": {
+        "enemies": 0,
+        "actors": 1,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 66,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 600,
+        "physicsSteps": 0,
+        "drawCandidates": 600,
+        "blood": 100,
+        "bloodDrawCandidates": 100,
+        "peakFlying": 256,
+        "peakBloodDrops": 256,
+        "peakFragmentPhysicsSteps": 344,
+        "peakFragmentDrawCandidates": 600
+      },
+      "longFrames33ms": 59,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 0,
+      "dpr": 2,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 0,
+      "samples": 183,
+      "samplingMs": 10048.3,
+      "interval": {
+        "mean": 54.551,
+        "p50": 50,
+        "p95": 66.7,
+        "max": 66.8
+      },
+      "update": {
+        "mean": 1.584,
+        "p50": 0.6,
+        "p95": 5.7,
+        "max": 7.5
+      },
+      "draw": {
+        "mean": 46.491,
+        "p50": 46,
+        "p95": 51.3,
+        "max": 61.7
+      },
+      "frameCpu": {
+        "mean": 48.075,
+        "p50": 47.3,
+        "p95": 54.4,
+        "max": 62
+      },
+      "enemyPerception": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "navigation": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "movement": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "playerPerception": {
+        "mean": 1.152,
+        "p50": 0.2,
+        "p95": 5.3,
+        "max": 7.3
+      },
+      "goreUpdate": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.009,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.027,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "aiAndNavigation": {
+        "mean": 0.007,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 0,
+        "startedDuringSample": 0,
+        "peakExpandedPerTick": 0,
+        "peakWorkPerTick": 0,
+        "peakStartsPerTick": 0,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0
+      },
+      "objects": {
+        "enemies": 0,
+        "actors": 1,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 30,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 183,
+      "longFrames50ms": 67,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 4,
+      "dpr": 2,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 4,
+      "samples": 181,
+      "samplingMs": 10045,
+      "interval": {
+        "mean": 55.246,
+        "p50": 50,
+        "p95": 66.7,
+        "max": 100
+      },
+      "update": {
+        "mean": 1.989,
+        "p50": 1,
+        "p95": 6.6,
+        "max": 9
+      },
+      "draw": {
+        "mean": 46.789,
+        "p50": 45.7,
+        "p95": 53.6,
+        "max": 96.1
+      },
+      "frameCpu": {
+        "mean": 48.778,
+        "p50": 47.4,
+        "p95": 56.2,
+        "max": 97.3
+      },
+      "enemyPerception": {
+        "mean": 0.191,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 1.8
+      },
+      "navigation": {
+        "mean": 0.013,
+        "p50": 0,
+        "p95": 0,
+        "max": 1.5
+      },
+      "movement": {
+        "mean": 0.067,
+        "p50": 0.1,
+        "p95": 0.2,
+        "max": 0.7
+      },
+      "playerPerception": {
+        "mean": 1.325,
+        "p50": 0.3,
+        "p95": 5.7,
+        "max": 8.4
+      },
+      "goreUpdate": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.008,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.2
+      },
+      "bloodDraw": {
+        "mean": 0.028,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.2
+      },
+      "aiAndNavigation": {
+        "mean": 0.203,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 1.8
+      },
+      "scheduler": {
+        "expandedDuringSample": 55,
+        "startedDuringSample": 2,
+        "peakExpandedPerTick": 55,
+        "peakWorkPerTick": 103,
+        "peakStartsPerTick": 1,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0.06666666666666667
+      },
+      "objects": {
+        "enemies": 4,
+        "actors": 5,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 36,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 180,
+      "longFrames50ms": 72,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 20,
+      "dpr": 2,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 20,
+      "samples": 184,
+      "samplingMs": 10005.8,
+      "interval": {
+        "mean": 54.074,
+        "p50": 50,
+        "p95": 66.7,
+        "max": 66.8
+      },
+      "update": {
+        "mean": 3.259,
+        "p50": 2.3,
+        "p95": 7.1,
+        "max": 11.4
+      },
+      "draw": {
+        "mean": 44.602,
+        "p50": 44.2,
+        "p95": 47.9,
+        "max": 50.3
+      },
+      "frameCpu": {
+        "mean": 47.861,
+        "p50": 47.1,
+        "p95": 53.4,
+        "max": 55.8
+      },
+      "enemyPerception": {
+        "mean": 0.545,
+        "p50": 0.5,
+        "p95": 0.9,
+        "max": 1.6
+      },
+      "navigation": {
+        "mean": 0.026,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 3.7
+      },
+      "movement": {
+        "mean": 0.275,
+        "p50": 0.2,
+        "p95": 0.5,
+        "max": 1
+      },
+      "playerPerception": {
+        "mean": 2.019,
+        "p50": 1.1,
+        "p95": 5.9,
+        "max": 10.4
+      },
+      "goreUpdate": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.007,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.03,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "aiAndNavigation": {
+        "mean": 0.571,
+        "p50": 0.5,
+        "p95": 0.9,
+        "max": 4.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 96,
+        "startedDuringSample": 15,
+        "peakExpandedPerTick": 96,
+        "peakWorkPerTick": 174,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 2,
+        "maximumQueueWaitSeconds": 0.3333333333333333
+      },
+      "objects": {
+        "enemies": 20,
+        "actors": 21,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 57,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 184,
+      "longFrames50ms": 61,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 50,
+      "dpr": 2,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 50,
+      "samples": 164,
+      "samplingMs": 10014.9,
+      "interval": {
+        "mean": 60.973,
+        "p50": 66.6,
+        "p95": 66.7,
+        "max": 100
+      },
+      "update": {
+        "mean": 5.492,
+        "p50": 4.7,
+        "p95": 10.1,
+        "max": 19.1
+      },
+      "draw": {
+        "mean": 48.243,
+        "p50": 47.8,
+        "p95": 51.8,
+        "max": 72
+      },
+      "frameCpu": {
+        "mean": 53.735,
+        "p50": 52.8,
+        "p95": 59.3,
+        "max": 79.2
+      },
+      "enemyPerception": {
+        "mean": 1.34,
+        "p50": 1.2,
+        "p95": 2,
+        "max": 2.6
+      },
+      "navigation": {
+        "mean": 0.014,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.3
+      },
+      "movement": {
+        "mean": 0.676,
+        "p50": 0.6,
+        "p95": 1,
+        "max": 2.8
+      },
+      "playerPerception": {
+        "mean": 2.945,
+        "p50": 2,
+        "p95": 7.2,
+        "max": 12.3
+      },
+      "goreUpdate": {
+        "mean": 0.006,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.007,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.02,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "aiAndNavigation": {
+        "mean": 1.354,
+        "p50": 1.2,
+        "p95": 2.1,
+        "max": 2.6
+      },
+      "scheduler": {
+        "expandedDuringSample": 1,
+        "startedDuringSample": 32,
+        "peakExpandedPerTick": 1,
+        "peakWorkPerTick": 5,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 6,
+        "maximumQueueWaitSeconds": 0.8333333333333334
+      },
+      "objects": {
+        "enemies": 50,
+        "actors": 51,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 93,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 164,
+      "longFrames50ms": 113,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 100,
+      "dpr": 2,
+      "workload": "alive",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 100,
+      "samples": 157,
+      "samplingMs": 10022.9,
+      "interval": {
+        "mean": 63.585,
+        "p50": 66.6,
+        "p95": 66.7,
+        "max": 83.4
+      },
+      "update": {
+        "mean": 9.185,
+        "p50": 8.3,
+        "p95": 13.8,
+        "max": 15.8
+      },
+      "draw": {
+        "mean": 48.055,
+        "p50": 48,
+        "p95": 51.3,
+        "max": 55.9
+      },
+      "frameCpu": {
+        "mean": 57.239,
+        "p50": 57.2,
+        "p95": 62.7,
+        "max": 65.6
+      },
+      "enemyPerception": {
+        "mean": 2.255,
+        "p50": 2.2,
+        "p95": 3.5,
+        "max": 4
+      },
+      "navigation": {
+        "mean": 0.063,
+        "p50": 0,
+        "p95": 0.2,
+        "max": 3
+      },
+      "movement": {
+        "mean": 1.296,
+        "p50": 1.2,
+        "p95": 1.9,
+        "max": 2.3
+      },
+      "playerPerception": {
+        "mean": 5.036,
+        "p50": 4.1,
+        "p95": 9.5,
+        "max": 10.8
+      },
+      "goreUpdate": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 0.007,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "bloodDraw": {
+        "mean": 0.02,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 0.1
+      },
+      "aiAndNavigation": {
+        "mean": 2.318,
+        "p50": 2.2,
+        "p95": 3.5,
+        "max": 5.7
+      },
+      "scheduler": {
+        "expandedDuringSample": 59,
+        "startedDuringSample": 112,
+        "peakExpandedPerTick": 36,
+        "peakWorkPerTick": 79,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 45,
+        "maximumQueueWaitSeconds": 1.6666666666666667
+      },
+      "objects": {
+        "enemies": 100,
+        "actors": 101,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 120,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 0,
+        "physicsSteps": 0,
+        "drawCandidates": 0,
+        "blood": 0,
+        "bloodDrawCandidates": 0,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 0
+      },
+      "longFrames33ms": 157,
+      "longFrames50ms": 131,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 0,
+      "dpr": 2,
+      "workload": "settled100",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 0,
+      "samples": 170,
+      "samplingMs": 10016.9,
+      "interval": {
+        "mean": 58.724,
+        "p50": 66.6,
+        "p95": 66.7,
+        "max": 66.8
+      },
+      "update": {
+        "mean": 1.679,
+        "p50": 0.7,
+        "p95": 6.2,
+        "max": 9.1
+      },
+      "draw": {
+        "mean": 50.255,
+        "p50": 49.7,
+        "p95": 54.5,
+        "max": 65.3
+      },
+      "frameCpu": {
+        "mean": 51.934,
+        "p50": 51.2,
+        "p95": 57.3,
+        "max": 71.2
+      },
+      "enemyPerception": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "navigation": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "movement": {
+        "mean": 0.004,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "playerPerception": {
+        "mean": 1.222,
+        "p50": 0.2,
+        "p95": 5.7,
+        "max": 8.6
+      },
+      "goreUpdate": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "goreDraw": {
+        "mean": 2.166,
+        "p50": 2,
+        "p95": 3.1,
+        "max": 4.1
+      },
+      "bloodDraw": {
+        "mean": 0.407,
+        "p50": 0.4,
+        "p95": 0.7,
+        "max": 1.1
+      },
+      "aiAndNavigation": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 0,
+        "startedDuringSample": 0,
+        "peakExpandedPerTick": 0,
+        "peakWorkPerTick": 0,
+        "peakStartsPerTick": 0,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0
+      },
+      "objects": {
+        "enemies": 0,
+        "actors": 1,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 28,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 600,
+        "physicsSteps": 0,
+        "drawCandidates": 600,
+        "blood": 100,
+        "bloodDrawCandidates": 100,
+        "peakFlying": 0,
+        "peakBloodDrops": 0,
+        "peakFragmentPhysicsSteps": 0,
+        "peakFragmentDrawCandidates": 600
+      },
+      "longFrames33ms": 170,
+      "longFrames50ms": 105,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 0,
+      "dpr": 2,
+      "workload": "burst100",
+      "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "spawned": 0,
+      "samples": 175,
+      "samplingMs": 10061.7,
+      "interval": {
+        "mean": 57.141,
+        "p50": 50,
+        "p95": 66.7,
+        "max": 83.4
+      },
+      "update": {
+        "mean": 1.759,
+        "p50": 0.7,
+        "p95": 6,
+        "max": 20.1
+      },
+      "draw": {
+        "mean": 48.942,
+        "p50": 48.8,
+        "p95": 53.6,
+        "max": 62.9
+      },
+      "frameCpu": {
+        "mean": 50.701,
+        "p50": 50.2,
+        "p95": 57.1,
+        "max": 75.6
+      },
+      "enemyPerception": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "navigation": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "movement": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "playerPerception": {
+        "mean": 1.164,
+        "p50": 0.2,
+        "p95": 5.4,
+        "max": 7.7
+      },
+      "goreUpdate": {
+        "mean": 0.071,
+        "p50": 0,
+        "p95": 0.5,
+        "max": 0.8
+      },
+      "goreDraw": {
+        "mean": 2.203,
+        "p50": 1.9,
+        "p95": 3.7,
+        "max": 6.4
+      },
+      "bloodDraw": {
+        "mean": 0.387,
+        "p50": 0.3,
+        "p95": 0.6,
+        "max": 1.6
+      },
+      "aiAndNavigation": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 0,
+        "startedDuringSample": 0,
+        "peakExpandedPerTick": 0,
+        "peakWorkPerTick": 0,
+        "peakStartsPerTick": 0,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0
+      },
+      "objects": {
+        "enemies": 0,
+        "actors": 1,
+        "chickens": 6,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 29,
+        "peakBullets": 0,
+        "drops": 0,
+        "flying": 0,
+        "settled": 600,
+        "physicsSteps": 0,
+        "drawCandidates": 600,
+        "blood": 100,
+        "bloodDrawCandidates": 100,
+        "peakFlying": 256,
+        "peakBloodDrops": 256,
+        "peakFragmentPhysicsSteps": 344,
+        "peakFragmentDrawCandidates": 600
+      },
+      "longFrames33ms": 175,
+      "longFrames50ms": 85,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    }
+  ]
+}

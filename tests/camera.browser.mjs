@@ -22,6 +22,12 @@ try {
     await page.evaluate(() => { window.requestAnimationFrame = () => 0; });
     // Let the one outstanding animation frame finish before controlled rendering.
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+    // Damage glow is an intentional screen overlay; exercise it in the independent composition too.
+    await page.evaluate(() => {
+      const scene = cameraGame.sceneManager.getCurrentScene(), player = scene.getPlayer(), c = player.getCollider().pose;
+      player.resetLifeState(); player.applyDamage({ kind:'melee',amount:1,sourcePosition:{x:c.x+50,y:c.y-50} });
+      scene.update(0,cameraGame.input);
+    });
     for (const viewport of [{ width: 1280, height: 720 }, { width: 900, height: 600 }]) {
       await page.setViewportSize(viewport);
       await page.waitForFunction(({ width, height }) => cameraGame.renderer.width === width * devicePixelRatio
@@ -40,6 +46,14 @@ try {
         expected.width = screen.canvas.width; expected.height = screen.canvas.height;
         const expectedContext = expected.getContext('2d');
         expectedContext.drawImage(worldCanvas, 0, 0, expected.width, expected.height);
+        expectedContext.save(); expectedContext.scale(devicePixelRatio,devicePixelRatio);
+        scene.damageFeedback.draw(expectedContext,expected.width/devicePixelRatio,expected.height/devicePixelRatio);
+        const view = scene.displayedView;
+        scene.floatingTexts.draw(expectedContext, view.x, view.y,
+          (expected.width/devicePixelRatio)/scene.camera.width);
+        scene.killIndicator?.draw(expectedContext,expected.width/devicePixelRatio,expected.height/devicePixelRatio);
+        expectedContext.restore();
+        scene.drawPickupPrompts(expectedContext, scene.camera.getOffset());
         // Below the minimap HUD (circle + gold counter) the screen must be the world composite.
         // The weapon list HUD is a screen-space overlay pinned to the right edge, so the compared
         // columns stop left of it instead of assuming every pixel below the minimap is world.
@@ -54,6 +68,13 @@ try {
         const expectedPixels = expectedContext.getImageData(0, hudBottom,
           compareWidth, expected.height - hudBottom).data;
         const samePixels = actualPixels.every((value, i) => value === expectedPixels[i]);
+        const differences = [];
+        if (!samePixels) for (let i=0;i<actualPixels.length && differences.length<4;i+=4) {
+          if (actualPixels.slice(i,i+4).some((v,k)=>v!==expectedPixels[i+k])) differences.push({
+            x:(i/4)%compareWidth,y:Math.floor(i/4/compareWidth)+hudBottom,
+            actual:[...actualPixels.slice(i,i+4)],expected:[...expectedPixels.slice(i,i+4)],
+          });
+        }
         // The gold counter sits under the circular minimap, whose size follows the viewport, so
         // look the marker colour up in the HUD corner instead of sampling one fixed pixel.
         const hudRegion = screen.getImageData(0, 0, Math.min(screen.canvas.width, 200 * devicePixelRatio),
@@ -67,7 +88,7 @@ try {
         camera.follow(x + camera.width / 2 + 201, y + camera.height / 2 + 126, 1 / 60);
         const follows = camera.x > x && camera.y > y;
         const transform = screen.getTransform();
-        return { centered, samePixels, hud, follows, colliderSize, zoom: scene.graphics.camera.zoom,
+        return { centered, samePixels, differences, hud, follows, colliderSize, zoom: scene.graphics.camera.zoom,
           viewport: [camera.width, camera.height], world: [worldCanvas.width, worldCanvas.height],
           lighting: [lightingSystem.shadowCanvas.width, lightingSystem.shadowCanvas.height],
           deadZone: [camera.deadZoneWidth, camera.deadZoneHeight],

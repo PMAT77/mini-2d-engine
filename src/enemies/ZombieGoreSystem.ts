@@ -21,6 +21,7 @@ export class ZombieGoreSystem {
   private flying: Fragment[] = [];
   private readonly settled = new GroundEffectGrid<Fragment>();
   private readonly deaths = new Set<string>();
+  private readonly stamps = new Map<Fragment, { canvas: HTMLCanvasElement; pad: number }>();
   private readonly water = { fraction: 0, depth: 0 };
   private physicsSteps = 0;
   private drawCandidates = 0;
@@ -127,9 +128,25 @@ export class ZombieGoreSystem {
     ctx.restore();
   }
 
+  private drawSettled(ctx: CanvasRenderingContext2D, f: Fragment, ox: number, oy: number, visibleAt?: VisibleAt): void {
+    if (f.x < ox - 64 || f.y < oy - 64 || f.x > ox + ctx.canvas.width + 64 || f.y > oy + ctx.canvas.height + 64 ||
+      (visibleAt && !visibleAt(f.x, f.y))) return;
+    if (typeof document === 'undefined' || typeof ctx.drawImage !== 'function') { this.drawFragment(ctx, f, ox, oy); return; }
+    let stamp = this.stamps.get(f);
+    if (!stamp) {
+      const pad = Math.ceil(f.radius) + 6, canvas = document.createElement('canvas'); canvas.width = canvas.height = pad * 2;
+      const buffer = canvas.getContext('2d');
+      if (!buffer) return;
+      // Only immutable local paint is cached. Terrain and identification are evaluated by the caller each draw.
+      this.drawFragment(buffer, f, f.x - pad, f.y - pad);
+      stamp = { canvas, pad }; this.stamps.set(f, stamp);
+    }
+    ctx.drawImage(stamp.canvas, f.x - ox - stamp.pad, f.y - oy - stamp.pad);
+  }
+
   draw(ctx: CanvasRenderingContext2D, ox: number, oy: number, visibleAt?: VisibleAt): void {
     this.drawCandidates = 0;
-    for (const f of this.settled.query(ox, oy, ctx.canvas.width, ctx.canvas.height)) { this.drawCandidates++; this.drawFragment(ctx, f, ox, oy, visibleAt); }
+    for (const f of this.settled.query(ox, oy, ctx.canvas.width, ctx.canvas.height)) { this.drawCandidates++; this.drawSettled(ctx, f, ox, oy, visibleAt); }
     for (const f of this.flying) { this.drawCandidates++; this.drawFragment(ctx, f, ox, oy, visibleAt); }
     ctx.save();
     for (const d of this.drops) {
@@ -142,7 +159,10 @@ export class ZombieGoreSystem {
   drawFlashes(ctx: CanvasRenderingContext2D, ox: number, oy: number, visibleAt?: VisibleAt): void {
     for (const f of this.flying) if (hitFlashAlpha(f.age) > 0) this.drawFragment(ctx, f, ox, oy, visibleAt, true);
   }
-  getStats() { return { drops: this.drops.length, flying: this.flying.length, settled: this.settled.size, physicsSteps: this.physicsSteps, drawCandidates: this.drawCandidates }; }
+  getStats() { return { drops: this.drops.length, flying: this.flying.length, settled: this.settled.size, cachedStamps: this.stamps.size, physicsSteps: this.physicsSteps, drawCandidates: this.drawCandidates }; }
   snapshot() { return { drops: this.drops.map(d => ({ ...d })), flying: this.flying.map(f => ({ ...f })), settled: Array.from(this.settled.values(), f => ({ ...f })) }; }
-  clear(): void { this.drops = []; this.flying = []; this.settled.clear(); this.deaths.clear(); this.physicsSteps = this.drawCandidates = 0; }
+  clear(): void {
+    for (const stamp of this.stamps.values()) stamp.canvas.width = stamp.canvas.height = 0;
+    this.stamps.clear(); this.drops = []; this.flying = []; this.settled.clear(); this.deaths.clear(); this.physicsSteps = this.drawCandidates = 0;
+  }
 }

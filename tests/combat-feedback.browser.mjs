@@ -105,7 +105,25 @@ try {
     assert.equal(await page.evaluate(()=>JSON.stringify(window.fixture.scene.getCombatFeedbackState())),frozen,'flying remains and permanent decals freeze');
     await page.keyboard.press('F2'); await page.evaluate(()=>window.fixture.tick(1,.7));
     assert.equal(await page.evaluate(()=>window.fixture.scene.getCombatFeedbackMetrics().settled),6);
+    const cached=await page.evaluate(()=>{
+      const f=window.fixture,s=f.scene,before=JSON.stringify(s.getCombatFeedbackState());
+      s.draw(f.game.renderer.ctx);s.draw(f.game.renderer.ctx);
+      return {stable:before===JSON.stringify(s.getCombatFeedbackState()),count:s.getCombatFeedbackMetrics().cachedStamps};
+    });
+    assert.equal(cached.stable,true,'cached rendering does not advance fragment state');assert.ok(cached.count>0);
     await page.screenshot({path:`${output}/remains-ground-dpr-${dpr}.png`});
+    const terrain=await page.evaluate(()=>{
+      const f=window.fixture,s=f.scene,v=s.getPlayer().getVisionState(),body=s.getPlayer().getCollider().pose;
+      const col=Math.floor((body.x+Math.cos(v.direction)*125)/50),row=Math.floor((body.y+Math.sin(v.direction)*125)/50);
+      const x=col*50+25,y=row*50+25,blood=s.bloodStainSystem,draw=blood.draw.bind(blood);
+      blood.spawn(x,y,f.map);s.updatePerception(.4);
+      const pixels=()=>{s.draw(f.game.renderer.ctx);const view=s.displayedView;return [...s.worldContext.getImageData(Math.round(x-view.x-8),Math.round(y-view.y-8),16,16).data];};
+      const ground=pixels();blood.draw=()=>{};const cleanGround=pixels();blood.draw=draw;
+      f.map.tiles[row][col]='wall';f.map.invalidateNavigation();s.updatePerception(.4);
+      const wall=pixels();blood.draw=()=>{};const cleanWall=pixels();blood.draw=draw;
+      return {groundHasBlood:JSON.stringify(ground)!==JSON.stringify(cleanGround),wallClean:JSON.stringify(wall)===JSON.stringify(cleanWall)};
+    });
+    assert.equal(terrain.groundHasBlood,true,'ground control actually paints blood');assert.equal(terrain.wallClean,true,'new terrain clips existing blood instead of baking wall pixels');
     const hidden=await page.evaluate(()=>{
       const f=window.fixture,s=f.scene,z=f.addEnemy('shambler',1250,750,0);s.updatePerception(.4);s.draw(f.game.renderer.ctx);
       const v=s.displayedView,ctx=s.worldContext,x=Math.max(0,Math.round(1170-v.x)),y=Math.max(0,Math.round(670-v.y));

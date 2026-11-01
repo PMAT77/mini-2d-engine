@@ -2031,9 +2031,9 @@ export class GameScene extends Scene {  private player!: Player;
     ctx.restore();
   }
 
-  getCombatFeedbackState() { return { player: this.damageFeedback.snapshot(), gore: this.zombieGore.snapshot(),
+  getCombatFeedbackState() { if (!isDevelopmentBuild()) return null; return { player: this.damageFeedback.snapshot(), gore: this.zombieGore.snapshot(),
     blood: { zombies: this.enemyBlood.getStains(), chickens: this.bloodStainSystem.getStains() } }; }
-  getCombatFeedbackMetrics() { return { ...this.zombieGore.getStats(), blood: this.enemyBlood.getActiveCount() + this.bloodStainSystem.getActiveCount(),
+  getCombatFeedbackMetrics() { if (!isDevelopmentBuild()) return null; return { ...this.zombieGore.getStats(), blood: this.enemyBlood.getActiveCount() + this.bloodStainSystem.getActiveCount(),
     bloodDrawCandidates: this.enemyBlood.lastDrawCandidates + this.bloodStainSystem.lastDrawCandidates }; }
 
   private drawPerceptionSilhouettes(ctx: CanvasRenderingContext2D,
@@ -2171,12 +2171,12 @@ export class GameScene extends Scene {  private player!: Player;
     this.rippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.craterSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     // 血迹压在弹坑之上：后画的斑块不会被弹坑的暗色吃掉。
-    this.bloodStainSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
-    this.enemyBlood.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height,
-      (x, y) => !this.perception || this.perception.canIdentify("player", x, y));
     ctx.save(); ctx.translate(-cameraOffset.x, -cameraOffset.y);
     ctx.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height), "evenodd");
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.bloodStainSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
+    this.enemyBlood.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height,
+      (x, y) => !this.perception || this.perception.canIdentify("player", x, y));
     this.zombieGore.draw(ctx, cameraOffset.x, cameraOffset.y,
       (x, y) => !this.perception || this.perception.canIdentify("player", x, y));
     ctx.restore();

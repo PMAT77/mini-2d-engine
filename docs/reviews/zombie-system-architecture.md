@@ -1,6 +1,6 @@
 # 丧尸敌人系统：最终架构与实施说明
 
-实施依据：V1.1；日期：2026-11-01。工作分支 `codex/mouse-aim-shooting`。基线及实际验证、代码提交见同目录 `zombie-system-test-report.md`。
+实施依据：V1.1 + 战斗反馈与永久残骸 V1.2；日期：2026-11-01。工作分支 `codex/mouse-aim-shooting`。基线及实际验证、代码提交见同目录 `zombie-system-test-report.md`。
 
 ## 1. 已落地的玩法
 
@@ -28,7 +28,7 @@
 | `src/navigation/NavigationGrid.ts` | 半径相关通行节点、边、端点连接、通行代价与 revision 缓存 |
 | `src/navigation/NavigationScheduler.ts` | 稳定二叉堆、分步 A*、公平队列、取消、分步路径重建和平滑 |
 | `src/enemies/ZombieConfig.ts` | 两类丧尸全部首轮参数、感知与击退配置，构造时校验并冻结 |
-| `src/enemies/Zombie.ts` | 位置、圆碰撞体、生命、移动、独立击退、硬直和死亡收尾 |
+| `src/enemies/Zombie.ts` | 位置、圆碰撞体、生命、移动、独立击退、硬直、白闪及即时死亡事件 |
 | `src/enemies/TargetMemory.ts` | 只保存合法视觉/听觉产生的位置快照及年龄 |
 | `src/enemies/ZombieBehavior.ts` | `wander / investigate / chase / search` 决策，不持有 Player 引用 |
 | `src/enemies/MeleeAttackController.ts` | 冻结方向的攻击周期、一次命中时刻、取消及不缩短的恢复期限 |
@@ -39,6 +39,10 @@
 | `src/interaction/InteractablePickup.ts` | 肉块和疫苗共享 ID、类型、配置、锚点、边界与一次性拾取契约 |
 | `src/objects/VaccinePickup.ts` | 20 像素无阻挡、立即可拾取的地图物品 |
 | `src/ui/PlayerStatusHud.ts` | 只读感染/库存/V 提示，窄屏一行 |
+| `src/combat/CombatFeedbackConfig.ts` | 集中定义白闪、红光、轻震、飞散与静态空间格参数 |
+| `src/ui/DamageFeedbackOverlay.ts` | 八方向与无方向伤害提示，九个有界槽位，CSS 像素布局 |
+| `src/enemies/ZombieGoreSystem.ts` | 定向血花、六块尸块飞散、水面落地、永久静态残骸 |
+| `src/objects/BloodStainSystem.ts` / `GroundEffectGrid.ts` | 本局永久血迹、小画布缓存与 256px 邻近查询 |
 
 `GameScene` 只负责把现有系统按时序连接、包装命中回调及单位层合成；敌人内部不回调修改场景私有状态。
 
@@ -74,19 +78,24 @@ flowchart LR
 ```ts
 type PlayerLifeState = 'alive' | 'dead';
 type PlayerDamageKind = 'melee' | 'infection' | 'script';
-interface PlayerDamageEvent { amount: number; kind: PlayerDamageKind; sourceId?: string; attackId?: string; }
+interface PlayerDamageEvent {
+  amount: number; kind: PlayerDamageKind; sourceId?: string; attackId?: string;
+  sourcePosition?: Readonly<{ x: number; y: number }>;
+}
 interface PlayerDamageResult { appliedAmount: number; killed: boolean; blocked: boolean; }
 ```
 
 伤害先校验再修改。近战实际扣血后保护 0.35 秒，感染和脚本伤害不受这层保护。`takeDamage` 委托为 script；首次致死事件可消费一次，死亡原因保留。普通 `heal`、修改当前血量和调整最大生命都不能复活。`resetLifeState()` 是显式生命入口；生存系统的 `resetLife()` 进一步清除感染，保留库存。
 
-死亡取消全部槽位未完成换弹、翻滚、射击姿态和主动输入；Player.update 的死亡路径仍更新旧子弹。丧尸沿用 `alive / dying / removed`，攻击及硬直属于动作状态，没有另一份生命状态机。
+死亡取消全部槽位未完成换弹、翻滚、射击姿态和主动输入；Player.update 的死亡路径仍更新旧子弹。丧尸沿用公共 LifeState 契约，但 V1.2 致命分支当帧完成移除，不再保留完整尸体滑行。小鸡仍经过 dying 滑行；攻击及硬直属于动作状态，没有另一份生命状态机。
+
+`consumeDamageEvents()` 一次性消费实际扣血事件：只在 appliedAmount > 0 时入队，冻结来源、受击位置、实际伤害及序号。被近战保护挡下或零伤害不触发屏幕反馈。显式生命重置清空事件队列并递增 lifeResetVersion；场景在暂停判断之前同步清理旧红光与受击轻震。
 
 ## 4. 角色运动与地形
 
 Entities 的 `setMotionResolver` 是可选扩展；没有注入时仍走原地图解析。玩家与每只丧尸的普通移动、翻滚和丧尸独立击退都通过 ActorCollisionWorld。角色圆作为障碍，与附近静态几何共同交给现有 `resolveMotion`，避免仅依靠移动后推开重叠。
 
-空间格边长 100，查询及分离按稳定 ID 顺序进行。分离最多四轮，每次修复最多 4 像素，修复也 sweep 地形，并拒绝加重第三方重叠的落点。拥堵时停止或等待；不把动态角色写进静态导航图。活体和 dying 丧尸阻挡，removed 时注销。
+空间格边长 100，查询及分离按稳定 ID 顺序进行。分离最多四轮，每次修复最多 4 像素，修复也 sweep 地形，并拒绝加重第三方重叠的落点。拥堵时停止或等待；不把动态角色写进静态导航图。活丧尸参与阻挡，V1.2 致命命中在返回命中回调前注销角色并取消导航，后续子弹采用新状态。尸块不参与角色、子弹、拾取或挡光。
 
 玩家在后置重叠修复中固定，由丧尸让开：这样保留已经采样的玩家、光源及相机位置，死亡玩家也不会被后置修复挪动。它仍在所有连续 sweep 中参与双方阻挡。空间不足时可以保留保守重叠，而不穿墙或传送。
 
@@ -136,14 +145,15 @@ VisionTarget 的 `emittingLightId` 指向玩家手电。必须光源开启、允
 | 游荡 / 追击速度 | 26 / 68 | 32 / 205 |
 | 追击加速度 | 380 | 1100 |
 | 伤害 | 12 | 9 |
-| 前摇 / 后摇 | .55 / 1.10 s | .32 / .90 s |
+| 前摇 / 后摇 | .38 / .72 s | .22 / .55 s |
+| 前摇末端快速挥击 / 惯性延伸 | .06 / .08 s | .05 / .06 s |
 | 感染概率 | .12 | .18 |
 | 搜索 | 5 s | 7 s |
 | 硬直 / 冷却 | .14 / .45 s | .10 / .45 s |
 | 近身 / 明亮 / 黑暗视距 | 75 / 300 / 140 | 75 / 350 / 170 |
 | 远视锥半角 / 连续确认 | 60° / .30 s | 60° / .20 s |
 | 质量 / 抗性 / 击退速度上限 | 1.6 / .20 / 260 | .9 / .05 / 400 |
-| 死亡可见最短 / 最长 | .20 / .65 s | .16 / .55 s |
+| 致命命中移除 | 当帧 | 当帧 |
 
 两类共用：听觉阈值 .08、隔墙 .4、新鲜 .3 s；视觉/听觉记忆 3/8 s、到达半径 25、漫游半径 150、停顿 1 s、搜索半径 100；击退阻尼 7、停止速度 10、致死倍率 1、收尾距离 12。时间、概率、正尺寸/生命、近身与黑暗视距关系都校验，感知和击退复用原验证器。
 
@@ -177,7 +187,18 @@ SoundPlayer.pauseAll/resumeAll 不改 currentTime；淡出计时也冻结。stop
 
 ## 9. 表现与调试
 
-丧尸和疫苗完整加入感知 target、单位层包围盒、剔除、阴影、剪影及交叉淡化。丧尸本体额外受地面轮廓裁剪，不能把伸出碰撞体的手臂画到墙顶。dying 保留身份，removed 才注销。敌人血迹使用单独的普通血迹容器并受当前位置辨识约束；鸡肉持续血迹不变。
+丧尸和疫苗完整加入感知 target、单位层包围盒、剔除、阴影、剪影及交叉淡化。丧尸本体额外受地面轮廓裁剪，不能把伸出碰撞体的手臂画到墙顶。致命命中当帧从敌人查询与感知候选中移除。敌人血迹、血花和碎块采用当前位置辨识与地面裁剪；隐藏死亡不显示细节，碎块不生成小地图标记。
+
+### V1.2 战斗反馈与残骸
+
+- 每次有效枪击重置 60ms 保持 + 80ms 淡出的白闪，独立于 450ms 硬直冷却。彩色轮廓使用同一姿态；局部纯白蒙版在环境光之后、感知遮罩之前合成，不作为世界光源。
+- 攻击姿态只读，分为 anticipation / strike / followThrough / recovery。挥击末端对应实际 hitTime；按攻击序号交替手臂，身体后撤/前倾与短弧残影只影响绘制。渲染边界由六个实际部件及残影范围计算。
+- 玩家红光由冻结的“玩家指向来源”向量决定，近战峰值 .55、持续 .45s，感染使用 .12/.25s 无方向脉冲。屏幕合成顺序为世界 → 红光 → 飘字/小地图/HUD。相机受击通道为 3 世界像素/.10s，独立于开火震动；鼠标逆变换仍读取实际显示相机。
+- `ZombieDeathEvent` 冻结 id、kind、完整致命姿态和命中快照，elapsedSeconds 为 0，消费一次。碎块继承同一姿态的头、躯干、双臂和双腿；不复用小鸡白烟或掉落。
+- 飞散速度由独立随机径向量与真实致命冲量合成，上限 360 px/s；飞行 .25–.55s、再弹跳 .10s。平面圆扫掠限制墙体与边界，高度只影响绘制。水中落地使用半浸没表现。
+- 最多 256 块同时飞行；超额直接结算合法落点，仍保留全部碎块。落地后不再物理更新，按 256px 空间格查询并缓存首次可见的碎块精灵。新增表现随机流与 AI 决策分离，绘制不消费随机数。
+- 所有血迹永久保留到退出本局，取消原 48 摊淘汰和肉块绑定释放。小鸡半径仍为 11–18，丧尸血泊使用 1.55 倍目标尺寸及定向溅点，贴墙时保守缩小。血迹首次可见绘制时缓存成小画布，辨识与光照不烘焙进缓存。
+- F2 冻结白闪、血花、红光、相机受击、飞散及弹跳；静态痕迹保持可绘制。退出场景释放全部队列、碎块、血迹和小画布。`getCombatFeedbackState/Metrics` 仅开发构建返回数据，生产返回 null。
 
 准星仅对可辨识、存活的丧尸反馈；小地图不注册实时敌人，疫苗按已辨识 pickup 规则注册。
 
