@@ -174,6 +174,7 @@ export interface GameSceneOptions extends TileMapOptions {
 export class GameScene extends Scene {  private player!: Player;
   private readonly actorWorld: ActorCollisionWorld;
   private readonly enemies: EnemySystem;
+  private readonly enemyBlood = new BloodStainSystem();
   private deathAcknowledged = false;
   private deathEnterHeld = true;
   private chickens: Chicken[] = [];
@@ -1567,7 +1568,13 @@ export class GameScene extends Scene {  private player!: Player;
       lights: this.perceptionLights,
       playerNoises: selectPlayerNoises(this.noiseSystem.getEvents()),
     });
-    this.enemies.consumeDeaths();
+    this.enemies.settleAttacks(this.player);
+    if (this.player.consumeDeathEvent()) {
+      this.interaction.reset(); this.flashlightOn = false; this.flashlight.setActive(false);
+      this.reloadVoice?.stop(0); this.reloadVoice = null;
+      this.crosshairOverlay?.setVisible(false);
+    }
+    for (const death of this.enemies.consumeDeaths()) this.enemyBlood.spawn(death.x, death.y, this.map);
 
     // 小鸡只在干地自由游荡，不读取玩家输入；感知刺激由场景统一提供。
     this.chickens.forEach(chicken => chicken.update(delta, input, this.map, {
@@ -1586,6 +1593,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.particleSystem.update(delta);
     this.craterSystem.update(delta);
     this.bloodStainSystem.update(delta);
+    this.enemyBlood.update(delta);
     this.footprintSystem.update(delta);
     this.rippleSystem.update(delta);
     // 边界反馈读取原始输入方向：贴墙时速度已被清零，但仍要能判断还在往里推。
@@ -1621,7 +1629,7 @@ export class GameScene extends Scene {  private player!: Player;
 
     // Tab 在主副枪械之间切换（Q 不再绑定），C 收枪/空手；都只认下沿。
     const tabDown = input.isKeyDown("Tab");
-    if (tabDown && !this.tabHeld) {
+    if (this.player.isAlive() && tabDown && !this.tabHeld) {
       this.player.cycleFirearm(1);
       this.weaponSwitchedThisFrame = true;
       // 与手电开关同一声轻响；单声部保证快速连按时只留最后一次的尾音。
@@ -1629,7 +1637,7 @@ export class GameScene extends Scene {  private player!: Player;
     }
     this.tabHeld = tabDown;
     const cDown = input.isKeyDown("c");
-    if (cDown && !this.cHeld) {
+    if (this.player.isAlive() && cDown && !this.cHeld) {
       this.player.toggleMelee();
       this.weaponSwitchedThisFrame = true;
     }
@@ -2057,6 +2065,8 @@ export class GameScene extends Scene {  private player!: Player;
     this.craterSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     // 血迹压在弹坑之上：后画的斑块不会被弹坑的暗色吃掉。
     this.bloodStainSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
+    this.enemyBlood.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height,
+      (x, y) => !this.perception || this.perception.canIdentify("player", x, y));
     this.torches.forEach(torch => torch.draw(ctx, cameraOffset.x, cameraOffset.y));
 
     // 单位层：只有迷雾范围内的单位才绘制，地形不参与裁剪。
@@ -2523,7 +2533,7 @@ export class GameScene extends Scene {  private player!: Player;
   private updateCrosshair(): void {
     const overlay = this.crosshairOverlay;
     if (!overlay) return;
-    if (this.cursorVisible) {
+    if (this.cursorVisible || !this.player.isAlive()) {
       overlay.setVisible(false);
       return;
     }

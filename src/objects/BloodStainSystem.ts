@@ -160,8 +160,9 @@ export class BloodStainSystem {
   }
 
   draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number,
-    viewWidth: number, viewHeight: number): void {
+    viewWidth: number, viewHeight: number, visibleAt?: (x: number, y: number) => boolean): void {
     for (const stain of this.stains) {
+      if (visibleAt && !visibleAt(stain.x, stain.y)) continue;
       const alpha = stain.sustained ? 1 : BloodStainSystem.getAlpha(stain.age);
       if (alpha <= 0) continue;
       const x = stain.x - cameraX, y = stain.y - cameraY;

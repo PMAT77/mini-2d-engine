@@ -16,6 +16,11 @@ import type { ZombieKind } from './ZombieConfig';
 import { EncounterSpawning } from './EncounterSpawning';
 import type { SpawnReport } from './EncounterSpawning';
 import type { BulletImpact, DeathFinished, HitResult } from '../combat/CombatTypes';
+import { sectorIntersectsCircle } from './MeleeAttackController';
+import type { AttackMoment } from './MeleeAttackController';
+import { hasLineOfSight } from '../vision/SightGeometry';
+import type { Player } from '../objects/Player';
+import type { PlayerDamageResult } from '../combat/PlayerDamage';
 
 interface EnemyRecord {
   zombie: Zombie; behavior: ZombieBehavior; vision: VisionSensor; hearing: HearingSensor; random: () => number;
@@ -33,6 +38,8 @@ export function selectPlayerNoises(events: readonly NoiseEvent[]): readonly Nois
 }
 
 export class EnemySystem {
+  private time = 0;
+  private intents: (AttackMoment & { zombie: Zombie })[] = [];
   readonly navigation: NavigationScheduler;
   private records: EnemyRecord[] = [];
   private nextId = 0;
@@ -78,6 +85,8 @@ export class EnemySystem {
     return result;
   }
   update(delta: number, context: EnemyContext): void {
+    if (!Number.isFinite(delta) || delta <= 0) return;
+    this.time += delta; this.intents = [];
     const start = clock();
     for (const r of this.records) {
       const z = r.zombie; r.replanLeft = Math.max(0, r.replanLeft - delta);
@@ -88,6 +97,13 @@ export class EnemySystem {
       const sight = context.target.alive ? r.vision.sense(delta, this.map, { ...center, facing: z.getFacingDirection() }, context.target, context.lights) : null;
       const heard = context.target.alive ? r.hearing.poll(this.map, { id: z.id, ...center }, context.playerNoises)[0] : null;
       r.behavior.update(delta, center, sight?.visible ? context.target : null, heard ?? null);
+      const moment = z.attack.advance(this.time);
+      if (moment && !z.isStunned() && context.target.alive) this.intents.push({ ...moment, zombie: z });
+      if (context.target.alive && sight?.visible && !z.isStunned() && z.attack.canStart(this.time) &&
+        sectorIntersectsCircle(center, z.getFacingDirection(), z.config.attackRadius, z.config.attackHalfAngle, context.target, context.target.radius) &&
+        hasLineOfSight(this.map, center.x, center.y, context.target.x, context.target.y)) z.attack.start(this.time, z.getFacingDirection());
+      if (!context.target.alive) z.attack.cancel();
+      if (z.isStunned() || z.attack.isBusy(this.time)) { z.stopMovement(); continue; }
       const goal = r.behavior.getGoal();
       if (!goal) { z.setMovement({ x: 0, y: 0 }, false); continue; }
       const grid = this.navigation.grid(z.getSize() / 2);
@@ -125,9 +141,23 @@ export class EnemySystem {
     this.actors.separate(); this.metrics.movementMs = clock() - moveStart;
   }
   consumeDeaths(): DeathFinished[] { const events = this.deathEvents; this.deathEvents = []; return events; }
+  settleAttacks(player: Player, onHit?: (result: PlayerDamageResult, zombie: Zombie, attackId: string, random: () => number) => void): void {
+    this.intents.sort((a, b) => a.occurredAt - b.occurredAt || a.attackId.localeCompare(b.attackId));
+    for (const intent of this.intents) {
+      const z = intent.zombie;
+      if (!z.isAlive() || z.isStunned() || !z.attack.isValid(intent.attackId) || !player.isAlive()) continue;
+      const origin = z.getCenter(), body = player.getCollider();
+      if (!sectorIntersectsCircle(origin, intent.facing, z.config.attackRadius, z.config.attackHalfAngle, body.pose, body.radius) ||
+        !hasLineOfSight(this.map, origin.x, origin.y, body.pose.x, body.pose.y)) continue;
+      const result = player.applyDamage({ kind: 'melee', amount: z.config.damage, sourceId: z.id, attackId: intent.attackId });
+      const r = this.records.find(r => r.zombie === z);
+      if (r) onHit?.(result, z, intent.attackId, r.random);
+    }
+    this.intents = [];
+  }
   snapshot() {
     return this.records.map(r => ({ id: r.zombie.id, kind: r.zombie.config.kind, ...r.zombie.getCenter(), life: r.zombie.getLifeState(), health: r.zombie.getHealth(),
-      state: r.behavior.getState(), memory: r.behavior.memory.snapshot(), goal: r.behavior.getGoal(), path: r.path.map(p => ({ ...p })), navigation: r.result?.status ?? null }));
+      state: r.behavior.getState(), action: r.zombie.getActionState(), memory: r.behavior.memory.snapshot(), goal: r.behavior.getGoal(), path: r.path.map(p => ({ ...p })), navigation: r.result?.status ?? null }));
   }
-  dispose(): void { for (const r of this.records) this.actors.unregister(r.zombie.id); this.records = []; this.deathEvents = []; this.navigation.clear(); }
+  dispose(): void { for (const r of this.records) this.actors.unregister(r.zombie.id); this.records = []; this.deathEvents = []; this.intents = []; this.navigation.clear(); }
 }

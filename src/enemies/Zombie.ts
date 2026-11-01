@@ -11,8 +11,12 @@ import type { KnockbackWorld } from '../combat/KnockbackMotion';
 import type { ZombieConfig } from './ZombieConfig';
 import { ZombieRenderer } from './ZombieRenderer';
 import type { ZombiePose } from './ZombieRenderer';
+import { MeleeAttackController } from './MeleeAttackController';
 
 export class Zombie extends Entities {
+  readonly attack: MeleeAttackController;
+  private stunLeft = 0;
+  private stunCooldownLeft = 0;
   private health: number;
   private life: LifeState = 'alive';
   private direction = new Vector2();
@@ -24,6 +28,7 @@ export class Zombie extends Entities {
   private knockback?: KnockbackMotion;
   constructor(readonly id: string, x: number, y: number, readonly config: Readonly<ZombieConfig>, facing = 0) {
     super(x, y); this.health = config.maxHealth; this.size = config.size; this.rotationSpeed = config.turnSpeed;
+    this.attack = new MeleeAttackController(id, config);
     this.currentRotation = facing + Math.PI; this.setCollider({ type: 'circle', radius: .5 });
     this.maxSpeed = config.wanderSpeed; this.accel = config.wanderAcceleration; this.decel = 1000;
   }
@@ -33,6 +38,8 @@ export class Zombie extends Entities {
   isPerceptionTarget(): boolean { return this.isRenderable(); }
   getLifeState(): LifeState { return this.life; }
   getHealth(): number { return this.health; }
+  isStunned(): boolean { return this.stunLeft > 1e-9; }
+  getActionState(): string { return !this.isAlive() ? this.life : this.isStunned() ? 'stunned' : this.attack.getState(); }
   getFacingDirection(): number { return this.currentRotation - Math.PI; }
   getCenter(): Point { return { x: this.x + this.size / 2, y: this.y + this.size / 2 }; }
   setMovement(direction: Point, chasing: boolean): void {
@@ -47,6 +54,11 @@ export class Zombie extends Entities {
     if (!this.isAlive() || !Number.isFinite(impact?.damage) || impact.damage <= 0) return 'ignored';
     this.health = Math.max(0, this.health - impact.damage); this.hitAge = 0;
     const lethal = this.health === 0;
+    if (lethal) this.attack.cancel();
+    else if (this.stunCooldownLeft <= 1e-9) {
+      this.stunLeft = this.config.knockback.hitStunSeconds; this.stunCooldownLeft = this.config.stunCooldown;
+      this.attack.cancel(); this.stopMovement();
+    }
     if (world && !this.knockback) this.knockback = new KnockbackMotion(this, world, this.config.knockback,
       body => world.getShapeSpeedFactor(body) > 0);
     const speed = this.knockback?.addImpact(impact, lethal) ?? 0;
@@ -66,6 +78,7 @@ export class Zombie extends Entities {
   update(delta: number, input: Input, map?: TileMap): void {
     if (!Number.isFinite(delta) || delta < 0 || this.life === 'removed') return;
     this.hitAge += delta;
+    this.stunLeft = Math.max(0, this.stunLeft - delta); this.stunCooldownLeft = Math.max(0, this.stunCooldownLeft - delta);
     if (this.life === 'dying') {
       this.knockback?.update(Math.min(delta, Math.max(0, this.deathDeadline - this.deathAge)));
       this.deathAge += delta;
@@ -75,12 +88,14 @@ export class Zombie extends Entities {
       return;
     }
     const x = this.x, y = this.y;
-    super.update(delta, input, map); this.knockback?.update(delta);
+    if (!this.isStunned() && this.direction.length() > 0) super.update(delta, input, map);
+    else this.velocity.set(0, 0);
+    this.knockback?.update(delta);
     this.phase += Math.hypot(this.x - x, this.y - y) * .18;
   }
   consumeDeathFinished(): DeathFinished | null { const event = this.deathFinished; this.deathFinished = null; return event; }
   getPose(): ZombiePose { return { x: this.x, y: this.y, size: this.size, facing: this.getFacingDirection(), kind: this.config.kind,
-    phase: this.phase, speed: this.velocity.length(), hit: Math.exp(-this.hitAge * 12) * .8, attack: 0, life: this.life }; }
+    phase: this.phase, speed: this.velocity.length(), hit: Math.exp(-this.hitAge * 12) * .8, attack: this.attack.getPoseAmount(), life: this.life }; }
   getRenderBounds() { return ZombieRenderer.bounds(this.getPose()); }
   draw(ctx: CanvasRenderingContext2D, ox = 0, oy = 0): void { ZombieRenderer.draw(ctx, this.getPose(), ox, oy); }
   drawSilhouette(ctx: CanvasRenderingContext2D, ox = 0, oy = 0): void { ZombieRenderer.draw(ctx, this.getPose(), ox, oy, true); }
