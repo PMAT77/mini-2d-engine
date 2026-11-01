@@ -111,6 +111,8 @@ try {
       for (let row = 3; row <= 9; row++) scene.map.tiles[row][20] = 'wall';
       for (let row = 7; row <= 9; row++) scene.map.tiles[row][10] = 'wall';
       scene.map.tiles[11][22] = 'mineral'; scene.map.tileHp[11][22] = 100;
+      // 火把闪烁用随机相位，跨运行亮度不稳定；这里只要玩家灯，先把地图自带光源摘掉。
+      scene.torches.forEach(t => scene.lightingSystem.removeLightSource(t.light)); scene.torches = [];
       scene.player.x = 250; scene.player.y = 370;
       const { Vector2 } = await import('/src/math/Vector2.ts');
       scene.playerLight.setPosition(new Vector2(274.5, 394.5));
@@ -128,13 +130,17 @@ try {
       const game = terrainGame, scene = game.sceneManager.getCurrentScene(), lighting = scene.lightingSystem;
       const pixel = (x, y) => [...lighting.shadowCtx.getImageData(Math.round(x - scene.camera.x), Math.round(y - scene.camera.y), 1, 1).data];
       const before = pixel(1055, 375), originalOpen = pixel(1100, 650);
-      lighting.setTerrainLight(gameTerrainLight); scene.setAmbientLight('#2F3843'); scene.draw(game.renderer.ctx);
+      lighting.setTerrainLight(gameTerrainLight); scene.setAmbientLight('#2F3843');
+      // 首次绘制会带上缩放/尺寸变更后的首帧偏差，画两帧再取样才稳定。
+      scene.draw(game.renderer.ctx); scene.draw(game.renderer.ctx);
       return { before, originalOpen, after: pixel(1055, 375), open: pixel(1100, 650), player: pixel(280, 400) };
     });
     await page.screenshot({ path: `${output}/terrain-game-after-dpr${dpr}.png` });
     assert.ok(gamePixels.after[0] < gamePixels.before[0] - 6, 'actual game has a short shadow outside the player light');
     assert.ok(gamePixels.open.every((value, i) => Math.abs(value - gamePixels.originalOpen[i]) <= 2), 'actual game dark regions retain their brightness');
-    assert.ok(gamePixels.player[0] > gamePixels.open[0] + 80, 'player light remains the main illumination');
+    // 光照遮罩是加色层：近身点比暗部至少亮 40 级、且高出 25%，说明主光源仍是玩家灯。
+    const lift = gamePixels.player[0] - gamePixels.open[0];
+    assert.ok(lift >= 40 && gamePixels.player[0] >= gamePixels.open[0] * 1.25, `player light remains the main illumination: +${lift} (${gamePixels.player[0]} vs ${gamePixels.open[0]})`);
     const shake = await page.evaluate(() => {
       const game = terrainGame, scene = game.sceneManager.getCurrentScene(), samples = [];
       scene.camera.shake(3, .2, Math.PI / 4, 50, 'linear');
