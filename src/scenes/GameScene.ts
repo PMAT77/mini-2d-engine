@@ -7,6 +7,11 @@ import { ActorCollisionWorld } from "../physics/ActorCollisionWorld";
 import { EnemySystem, selectPlayerNoises } from "../enemies/EnemySystem";
 import type { DamageableEntry } from "../combat/HitTargetResolver";
 import { Zombie } from "../enemies/Zombie";
+import { EncounterSpawning } from "../enemies/EncounterSpawning";
+import { PlayerSurvivalSystem } from "../survival/PlayerSurvivalSystem";
+import { PlayerStatusHud } from "../ui/PlayerStatusHud";
+import { VaccinePickup } from "../objects/VaccinePickup";
+import type { InteractablePickup } from "../interaction/InteractablePickup";
 import { TileMap, TileMapOptions } from "../map/TileMap";
 // 世界几何（实心地形轮廓）由 TileMap 统一提供，绘制时不再直接遍历多边形。
 import { TileTypeId, getTileType } from "../map/TileType";
@@ -175,6 +180,10 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly actorWorld: ActorCollisionWorld;
   private readonly enemies: EnemySystem;
   private readonly enemyBlood = new BloodStainSystem();
+  private readonly survival: PlayerSurvivalSystem;
+  private readonly statusHud = new PlayerStatusHud();
+  private vaccinePickups: VaccinePickup[] = [];
+  private vaccineHeld = false;
   private deathAcknowledged = false;
   private deathEnterHeld = true;
   private chickens: Chicken[] = [];
@@ -268,10 +277,10 @@ export class GameScene extends Scene {  private player!: Player;
   private cHeld = false;
   private spaceHeld = false;
   /** 按键拾取控制器：只接管 INTERACT 物品，AUTO 仍走各自碰撞流程。 */
-  private readonly interaction = new InteractionController<MeatPickup>();
+  private readonly interaction = new InteractionController<InteractablePickup>();
   /** 本帧通过可见性过滤的交互候选与可绘制标记（世界坐标）。 */
-  private pickupCandidates: PickupCandidate<MeatPickup>[] = [];
-  private pickupMarkers: { marker: PickupMarker; target: MeatPickup | GoldPickup }[] = [];
+  private pickupCandidates: PickupCandidate<InteractablePickup>[] = [];
+  private pickupMarkers: { marker: PickupMarker; target: InteractablePickup | GoldPickup }[] = [];
   /** 拾取提示纯视觉层；不参与按键判断与结算。 */
   private readonly pickupPrompt = new PickupPromptRenderer();
   private promptTime = 0;
@@ -416,12 +425,13 @@ export class GameScene extends Scene {  private player!: Player;
     const deadZoneHeight = this.camera.deadZoneHeight;
 
     // 在死区内生成可行走位置作为玩家出生点
-    const spawn = this.getSpawnPositionInArea(
+    const spawn = sceneOptions.playerSpawn ?? this.getSpawnPositionInArea(
       Math.max(0, Math.min(deadZoneLeft, this.map.width * this.map.tileSize - deadZoneWidth)),
       Math.max(0, Math.min(deadZoneTop, this.map.height * this.map.tileSize - deadZoneHeight)),
       Math.min(deadZoneWidth, this.map.width * this.map.tileSize),
       Math.min(deadZoneHeight, this.map.height * this.map.tileSize), GameScene.PLAYER_SIZE, { type: "circle", radius: 0.5 });
     this.player = new Player(sceneOptions.playerSpawn?.x ?? spawn.x, sceneOptions.playerSpawn?.y ?? spawn.y, undefined, this.particleSystem);
+    this.survival = new PlayerSurvivalSystem(this.player);
     this.actorWorld.register("player", this.player);
     this.player.setMotionResolver((body, move, rotation) => this.actorWorld.resolve("player", body, move, rotation));
     // 子弹自然落地时尝试在干燥地面留下弹坑。
@@ -881,7 +891,7 @@ export class GameScene extends Scene {  private player!: Player;
     let collected = 0;
     this.goldPickups = this.goldPickups.filter(pickup => {
       pickup.update(delta);
-      if (!pickup.isCollidingWithShape(body)) return true;
+      if (!this.player.isAlive() || !pickup.isCollidingWithShape(body)) return true;
       this.player.collectGold();
       collected++;
       this.particleSystem.createExplosion(new Vector2(pickup.x + GoldPickup.SIZE / 2, pickup.y + GoldPickup.SIZE / 2),
@@ -1049,7 +1059,7 @@ export class GameScene extends Scene {  private player!: Player;
     const playerAnchor = { x: vision.x, y: vision.y };
     const threeLayer = this.visionMode === "three-layer" && !!this.perception;
 
-    for (const meat of this.meatPickups) {
+    for (const meat of [...this.meatPickups, ...this.vaccinePickups]) {
       if (!meat.isPickupReady()) continue;
       const anchor = meat.getPickupAnchor();
       const distance = Math.hypot(anchor.x - playerAnchor.x, anchor.y - playerAnchor.y);
@@ -1068,7 +1078,7 @@ export class GameScene extends Scene {  private player!: Player;
       }
       if (decision.prompt) {
         this.pickupCandidates.push(
-          createPickupCandidate(meat, `meat-${meat.id}`, anchor, playerAnchor, config));
+          createPickupCandidate<InteractablePickup>(meat, `${meat.kind}-${meat.id}`, anchor, playerAnchor, config));
       }
     }
 
@@ -1103,7 +1113,11 @@ export class GameScene extends Scene {  private player!: Player;
       const anchor = completed.getPickupAnchor();
       // 完成反馈只读取锚点，不延迟移除与结算。
       this.completedPickupFeedback = { x: anchor.x, y: anchor.y };
-      this.collectMeatPickup(completed);
+      if (completed.kind === "meat") this.collectMeatPickup(completed as MeatPickup);
+      else if (this.survival.collectVaccine(completed)) {
+        this.vaccinePickups = this.vaccinePickups.filter(p => p !== completed);
+        this.showPickupText("疫苗 +1");
+      }
       // 同一帧完成拾取后，该物品不能再留下候选或高亮点。
       this.pickupCandidates = this.pickupCandidates.filter(c => c.target !== completed);
       this.pickupMarkers = this.pickupMarkers.filter(entry => entry.target !== completed);
@@ -1179,6 +1193,7 @@ export class GameScene extends Scene {  private player!: Player;
 
   // 添加检查玩家与道具碰撞的方法
   private checkPickupCollisions(): void {
+    if (!this.player.isAlive()) return;
     const playerCollider = this.player.getCollider();
     const collectedPickups: number[] = [];
 
@@ -1396,6 +1411,18 @@ export class GameScene extends Scene {  private player!: Player;
       }
       this.actorWorld.sync();
       this.enemies.spawn(this.sceneOptions.encounters ?? {}, this.player.getVisionState());
+      const vaccines = this.sceneOptions.encounters?.vaccines ?? 2;
+      if (!Number.isSafeInteger(vaccines) || vaccines < 0 || vaccines > 1000) throw new Error("疫苗生成数量无效");
+      const origin = this.player.getVisionState(), spawner = new EncounterSpawning(this.map, origin, seededRandom((this.sceneOptions.seed ?? 0x3a62) ^ 0x76616363));
+      const occupied: { center: { x: number; y: number }; radius: number }[] = [{ center: origin, radius: this.player.getCollider().radius }];
+      for (let i = 0; i < vaccines; i++) {
+        const center = spawner.find(this.player.getCollider().radius, 100, 350, occupied);
+        if (!center) continue;
+        this.vaccinePickups.push(new VaccinePickup(center.x - 10, center.y - 10, `map-${i + 1}`));
+        occupied.push({ center, radius: 10 });
+      }
+      this.enemies.spawnReports.push({ kind: "vaccine", requested: vaccines, spawned: this.vaccinePickups.length, skipped: vaccines - this.vaccinePickups.length,
+        ...(vaccines > this.vaccinePickups.length ? { reason: "200 次候选中没有玩家体型可达的干地位置" } : {}) });
       onProgress?.(1, 1);
       this.loaded = true;
     })();
@@ -1438,6 +1465,7 @@ export class GameScene extends Scene {  private player!: Player;
         initialAudio: this.initialAudio,
         // 三层视野不读 fog.range/fog.feather，留着这两根滑杆只会误导调参。
         hiddenSections: this.visionMode === "three-layer" ? ["fog"] : [],
+        onReset: () => this.survival.resetLife(),
       });
       window.addEventListener('resize', this.resizeListener);
       if (typeof document !== 'undefined') document.addEventListener('keydown', this.cursorKeyListener);
@@ -1450,6 +1478,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.active = false;
     this.actorWorld.clear();
     this.enemies.dispose();
+    this.survival.dispose(); this.vaccinePickups = []; this.enemyBlood.clear();
     // 循环音效不会自己停，离开场景时立即收掉，免得声音跟着残留。
     this.sfx.stopLoops();
     // 换弹声也要跟着停，否则重进场景后还会响到采样结束。
@@ -1515,11 +1544,20 @@ export class GameScene extends Scene {  private player!: Player;
     // 开火/切枪都只在本帧有效：交互取消只消费当帧信号。
     this.shotThisFrame = false;
     this.weaponSwitchedThisFrame = false;
+    const aim = this.getPointerAim(input);
+    const vaccineDown = input.isKeyDown("v");
+    const actionInput = aim?.fire === true || (input.isKeyDown(" ") && !this.spaceHeld) ||
+      (input.isKeyDown("r") && !this.reloadHeld) || (input.isKeyDown("Tab") && !this.tabHeld) || (input.isKeyDown("c") && !this.cHeld);
+    if (vaccineDown && !this.vaccineHeld && this.survival.tryUseVaccine({ paused: false, rolling: this.player.isRolling(),
+      reloading: this.player.getWeaponView().isReloading, interacting: input.isKeyDown("e"), actionInput })) this.showPickupText("感染已治愈");
+    this.vaccineHeld = vaccineDown;
+    const dot = this.survival.update(delta);
+    if (dot?.appliedAmount) this.showPickupText(`感染 -${dot.appliedAmount} HP`);
 
     // 更新玩家状态
     const prevX = this.player.x, prevY = this.player.y;
     this.actorWorld.sync();
-    this.player.update(delta, input, this.map, this.getPointerAim(input));
+    this.player.update(delta, input, this.map, aim);
     // 换弹完成、被翻滚打断或切走时收掉没放完的换弹声，别压到下面那声枪响。
     if (this.reloadVoice && !this.player.getWeaponView().isReloading) {
       this.reloadVoice.stop(0.12);
@@ -1568,7 +1606,9 @@ export class GameScene extends Scene {  private player!: Player;
       lights: this.perceptionLights,
       playerNoises: selectPlayerNoises(this.noiseSystem.getEvents()),
     });
-    this.enemies.settleAttacks(this.player);
+    this.enemies.settleAttacks(this.player, (result, zombie, _id, random) => {
+      if (this.survival.onMeleeDamage(result, zombie.config.infectionChance, random)) this.showPickupText("已感染");
+    });
     if (this.player.consumeDeathEvent()) {
       this.interaction.reset(); this.flashlightOn = false; this.flashlight.setActive(false);
       this.reloadVoice?.stop(0); this.reloadVoice = null;
@@ -1666,6 +1706,9 @@ export class GameScene extends Scene {  private player!: Player;
   /** 供敌人听觉、调试面板与测试读取的噪声总线（只读用途，写入仍由场景负责）。 */
   getNoiseSystem(): NoiseSystem { return this.noiseSystem; }
   getEnemySystem(): EnemySystem { return this.enemies; }
+  getSurvivalSystem(): PlayerSurvivalSystem { return this.survival; }
+  getPlayer(): Player { return this.player; }
+  getVaccinePickups(): readonly VaccinePickup[] { return this.vaccinePickups; }
 
   /**
    * 重建本帧感知光源：玩家微光、手电与点燃的火把。
@@ -1750,6 +1793,7 @@ export class GameScene extends Scene {  private player!: Player;
     for (const zombie of this.enemies.zombies) {
       targets.push({ id: this.getPerceptionId(zombie), category: "enemy", ...zombie.getCenter(), bounds: zombie.getRenderBounds() });
     }
+    for (const vaccine of this.vaccinePickups) targets.push({ id: this.getPerceptionId(vaccine), category: "loot", ...vaccine.getPickupAnchor(), bounds: vaccine.getRenderBounds() });
     for (const gold of this.goldPickups) {
       targets.push({
         id: this.getPerceptionId(gold),
@@ -1824,6 +1868,8 @@ export class GameScene extends Scene {  private player!: Player;
     const specs = this.minimapMarkerSpecs;
     specs.length = 0;
     for (const mineral of this.minimapMineralMarkers) specs.push(mineral);
+    for (const vaccine of this.vaccinePickups) specs.push({ id: entityMarkerId("pickup", this.getPerceptionId(vaccine)), type: "pickup",
+      ...vaccine.getPickupAnchor(), visible: this.getEntityVisibility(vaccine) === "identified" });
     for (const gold of this.goldPickups) {
       specs.push({
         id: entityMarkerId("gold", this.getPerceptionId(gold)),
@@ -1978,6 +2024,8 @@ export class GameScene extends Scene {  private player!: Player;
       paint(zombie.getRenderBounds(), silhouetteWeight(zombie),
         (sctx, pad) => { const b = zombie.getRenderBounds(); zombie.drawSilhouette(sctx, b.x - pad, b.y - pad); });
     }
+    for (const vaccine of this.vaccinePickups) paint(vaccine.getRenderBounds(), silhouetteWeight(vaccine),
+      (sctx, pad) => vaccine.draw(sctx, vaccine.x - pad, vaccine.y - pad));
     for (const chicken of this.chickens) {
       if (!chicken.isRenderable()) continue;
       const size = chicken.getSize();
@@ -2135,6 +2183,9 @@ export class GameScene extends Scene {  private player!: Player;
       if (!visible(zombie.x, zombie.y, 80) || !drawn(zombie)) continue;
       const b = zombie.getRenderBounds(); include(b.x - cameraOffset.x - 10, b.y - cameraOffset.y - 10, b.width + 20, b.height + 20);
     }
+    for (const vaccine of this.vaccinePickups) {
+      if (visible(vaccine.x, vaccine.y, 32) && drawn(vaccine)) include(vaccine.x - cameraOffset.x - 16, vaccine.y - cameraOffset.y - 16, 52, 52);
+    }
     for (const bullet of bullets) {
       const position = bullet.getPosition();
       if (!visible(position.x, position.y, 40)) continue;
@@ -2171,13 +2222,16 @@ export class GameScene extends Scene {  private player!: Player;
       effectBounds.height = Math.max(0, maxY - minY);
     }
 
-    if (this.goldPickups.length || this.chickens.length || this.meatPickups.length || this.enemies.zombies.length) {
+    if (this.goldPickups.length || this.chickens.length || this.meatPickups.length || this.enemies.zombies.length || this.vaccinePickups.length) {
       units.save();
       // 与光照共用同一份世界坐标地形轮廓：已按瓦片内容缓存，避免每帧重建整屏裁剪路径。
       units.translate(-cameraOffset.x, -cameraOffset.y);
       units.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), "evenodd");
       units.setTransform(1, 0, 0, 1, 0, 0);
       // 和地图共用像素边界，地面投影不能覆盖墙壁、矿石的顶面。
+      for (const vaccine of this.vaccinePickups) {
+        if (visible(vaccine.x, vaccine.y, 32) && drawn(vaccine)) { units.globalAlpha = this.getEntityAlpha(vaccine); vaccine.drawShadow(units, cameraOffset.x, cameraOffset.y); }
+      }
       for (const zombie of this.enemies.zombies) {
         if (visible(zombie.x, zombie.y, 80) && drawn(zombie)) {
           units.globalAlpha = this.getEntityAlpha(zombie); zombie.drawShadow(units, cameraOffset.x, cameraOffset.y);
@@ -2207,6 +2261,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 近身剪影用不透明彩色垫底、灰色叠加来保证互补比例；此时彩色本体也必须和
     // 灰色一样受地面轮廓裁剪，否则被墙挡住的部分会以暖色压在墙顶上。
     const clipSilhouetteBodies = threeLayer && (
+      this.vaccinePickups.some(v => this.getEntitySilhouette(v) > 0.002) ||
       this.enemies.zombies.some(z => this.getEntitySilhouette(z) > 0.002) ||
       this.chickens.some(c => this.getEntitySilhouette(c) > 0.002) ||
       this.goldPickups.some(p => this.getEntitySilhouette(p) > 0.002) ||
@@ -2241,6 +2296,9 @@ export class GameScene extends Scene {  private player!: Player;
       units.restore();
     }
     // 小鸡在拾取物之上、子弹之下；随后统一做迷雾裁剪，因此迷雾外不可见。
+    for (const vaccine of this.vaccinePickups) {
+      if (visible(vaccine.x, vaccine.y, 32) && drawn(vaccine)) { units.globalAlpha = this.getEntityDrawAlpha(vaccine); vaccine.draw(units, cameraOffset.x, cameraOffset.y); }
+    }
     for (const zombie of this.enemies.zombies) {
       if (visible(zombie.x, zombie.y, 80) && drawn(zombie)) {
         units.globalAlpha = this.getEntityDrawAlpha(zombie); zombie.draw(units, cameraOffset.x, cameraOffset.y);
@@ -2378,6 +2436,7 @@ export class GameScene extends Scene {  private player!: Player;
     const loadout = this.player.getWeaponLoadoutView();
     const listLayout = getWeaponListLayout(hudWidth, hudHeight);
     this.weaponListHud.draw(ctx, loadout, hudWidth, hudHeight);
+    this.statusHud.draw(ctx, this.survival.snapshot(), hudWidth, hudHeight, listLayout.area);
     // 手电状态条贴在武器列表上方，文案右缘与弹药列右缘对齐。
     this.flashlightHud.draw(
       ctx,
@@ -2424,12 +2483,12 @@ export class GameScene extends Scene {  private player!: Player;
     const playerScreenX = (playerView.x - cameraOffset.x) * scale;
 
     const markers = this.pickupMarkers.map(entry => {
-      const halfSize = (entry.target instanceof MeatPickup ? MeatPickup.SIZE : GoldPickup.SIZE) / 2;
+      const bounds = entry.target.getRenderBounds();
       return {
         x: (entry.marker.x - cameraOffset.x) * scale,
         y: (entry.marker.y - cameraOffset.y) * scale,
         style: entry.marker.style,
-        halfHeight: halfSize * scale,
+        halfHeight: bounds.height / 2 * scale,
         target: entry.target === snapshot.target,
       };
     });
@@ -2437,13 +2496,13 @@ export class GameScene extends Scene {  private player!: Player;
     let prompt = null;
     if (snapshot.target && (snapshot.state === "focused" || snapshot.state === "holding")) {
       const anchor = snapshot.target.getPickupAnchor();
-      const halfSize = MeatPickup.SIZE / 2 * scale;
+      const bounds = snapshot.target.getRenderBounds();
       const anchorX = (anchor.x - cameraOffset.x) * scale;
       prompt = {
         x: anchorX,
         y: (anchor.y - cameraOffset.y) * scale,
-        halfWidth: halfSize,
-        halfHeight: halfSize,
+        halfWidth: bounds.width / 2 * scale,
+        halfHeight: bounds.height / 2 * scale,
         progress: snapshot.progress,
         holding: snapshot.state === "holding",
         // 玩家从右侧靠近时提示停在掉落物上方，其余情况统一在右侧。
@@ -2470,7 +2529,7 @@ export class GameScene extends Scene {  private player!: Player;
 
   /** 供浏览器验收与调试读取的拾取快照（只读用途）。 */
   getPickupDebugState() {
-    const snapshot: InteractionSnapshot<MeatPickup> = this.interaction.getSnapshot();
+    const snapshot: InteractionSnapshot<InteractablePickup> = this.interaction.getSnapshot();
     return {
       state: snapshot.state,
       progress: snapshot.progress,

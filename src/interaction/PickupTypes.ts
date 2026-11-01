@@ -52,6 +52,10 @@ export const MEAT_PICKUP_CONFIG: Readonly<PickupConfig> = Object.freeze({
   displayName: "鸡肉块",
   priority: 0,
 });
+export const VACCINE_PICKUP_CONFIG: Readonly<PickupConfig> = Object.freeze({
+  mode: 'INTERACT', duration: .5, interactionRadius: 70, discoveryRadius: 160,
+  markerStyle: 'whiteDot', displayName: '疫苗', priority: 1,
+});
 
 /** 黄金碎块：保持碰撞自动拾取，不进入交互状态机。 */
 export const GOLD_PICKUP_CONFIG: Readonly<PickupConfig> = Object.freeze({

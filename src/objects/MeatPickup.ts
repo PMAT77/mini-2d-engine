@@ -12,6 +12,7 @@ const BONE_SHADE = "#D8C8A6";
  * 与金块一样属于单位层，受迷雾和世界光照影响。
  */
 export class MeatPickup {
+  readonly kind = 'meat' as const;
   static readonly SIZE = 16;
   static readonly FALL_SECONDS = 0.28;
   private static nextId = 1;
@@ -50,6 +51,7 @@ export class MeatPickup {
   isCollected(): boolean {
     return this.collected;
   }
+  getRenderBounds() { return { x: this.x, y: this.y, width: MeatPickup.SIZE, height: MeatPickup.SIZE }; }
 
   /** 一次性结算标记：返回 false 表示这块肉已经被拾取过。 */
   markCollected(): boolean {

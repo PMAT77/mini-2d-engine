@@ -31,6 +31,7 @@ interface ColorField {
 }
 
 export interface PlayerDebugPanelOptions {
+  onReset?: () => void;
   player: Player;
   input: Input;
   canvas: HTMLCanvasElement;
@@ -664,6 +665,7 @@ export class PlayerDebugPanel {
 
   private reset(): void {
     this.player.resetLifeState();
+    this.options.onReset?.();
     this.player.applyConfig(this.initialPlayer);
     this.player.setDebugState({
       health: this.player.getMaxHealth(), stamina: this.player.getMaxStamina(),

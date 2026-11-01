@@ -5,6 +5,7 @@ import { GOLD_PICKUP_CONFIG, type PickupConfig } from "../interaction/PickupType
 
 /** 黄金碎块沿安全路径散落，落地后一直保留，直到被玩家拾取。 */
 export class GoldPickup extends GameObject {
+  getRenderBounds() { return { x: this.x, y: this.y, width: GoldPickup.SIZE, height: GoldPickup.SIZE }; }
   static readonly SIZE = GOLD_FRAGMENT_SIZE;
   static readonly SCATTER_DURATION = 0.45;
   /** 拾取配置：保持碰撞自动拾取，只额外提供金色发现点。 */
