@@ -17,6 +17,7 @@ export interface VisionViewer {
 export interface VisionTarget {
   x: number;
   y: number;
+  emittingLightId?: string;
 }
 
 export interface VisionSample {
@@ -87,7 +88,11 @@ export class VisionSensor {
       return hidden;
     }
 
-    const illuminated = illuminationAt(map, target.x, target.y, lights) >= this.illuminationThreshold;
+    const exposed = target.emittingLightId !== undefined && lights.some(light =>
+      light.id === target.emittingLightId && light.active && light.revealsDetails &&
+      lightStrengthAt(light, viewer.x, viewer.y) >= this.illuminationThreshold &&
+      hasLineOfSight(map, light.x, light.y, viewer.x, viewer.y));
+    const illuminated = exposed || illuminationAt(map, target.x, target.y, lights) >= this.illuminationThreshold;
     const range = illuminated ? this.rules.visionRange : this.rules.darkVisionRange;
     if (distance > range) {
       this.seenSeconds = 0;
@@ -100,12 +105,9 @@ export class VisionSensor {
     }
 
     const near = distance <= this.rules.nearSenseRadius;
-    let inCone = near;
-    if (!inCone) {
-      const halfAngle = this.rules.farHalfAngleDeg * (Math.PI / 180);
-      const angle = normalizeAngle(Math.atan2(target.y - viewer.y, target.x - viewer.x) - viewer.facing);
-      inCone = Math.abs(angle) <= halfAngle;
-    }
+    const halfAngle = (near ? this.rules.nearHalfAngleDeg : this.rules.farHalfAngleDeg) * Math.PI / 180;
+    const angle = normalizeAngle(Math.atan2(target.y - viewer.y, target.x - viewer.x) - viewer.facing);
+    const inCone = Math.abs(angle) <= halfAngle;
     if (!inCone) {
       this.seenSeconds = 0;
       return { ...hidden, illuminated };

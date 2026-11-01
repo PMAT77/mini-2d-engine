@@ -14,7 +14,8 @@ const emptyInput = { isKeyDown: () => false };
 globalThis.window = { innerWidth: 1200, innerHeight: 800, devicePixelRatio: 1 };
 
 const makeScene = () => {
-  const scene = new GameScene({ generateWater: false });
+  // This ore-only fixture must not randomly place a chicken in its bullet lane.
+  const scene = new GameScene({ generateWater: false, chickenCount: 0 });
   scene.map.tiles.forEach(row => row.fill('default'));
   scene.map.tileHp.forEach(row => row.fill(0));
   scene.map.tileHighlight.forEach(row => row.fill(0));

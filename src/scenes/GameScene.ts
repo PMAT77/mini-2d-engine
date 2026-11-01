@@ -4,6 +4,9 @@ import { Scene } from "../core/Scene";
 import { MenuScene } from "./MenuScene";
 import { resolveFirstDamageableHit } from "../combat/HitTargetResolver";
 import { ActorCollisionWorld } from "../physics/ActorCollisionWorld";
+import { EnemySystem, selectPlayerNoises } from "../enemies/EnemySystem";
+import type { DamageableEntry } from "../combat/HitTargetResolver";
+import { Zombie } from "../enemies/Zombie";
 import { TileMap, TileMapOptions } from "../map/TileMap";
 // 世界几何（实心地形轮廓）由 TileMap 统一提供，绘制时不再直接遍历多边形。
 import { TileTypeId, getTileType } from "../map/TileType";
@@ -165,10 +168,12 @@ export interface GameSceneOptions extends TileMapOptions {
   /** Top-left player position, applied before radius-safe encounter generation. */
   playerSpawn?: { x: number; y: number };
   encounters?: { shambler?: number; runner?: number; vaccines?: number };
+  chickenCount?: number;
 }
 
 export class GameScene extends Scene {  private player!: Player;
   private readonly actorWorld: ActorCollisionWorld;
+  private readonly enemies: EnemySystem;
   private deathAcknowledged = false;
   private deathEnterHeld = true;
   private chickens: Chicken[] = [];
@@ -365,6 +370,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 100×100 个瓦片，每格 50 像素
     this.map = sceneOptions.map ?? new TileMap(100, 100, sceneOptions);
     this.actorWorld = new ActorCollisionWorld(this.map);
+    this.enemies = new EnemySystem(this.map, this.actorWorld, sceneOptions.seed ?? Math.floor(Math.random() * 4294967296));
     if (this.visionMode === "three-layer") {
       this.perception = new PerceptionSystem({
         map: this.map,
@@ -464,7 +470,9 @@ export class GameScene extends Scene {  private player!: Player;
     this.torches.forEach(torch => this.lightingSystem.addLightSource(torch.light));
 
     // 小鸡围绕出生点随机生成，平时只在干地上自由活动；属于单位层，会被迷雾裁剪。
-    this.chickens = Chicken.spawn(this.map, GameScene.CHICKEN_COUNT, playerCenter);
+    const chickenCount = sceneOptions.chickenCount ?? GameScene.CHICKEN_COUNT;
+    if (!Number.isSafeInteger(chickenCount) || chickenCount < 0 || chickenCount > 1000) throw new Error("小鸡数量必须为 0–1000 的整数");
+    this.chickens = Chicken.spawn(this.map, chickenCount, playerCenter);
     for (const chicken of this.chickens) {
       chicken.setOnStepCallback((x, y) => this.playChickenStep(x, y));
       chicken.setOnCluckCallback((x, y, startled) => this.playChickenCluck(chicken, x, y, startled === true));
@@ -889,8 +897,9 @@ export class GameScene extends Scene {  private player!: Player;
   /** 查找子弹线段上最早接触的小鸡；只有子弹真正走到命中点时才结算伤害。 */
   private findChickenHit(startX: number, startY: number, endX: number, endY: number,
     radius: number, damage: number): BulletEntityHit | null {
-    const best = resolveFirstDamageableHit({ startX, startY, endX, endY, radius },
-      this.chickens.map((chicken, index) => ({ id: `chicken-${index}`, target: chicken })));
+    const entries: DamageableEntry[] = this.chickens.map((chicken, index) => ({ id: `chicken-${index}`, target: chicken }));
+    for (const zombie of this.enemies.zombies) entries.push({ id: zombie.id, target: zombie });
+    const best = resolveFirstDamageableHit({ startX, startY, endX, endY, radius }, entries);
     if (!best) return null;
     const target = best;
     return {
@@ -898,7 +907,11 @@ export class GameScene extends Scene {  private player!: Player;
       x: target.x,
       y: target.y,
       // 伤害与命中点都取真实命中快照；准星在鸡身后不会改变任何一项。
-      apply: (impact: BulletImpact) => this.damageChicken(target.entry.target, impact),
+      apply: (impact: BulletImpact) => {
+        const entity = target.entry.target;
+        if (entity instanceof Chicken) this.damageChicken(entity, impact);
+        else this.enemies.receiveHit(entity as Zombie, impact);
+      },
     };
   }
 
@@ -1380,6 +1393,8 @@ export class GameScene extends Scene {  private player!: Player;
         this.player.x = spawn.x;
         this.player.y = spawn.y;
       }
+      this.actorWorld.sync();
+      this.enemies.spawn(this.sceneOptions.encounters ?? {}, this.player.getVisionState());
       onProgress?.(1, 1);
       this.loaded = true;
     })();
@@ -1433,6 +1448,7 @@ export class GameScene extends Scene {  private player!: Player;
   onExit(): void {
     this.active = false;
     this.actorWorld.clear();
+    this.enemies.dispose();
     // 循环音效不会自己停，离开场景时立即收掉，免得声音跟着残留。
     this.sfx.stopLoops();
     // 换弹声也要跟着停，否则重进场景后还会响到采样结束。
@@ -1546,6 +1562,13 @@ export class GameScene extends Scene {  private player!: Player;
     // 小鸡视觉与玩家三层视野共用同一份灯列表，避免两套光照判断漂移。
     this.rebuildPerceptionLights();
 
+    this.enemies.update(delta, {
+      target: { x: playerCenterX, y: playerCenterY, alive: this.player.isAlive(), radius: this.player.getCollider().radius, emittingLightId: "flashlight" },
+      lights: this.perceptionLights,
+      playerNoises: selectPlayerNoises(this.noiseSystem.getEvents()),
+    });
+    this.enemies.consumeDeaths();
+
     // 小鸡只在干地自由游荡，不读取玩家输入；感知刺激由场景统一提供。
     this.chickens.forEach(chicken => chicken.update(delta, input, this.map, {
       targetX: playerCenterX,
@@ -1634,6 +1657,7 @@ export class GameScene extends Scene {  private player!: Player;
 
   /** 供敌人听觉、调试面板与测试读取的噪声总线（只读用途，写入仍由场景负责）。 */
   getNoiseSystem(): NoiseSystem { return this.noiseSystem; }
+  getEnemySystem(): EnemySystem { return this.enemies; }
 
   /**
    * 重建本帧感知光源：玩家微光、手电与点燃的火把。
@@ -1714,6 +1738,9 @@ export class GameScene extends Scene {  private player!: Player;
         y: chicken.y + size / 2,
         bounds: { x: chicken.x, y: chicken.y, width: size, height: size },
       });
+    }
+    for (const zombie of this.enemies.zombies) {
+      targets.push({ id: this.getPerceptionId(zombie), category: "enemy", ...zombie.getCenter(), bounds: zombie.getRenderBounds() });
     }
     for (const gold of this.goldPickups) {
       targets.push({
@@ -1939,6 +1966,10 @@ export class GameScene extends Scene {  private player!: Player;
     ctx.clip(ground, "evenodd");
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
+    for (const zombie of this.enemies.zombies) {
+      paint(zombie.getRenderBounds(), silhouetteWeight(zombie),
+        (sctx, pad) => { const b = zombie.getRenderBounds(); zombie.drawSilhouette(sctx, b.x - pad, b.y - pad); });
+    }
     for (const chicken of this.chickens) {
       if (!chicken.isRenderable()) continue;
       const size = chicken.getSize();
@@ -2090,6 +2121,10 @@ export class GameScene extends Scene {  private player!: Player;
       if (!visible(chicken.x, chicken.y, 72) || !drawn(chicken)) continue;
       include(chicken.x - cameraOffset.x - 40, chicken.y - cameraOffset.y - 40, 120, 120);
     }
+    for (const zombie of this.enemies.zombies) {
+      if (!visible(zombie.x, zombie.y, 80) || !drawn(zombie)) continue;
+      const b = zombie.getRenderBounds(); include(b.x - cameraOffset.x - 10, b.y - cameraOffset.y - 10, b.width + 20, b.height + 20);
+    }
     for (const bullet of bullets) {
       const position = bullet.getPosition();
       if (!visible(position.x, position.y, 40)) continue;
@@ -2126,13 +2161,18 @@ export class GameScene extends Scene {  private player!: Player;
       effectBounds.height = Math.max(0, maxY - minY);
     }
 
-    if (this.goldPickups.length || this.chickens.length || this.meatPickups.length) {
+    if (this.goldPickups.length || this.chickens.length || this.meatPickups.length || this.enemies.zombies.length) {
       units.save();
       // 与光照共用同一份世界坐标地形轮廓：已按瓦片内容缓存，避免每帧重建整屏裁剪路径。
       units.translate(-cameraOffset.x, -cameraOffset.y);
       units.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), "evenodd");
       units.setTransform(1, 0, 0, 1, 0, 0);
       // 和地图共用像素边界，地面投影不能覆盖墙壁、矿石的顶面。
+      for (const zombie of this.enemies.zombies) {
+        if (visible(zombie.x, zombie.y, 80) && drawn(zombie)) {
+          units.globalAlpha = this.getEntityAlpha(zombie); zombie.drawShadow(units, cameraOffset.x, cameraOffset.y);
+        }
+      }
       for (const pickup of this.goldPickups) {
         if (visible(pickup.x, pickup.y, 48) && drawn(pickup)) {
           units.globalAlpha = this.getEntityAlpha(pickup);
@@ -2157,6 +2197,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 近身剪影用不透明彩色垫底、灰色叠加来保证互补比例；此时彩色本体也必须和
     // 灰色一样受地面轮廓裁剪，否则被墙挡住的部分会以暖色压在墙顶上。
     const clipSilhouetteBodies = threeLayer && (
+      this.enemies.zombies.some(z => this.getEntitySilhouette(z) > 0.002) ||
       this.chickens.some(c => this.getEntitySilhouette(c) > 0.002) ||
       this.goldPickups.some(p => this.getEntitySilhouette(p) > 0.002) ||
       this.meatPickups.some(p => this.getEntitySilhouette(p) > 0.002) ||
@@ -2190,6 +2231,11 @@ export class GameScene extends Scene {  private player!: Player;
       units.restore();
     }
     // 小鸡在拾取物之上、子弹之下；随后统一做迷雾裁剪，因此迷雾外不可见。
+    for (const zombie of this.enemies.zombies) {
+      if (visible(zombie.x, zombie.y, 80) && drawn(zombie)) {
+        units.globalAlpha = this.getEntityDrawAlpha(zombie); zombie.draw(units, cameraOffset.x, cameraOffset.y);
+      }
+    }
     for (const chicken of this.chickens) {
       if (visible(chicken.x, chicken.y, 72) && drawn(chicken)) {
         units.globalAlpha = this.getEntityDrawAlpha(chicken);
@@ -2509,8 +2555,8 @@ export class GameScene extends Scene {  private player!: Player;
       && !this.perception.canIdentify("player", world.x, world.y)) {
       return false;
     }
-    return this.chickens.some(chicken =>
-      chicken.hitTestSegment(world.x, world.y, world.x, world.y, 0) !== null);
+    return [...this.chickens, ...this.enemies.zombies].some(target =>
+      target.hitTestSegment(world.x, world.y, world.x, world.y, 0) !== null);
   }
 
   /** 重建单位可见性遮罩：以角色为中心的圆形柔边迷雾。 */

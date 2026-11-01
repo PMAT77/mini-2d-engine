@@ -26,6 +26,7 @@ export class HearingSensor {
   private readonly rules: SenseRules;
   /** 已经处理过的最大事件 id：同一个事件不会重复触发听觉。 */
   private lastProcessedId = 0;
+  private heardIds = new Set<number>();
 
   constructor(rules: SenseRules = DEFAULT_SENSE_RULES) {
     this.rules = createSenseRules(rules);
@@ -35,11 +36,13 @@ export class HearingSensor {
     const threshold = listener.threshold ?? this.rules.hearingThreshold;
     const heard: SoundStimulus[] = [];
     let newestId = this.lastProcessedId;
+    const freshIds = new Set(events.filter(e => e.age <= this.rules.freshnessSeconds).map(e => e.id));
+    for (const id of this.heardIds) if (!freshIds.has(id)) this.heardIds.delete(id);
 
     for (const event of events) {
       if (!Number.isFinite(event.x) || !Number.isFinite(event.y)) continue;
       if (event.age > this.rules.freshnessSeconds) continue;
-      if (event.id <= this.lastProcessedId) continue;
+      if (this.heardIds.has(event.id)) continue;
 
       const distance = Math.hypot(listener.x - event.x, listener.y - event.y);
       let gain = computeAudibleGain(distance, event.radius);
@@ -66,15 +69,17 @@ export class HearingSensor {
       });
       // 只有真正可闻的事件才推进水位：后进入听觉范围的事件仍能被消费。
       if (event.id > newestId) newestId = event.id;
+      this.heardIds.add(event.id);
     }
 
     if (newestId > this.lastProcessedId) this.lastProcessedId = newestId;
-    heard.sort((a, b) => b.strength - a.strength);
+    heard.sort((a, b) => b.strength - a.strength || a.age - b.age || a.eventId - b.eventId);
     return heard;
   }
 
   reset(): void {
     this.lastProcessedId = 0;
+    this.heardIds.clear();
   }
 
   getLastProcessedId(): number {
