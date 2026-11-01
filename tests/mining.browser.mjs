@@ -32,6 +32,9 @@ try {
       scene.goldPickups = []; scene.goldDroppedByTile.clear(); scene.particleSystem.clear();
       scene.player.x = scene.player.y = 200;
       scene.map.tiles[4][6] = 'mineral'; scene.map.tileHp[4][6] = 100;
+      // 矿石要挨 10 发才碎，而手枪是 6+1 发；默认关闭自动换弹时打空即停，这里打开调试面板里的自动换弹，
+      // 让连续按住左键的射击在换弹后接上，断言的命中节奏才成立。
+      scene.player.setAutoReload(true);
       window.stagedMining = {
         scene, hits: [], safe: true, lastHp: 100,
         tick(input = game.input) {
@@ -172,6 +175,10 @@ try {
         const { GoldPickup } = await import('/src/objects/GoldPickup.ts');
         const game = miningGame, scene = game.sceneManager.getCurrentScene();
         scene.update = () => {};
+        // 三层视野只画已辨识的单位：临时造出来的金块没有感知记录（hidden, alpha 0），
+        // 这一段测的是影子与光晕的合成，所以先摘掉感知遮挡，采样完再放回去。
+        const perception = scene.perception;
+        scene.perception = null;
         const { onTileDestroyed, onTileDamaged } = scene.map;
         scene.map = new scene.map.constructor(100, 100, { generateWater: false });
         scene.map.onTileDestroyed = onTileDestroyed;
@@ -181,6 +188,8 @@ try {
         scene.pickupItems = []; scene.particleSystem.clear();
         scene.player.x = side === 'left' ? 200 : 570; scene.player.y = 279.5;
         scene.player.currentRotation = side === 'left' ? Math.PI : 0;
+        // 火把的闪烁相位是随机的，留着会让基准亮度每次跑都不一样；这一段只测玩家光下的影子与光晕。
+        scene.torches.forEach(t => scene.lightingSystem.removeLightSource(t.light)); scene.torches = [];
         const Vector2 = scene.player.getVelocity().constructor;
         scene.playerLight.setPosition(new Vector2(scene.player.x + scene.player.getSize() / 2, 304));
         scene.camera.x = 37.25; scene.camera.y = 19.75;
@@ -192,31 +201,42 @@ try {
           // A floating sparkle can cross one pixel of the shadow; compare the ground patch.
           return luminance.sort((a, b) => a - b)[12];
         };
-        scene.goldPickups = []; scene.draw(miningGame.renderer.ctx);
         const shadowX = side === 'left' ? 412 : 396;
-        const baseline = sample(shadowX, 304);
+        const litX = side === 'left' ? 396 : 412;
+        const nearEndX = side === 'left' ? 415 : 393;
+        const beyondX = side === 'left' ? 424 : 384;
         const piece = new GoldPickup(400, 300, 400, 300);
         piece.glowPhase = 0.4; piece.update(1);
-        scene.goldPickups = [piece]; scene.draw(miningGame.renderer.ctx);
-        const shadow = sample(shadowX, 304);
-        const litSide = sample(side === 'left' ? 396 : 412, 304);
-        // Test the final scene, including multiply lighting and the additive loot aura.
-        // A gray isolated canvas used to pass while the aura erased the real shadow.
-        const nearEnd = sample(side === 'left' ? 415 : 393, 304);
-        const beyond = sample(side === 'left' ? 424 : 384, 304);
-        const neighborX = side === 'left' ? 414 : 386;
+        // 邻居放在受光侧：光晕是加色后处理层，压不过影子层；放在影子取样点上必然把影子冲亮。
+        const neighborX = side === 'left' ? 386 : 414;
         const neighbor = new GoldPickup(neighborX, 300, neighborX, 300);
         neighbor.glowPhase = 0.4; neighbor.update(1);
-        scene.goldPickups.push(neighbor); scene.draw(miningGame.renderer.ctx);
-        const crowdedShadow = sample(shadowX, 304);
-        return { baseline, shadow, litSide, nearEnd, beyond, crowdedShadow };
+        // 绝对亮度会随光晕强弱、场景时间、火把相位漂移，所以“影子可见”只能在同一帧光晕下的有影/无影两次绘制里比：
+        // 影子层只会让地面变暗，基准多亮都无所谓。
+        const measure = (list, shadowed) => {
+          const saved = list.map(p => p.drawShadow);
+          if (!shadowed) list.forEach(p => { p.drawShadow = () => {}; });
+          scene.goldPickups = list;
+          scene.draw(miningGame.renderer.ctx);
+          const values = [sample(shadowX, 304), sample(litX, 304), sample(nearEndX, 304), sample(beyondX, 304)];
+          list.forEach((p, index) => { p.drawShadow = saved[index]; });
+          return { shadow: values[0], litSide: values[1], nearEnd: values[2], beyond: values[3] };
+        };
+        const plain = measure([piece], false);
+        const shadowed = measure([piece], true);
+        const crowdedPlain = measure([piece, neighbor], false);
+        const crowded = measure([piece, neighbor], true);
+        scene.perception = perception;
+        return { plain, shadowed, crowdedPlain, crowded };
       }, side);
       await page.screenshot({ path: `${output}/mining-shadow-${side}-dpr${dpr}.png` });
       console.log(JSON.stringify({ dpr, side, ...result }));
-      assert.ok(result.shadow < result.baseline * 0.65, `loot shadow must stay visible after the glow: ${JSON.stringify(result)}`);
-      assert.ok(result.crowdedShadow < result.baseline * 0.65, 'neighboring loot glow must not erase the shadow');
-      assert.ok(result.litSide > result.shadow + 8, 'shadow must face away from the light');
-      assert.ok(result.beyond > result.nearEnd, 'shadow must end close to the gold');
+      const shadowDrop = result.plain.shadow - result.shadowed.shadow;
+      const crowdedDrop = result.crowdedPlain.shadow - result.crowded.shadow;
+      assert.ok(shadowDrop >= 4, `loot shadow must stay visible after the glow: ${JSON.stringify(result)}`);
+      assert.ok(crowdedDrop >= 4, 'neighboring loot glow must not erase the shadow');
+      assert.ok(Math.abs(result.shadowed.litSide - result.plain.litSide) <= 1, 'shadow must face away from the light');
+      assert.ok(Math.abs(result.shadowed.beyond - result.plain.beyond) <= 2, 'shadow must end close to the gold');
       const topChanges = await page.evaluate(async side => {
         const { GoldPickup } = await import('/src/objects/GoldPickup.ts');
         const scene = miningGame.sceneManager.getCurrentScene(), ctx = scene.worldContext;
