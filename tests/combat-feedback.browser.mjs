@@ -48,6 +48,8 @@ try {
     const frozen = await page.evaluate(() => JSON.stringify(window.fixture.scene.getCombatFeedbackState()));
     await page.evaluate(() => window.fixture.tick(180, 1/30));
     assert.equal(await page.evaluate(() => JSON.stringify(window.fixture.scene.getCombatFeedbackState())), frozen, 'feedback pauses with F2');
+    await page.evaluate(()=>{window.fixture.scene.getPlayer().resetLifeState();window.fixture.tick();});
+    assert.deepEqual(await page.evaluate(()=>window.fixture.scene.getCombatFeedbackState().player),[],'explicit life reset clears old damage glow even while paused');
     assert.deepEqual(errors, []); cases++; await context.close();
   }
   {
@@ -77,5 +79,45 @@ try {
     assert.notDeepEqual(poses[1].parts,poses[3].parts,'windup and impact have visibly distinct geometry');
     await page.screenshot({ path: `${output}/attack-sequence.png` }); cases++; await page.close();
   }
-  console.log(`Combat feedback browser: ${cases} DPR/layout, eight-direction, white-flash, attack-pose and pause cases passed.`);
+  for (const dpr of [1, 1.25, 2]) {
+    const context = await browser.newContext({ viewport: { width:1280,height:720 }, deviceScaleFactor:dpr });
+    const page = await context.newPage(), errors=[]; page.on('pageerror', e=>errors.push(e.message));
+    await page.goto(`${process.env.TEST_BASE_URL || 'http://127.0.0.1:5173'}/tests/zombie-fixture.html?count=0`); await page.waitForFunction(()=>window.fixture);
+    const immediate = await page.evaluate(()=>{
+      const f=window.fixture,p=f.scene.getPlayer(),v=p.getVisionState(),c=p.getCollider().pose;
+      const z=f.addEnemy('runner',c.x+Math.cos(v.direction)*85,c.y+Math.sin(v.direction)*85,0);
+      f.scene.updatePerception(.4); f.scene.draw(f.game.renderer.ctx);
+      const before=f.scene.getZombieDebugState().actors;
+      const impact={damage:1000,point:z.getCenter(),direction:{x:1,y:0},impulse:200,impactSpeed:100,initialSpeed:100,traveledDistance:1,source:'bullet'};
+      f.scene.getEnemySystem().receiveHit(z,impact);
+      const after=f.scene.getZombieDebugState().actors;
+      f.tick(1,0); const first=f.scene.getCombatFeedbackState();
+      f.scene.getEnemySystem().receiveHit(z,impact); f.tick(1,0);
+      return {before,after,life:z.getLifeState(),first,again:f.scene.getCombatFeedbackMetrics()};
+    });
+    assert.equal(immediate.before-immediate.after,1); assert.equal(immediate.life,'removed');
+    assert.equal(immediate.first.gore.flying.length,6); assert.equal(immediate.again.flying,6); assert.equal(immediate.again.blood,1);
+    await page.screenshot({path:`${output}/remains-flash-dpr-${dpr}.png`});
+    await page.evaluate(()=>window.fixture.tick(1,.18)); await page.screenshot({path:`${output}/remains-flight-dpr-${dpr}.png`});
+    await page.keyboard.press('F2'); await page.evaluate(()=>window.fixture.tick());
+    const frozen=await page.evaluate(()=>JSON.stringify(window.fixture.scene.getCombatFeedbackState()));
+    await page.evaluate(()=>window.fixture.tick(180,1/30));
+    assert.equal(await page.evaluate(()=>JSON.stringify(window.fixture.scene.getCombatFeedbackState())),frozen,'flying remains and permanent decals freeze');
+    await page.keyboard.press('F2'); await page.evaluate(()=>window.fixture.tick(1,.7));
+    assert.equal(await page.evaluate(()=>window.fixture.scene.getCombatFeedbackMetrics().settled),6);
+    await page.screenshot({path:`${output}/remains-ground-dpr-${dpr}.png`});
+    const hidden=await page.evaluate(()=>{
+      const f=window.fixture,s=f.scene,z=f.addEnemy('shambler',1250,750,0);s.updatePerception(.4);s.draw(f.game.renderer.ctx);
+      const v=s.displayedView,ctx=s.worldContext,x=Math.max(0,Math.round(1170-v.x)),y=Math.max(0,Math.round(670-v.y));
+      const w=Math.min(160,ctx.canvas.width-x),h=Math.min(160,ctx.canvas.height-y);
+      const before=[...ctx.getImageData(x,y,w,h).data], identifiable=s.perception.canIdentify('player',1250,750);
+      s.getEnemySystem().receiveHit(z,{damage:1000,point:z.getCenter(),direction:{x:1,y:0},impulse:200,impactSpeed:100,initialSpeed:100,traveledDistance:1,source:'bullet'});f.tick(1,0);
+      return {identifiable,unchanged:JSON.stringify(before)===JSON.stringify([...ctx.getImageData(x,y,w,h).data])};
+    });
+    assert.equal(hidden.identifiable,false); assert.equal(hidden.unchanged,true,'hidden death gives no blood, flash or fragment detail');
+    const cleared=await page.evaluate(()=>{const s=window.fixture.scene;s.onExit();return s.getCombatFeedbackState();});
+    assert.deepEqual(cleared.player,[]);assert.deepEqual(cleared.gore,{drops:[],flying:[],settled:[]});assert.deepEqual(cleared.blood,{zombies:[],chickens:[]});
+    assert.deepEqual(errors,[]);cases++;await context.close();
+  }
+  console.log(`Combat feedback browser: ${cases} DPR/layout, directional glow, strike, gore, visibility, pause and cleanup cases passed.`);
 } finally { await browser.close(); }

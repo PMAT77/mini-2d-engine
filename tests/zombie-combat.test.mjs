@@ -63,13 +63,17 @@ test('gun hits always damage, only cooldown-ready hits stun and pending attacks 
   assert.equal(z.attack.getRecoveryDeadline(), deadline);
 });
 
-test('fatal bullets cancel attacks and navigation; corpse blocks until exactly one death completion', () => {
+test('fatal bullets immediately cancel attacks/navigation, unblock actors and emit one immutable death', () => {
   const f = setup(), z = f.enemies.add('runner', { x: 225, y: 225 }, 0);
-  z.attack.start(0, 0); f.enemies.receiveHit(z, impact(100)); assert.equal(z.getLifeState(), 'dying'); assert.equal(f.actors.size, 2);
+  z.attack.start(0, 0); const hit = impact(100); f.enemies.receiveHit(z, hit);
+  assert.equal(z.getLifeState(), 'removed'); assert.equal(f.actors.size, 1); assert.equal(f.enemies.zombies.length, 0);
+  const deaths = f.enemies.consumeDeaths(); assert.equal(deaths.length,1); assert.equal(deaths[0].elapsedSeconds,0);
+  hit.direction.x = 999; assert.equal(deaths[0].impact.direction.x,1); assert.ok(Object.isFrozen(deaths[0].pose));
+  assert.equal(f.enemies.receiveHit(z,impact(100)),'ignored');
   for (let i = 0; i < 5; i++) tick(f, 1 / 60);
-  assert.equal(f.actors.size, 2); assert.equal(f.player.getHealth(), 100);
+  assert.equal(f.actors.size, 1); assert.equal(f.player.getHealth(), 100);
   for (let i = 0; i < 35; i++) tick(f, 1 / 60);
-  assert.equal(f.actors.size, 1); assert.equal(f.enemies.consumeDeaths().length, 1); assert.equal(f.enemies.consumeDeaths().length, 0); assert.equal(f.enemies.zombies.length, 0);
+  assert.equal(f.actors.size, 1); assert.equal(f.enemies.consumeDeaths().length, 0); assert.equal(f.enemies.zombies.length, 0);
 });
 
 test('real player rolls cannot pass a zombie group and a fixed player is never moved by overlap repair', () => {
@@ -85,7 +89,7 @@ test('real player rolls cannot pass a zombie group and a fixed player is never m
   f.actors.sync(); const x = p.x; f.actors.separate(); assert.equal(p.x, x);
 });
 
-test('zombie knockback can enter walkable water and corpse deadlines remain consistent across FPS', () => {
+test('zombie knockback can enter walkable water and death removes it immediately across FPS', () => {
   for (const fps of [30, 60, 144]) {
     const f = setup(); for (const row of f.map.tiles) for (let x = 4; x < 16; x++) row[x] = 'water'; f.map.invalidateNavigation();
     const z = f.enemies.add('runner', { x: 150, y: 225 }, 0);
@@ -93,9 +97,8 @@ test('zombie knockback can enter walkable water and corpse deadlines remain cons
     for (let i = 0; i < fps; i++) z.update(1/fps, idle, f.map);
     assert.ok(z.getCenter().x > 185, `water knockback at ${fps} FPS`);
     f.enemies.receiveHit(z, { ...impact(100), impulse: 100 });
-    let elapsed = 0, event = null;
-    for (let i = 0; i < fps && !event; i++) { z.update(1/fps, idle, f.map); elapsed += 1/fps; event = z.consumeDeathFinished(); }
-    assert.ok(event); assert.ok(Math.abs(elapsed - event.elapsedSeconds) <= 1/fps + 1e-9); assert.equal(z.consumeDeathFinished(), null);
+    const event = f.enemies.consumeDeaths()[0]; assert.ok(event); assert.equal(event.elapsedSeconds,0);
+    assert.equal(z.getLifeState(),'removed'); assert.equal(f.actors.size,1); assert.equal(f.enemies.consumeDeaths().length,0);
   }
 });
 

@@ -15,7 +15,8 @@ import { ZOMBIE_CONFIG } from './ZombieConfig';
 import type { ZombieKind } from './ZombieConfig';
 import { EncounterSpawning } from './EncounterSpawning';
 import type { SpawnReport } from './EncounterSpawning';
-import type { BulletImpact, DeathFinished, HitResult } from '../combat/CombatTypes';
+import type { BulletImpact, HitResult } from '../combat/CombatTypes';
+import type { ZombieDeathEvent } from './Zombie';
 import { snapshotBulletImpact } from '../combat/CombatTypes';
 import { sectorIntersectsCircle } from './MeleeAttackController';
 import type { AttackMoment } from './MeleeAttackController';
@@ -45,14 +46,14 @@ export class EnemySystem {
   readonly navigation: NavigationScheduler;
   private records: EnemyRecord[] = [];
   private nextId = 0;
-  private deathEvents: DeathFinished[] = [];
+  private deathEvents: ZombieDeathEvent[] = [];
   private hitEffects: Readonly<BulletImpact>[] = [];
   readonly spawnReports: SpawnReport[] = [];
   readonly metrics = { perceptionMs: 0, navigationMs: 0, movementMs: 0 };
   constructor(readonly map: TileMap, private readonly actors: ActorCollisionWorld, private readonly seed: number, private readonly noises?: NoiseSystem) {
     this.navigation = new NavigationScheduler(map);
   }
-  get zombies(): readonly Zombie[] { return this.records.map(r => r.zombie); }
+  get zombies(): readonly Zombie[] { return this.records.filter(r => r.zombie.getLifeState() !== 'removed').map(r => r.zombie); }
   add(kind: ZombieKind, center: Point, facing = 0): Zombie {
     const id = `zombie-${++this.nextId}`, config = ZOMBIE_CONFIG[kind], random = seededRandom((this.seed ^ Math.imul(this.nextId, 0x9e3779b1)) >>> 0);
     const zombie = new Zombie(id, center.x - config.size / 2, center.y - config.size / 2, config, facing);
@@ -85,7 +86,10 @@ export class EnemySystem {
       resolveMotion: (body, move, rotation = 0) => this.actors.resolve(zombie.id, body, move, rotation),
     });
     if (result !== 'ignored') this.hitEffects.push(snapshotBulletImpact(impact));
-    if (!zombie.isAlive()) this.navigation.cancel(zombie.id);
+    if (!zombie.isAlive()) {
+      this.navigation.cancel(zombie.id); this.actors.unregister(zombie.id);
+      const death = zombie.consumeDeathFinished(); if (death) this.deathEvents.push(death);
+    }
     return result;
   }
   findBySoundId(id?: string): Zombie | undefined { return this.records.find(r => r.zombie.id === id)?.zombie; }
@@ -160,7 +164,7 @@ export class EnemySystem {
     this.records = this.records.filter(r => r.zombie.getLifeState() !== 'removed');
     this.actors.separate(); this.metrics.movementMs = clock() - moveStart;
   }
-  consumeDeaths(): DeathFinished[] { const events = this.deathEvents; this.deathEvents = []; return events; }
+  consumeDeaths(): ZombieDeathEvent[] { const events = this.deathEvents; this.deathEvents = []; return events; }
   consumeHitEffects(): readonly Readonly<BulletImpact>[] { const events = this.hitEffects; this.hitEffects = []; return events; }
   settleAttacks(player: Player, onHit?: (result: PlayerDamageResult, zombie: Zombie, attackId: string, random: () => number) => void): void {
     this.intents.sort((a, b) => a.occurredAt - b.occurredAt || a.attackId.localeCompare(b.attackId));
@@ -184,7 +188,7 @@ export class EnemySystem {
     }
   }
   snapshot() {
-    return this.records.map(r => ({ id: r.zombie.id, kind: r.zombie.config.kind, ...r.zombie.getCenter(), life: r.zombie.getLifeState(), health: r.zombie.getHealth(),
+    return this.records.filter(r => r.zombie.getLifeState() !== 'removed').map(r => ({ id: r.zombie.id, kind: r.zombie.config.kind, ...r.zombie.getCenter(), life: r.zombie.getLifeState(), health: r.zombie.getHealth(),
       state: r.behavior.getState(), action: r.zombie.getActionState(), memory: r.behavior.memory.snapshot(), goal: r.behavior.getGoal(), path: r.path.map(p => ({ ...p })), navigation: r.result?.status ?? null }));
   }
   dispose(): void { for (const r of this.records) this.actors.unregister(r.zombie.id); this.records = []; this.deathEvents = []; this.hitEffects = []; this.intents = []; this.navigation.clear(); }

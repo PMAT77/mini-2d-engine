@@ -24,9 +24,8 @@ test('both types preserve confirmation, stun, attack impact, death and search ti
     for(let i=1;i<=Math.ceil((config.windup+config.recovery+.1)*fps);i++)if(attack.advance(i*dt)){hits++;hitTime=i*dt;}
     assert.equal(hits,1);within(hitTime,config.windup,'impact');
 
-    z.receiveHit(impact(1000));let death=0,event=null;
-    for(let i=0;i<fps&&!event;i++){z.update(dt,idle,map);death+=dt;event=z.consumeDeathFinished();}
-    assert.ok(event);within(death,config.knockback.minDeathSeconds,'death');assert.equal(z.consumeDeathFinished(),null);
+    z.receiveHit(impact(1000));const event=z.consumeDeathFinished();
+    assert.ok(event);assert.equal(z.getLifeState(),'removed');assert.equal(event.elapsedSeconds,0);assert.equal(z.consumeDeathFinished(),null);
 
     const behavior=new ZombieBehavior(config,seededRandom(1)),point={x:400,y:400};
     behavior.update(0,point,point,null);behavior.update(0,point,null,null);assert.equal(behavior.getState(),'search');

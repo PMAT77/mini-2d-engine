@@ -160,6 +160,7 @@ export class Player extends Entities {
   private deathCause: Readonly<PlayerDamageEvent> | null = null;
   private damageEvents: PlayerDamageApplied[] = [];
   private damageSequence = 0;
+  private lifeResetVersion = 0;
   private meleeGrace = 0;
   private maxHealth = 100;
   private gold = 0;
@@ -240,6 +241,7 @@ export class Player extends Entities {
   }
   isAlive(): boolean { return this.lifeState === 'alive'; }
   getLifeState(): PlayerLifeState { return this.lifeState; }
+  getLifeResetVersion(): number { return this.lifeResetVersion; }
   getDeathCause(): Readonly<PlayerDamageEvent> | null { return this.deathCause; }
   consumeDeathEvent(): Readonly<PlayerDamageEvent> | null {
     const event = this.deathEvent; this.deathEvent = null; return event;
@@ -280,6 +282,7 @@ export class Player extends Entities {
     return { appliedAmount, killed, blocked: false };
   }
   resetLifeState(): void {
+    this.lifeResetVersion++;
     this.lifeState = 'alive'; this.health = this.maxHealth; this.meleeGrace = 0;
     this.deathCause = this.deathEvent = null;
     this.damageEvents = [];

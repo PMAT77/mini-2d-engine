@@ -5,7 +5,7 @@ import { join } from 'node:path';
 const require = createRequire(import.meta.url);
 const load = path => require(join(process.env.TEST_BUILD_DIR, path + '.js'));
 const {
-  BloodStainSystem, BLOOD_HOLD_SECONDS, BLOOD_FADE_SECONDS, BLOOD_MIN_RADIUS, BLOOD_MAX_RADIUS,
+  BloodStainSystem, BLOOD_MIN_RADIUS, BLOOD_MAX_RADIUS,
 } = load('objects/BloodStainSystem');
 const { Chicken } = load('objects/Chicken');
 const { MeatPickup } = load('objects/MeatPickup');
@@ -58,17 +58,15 @@ test('blood only lands on dry walkable ground and shrinks to fit beside walls', 
   assert.equal(new BloodStainSystem(() => 1).spawn(196, 225, wall), false);
 });
 
-test('blood holds for four seconds, then fades smoothly and expires', () => {
+test('blood survives thirty minutes and more than 48 deaths, with no eviction before explicit clear', () => {
   const blood = new BloodStainSystem(() => .5);
   assert.equal(blood.spawn(225, 225, ground()), true);
-  blood.update(BLOOD_HOLD_SECONDS - .01);
-  assert.equal(blood.getStains()[0].alpha, 1);
-  blood.update(.02);
-  assert.ok(blood.getStains()[0].alpha < 1);
-  blood.update(BLOOD_FADE_SECONDS / 2 - .01);
-  near(blood.getStains()[0].alpha, .5, 1e-3);
-  blood.update(BLOOD_FADE_SECONDS);
-  assert.equal(blood.getActiveCount(), 0);
+  const first = blood.getStains()[0], map = ground();
+  for (let i = 0; i < 99; i++) assert.equal(blood.spawn(225, 225, map), true);
+  blood.update(1800);
+  assert.equal(blood.getActiveCount(), 100); assert.deepEqual(blood.getStains()[0], first);
+  assert.ok(blood.getStains().every(s => s.alpha === 1));
+  blood.clear(); assert.equal(blood.getActiveCount(), 0);
 
   const stable = new BloodStainSystem(() => .5);
   stable.spawn(225, 225, ground());
@@ -90,10 +88,10 @@ test('stain size and splatter layout vary within their bounds', () => {
 
 const alphaOf = color => parseFloat(color.slice(color.lastIndexOf(',') + 1));
 
-test('drawing applies the fade alpha, keeps a visible rim, never strokes, and culls offscreen stains', () => {
+test('drawing keeps full alpha and a visible rim, never strokes, and culls offscreen stains', () => {
   const blood = new BloodStainSystem(() => .5);
   blood.spawn(225, 225, ground());
-  blood.update(BLOOD_HOLD_SECONDS + BLOOD_FADE_SECONDS / 2);
+  blood.update(1800);
   const calls = [];
   const stops = [];
   const ctx = {
@@ -109,7 +107,7 @@ test('drawing applies the fade alpha, keeps a visible rim, never strokes, and cu
   blood.draw(ctx, 0, 0, 800, 600);
   assert.ok(calls.includes('fill'));
   assert.ok(!calls.includes('stroke'), 'blood must not draw an outlined edge');
-  assert.ok(ctx.globalAlpha > 0 && ctx.globalAlpha < 1);
+  assert.equal(ctx.globalAlpha, 1);
 
   // 肉块会压在血迹正中：渐变靠边必须留下一圈看得见的血，不能一路淡到零。
   const rim = stops.find(stop => stop.offset >= 0.8 && stop.offset < 1);
@@ -127,30 +125,20 @@ test('even the smallest blood pool is wider than the meat chunk dropped on it', 
     `pool diameter ${BLOOD_MIN_RADIUS * 2} must exceed meat size ${MeatPickup.SIZE}`);
 });
 
-test('blood under an uncollected meat chunk stays until the chunk is gone', () => {
+test('spatial queries skip distant permanent stains and visibility filtering hides their details', () => {
   const blood = new BloodStainSystem(() => .5);
-  const release = blood.spawnSustained(225, 225, ground());
-  assert.ok(release, 'a sustained splatter reports how to release it');
-
-  // 肉块一直没捡：远超正常寿命后血迹仍原样留在原地。
-  for (let second = 0; second < 60; second++) blood.update(1);
-  assert.equal(blood.getActiveCount(), 1);
-  assert.equal(blood.getStains()[0].alpha, 1);
-
-  // 肉块被捡走后才重新开始 4 秒保留，再平滑淡出。
-  release();
-  blood.update(BLOOD_HOLD_SECONDS - .01);
-  assert.equal(blood.getStains()[0].alpha, 1);
-  blood.update(.02);
-  assert.ok(blood.getStains()[0].alpha < 1);
-  blood.update(BLOOD_FADE_SECONDS);
-  assert.equal(blood.getActiveCount(), 0);
+  const map = ground(256, 16);
+  blood.spawn(225,225,map);
+  for(let i=0;i<50;i++) blood.spawn(5025+i*100,225,map);
+  const ctx = { save(){},restore(){} };
+  blood.draw(ctx,0,0,800,600,()=>false);
+  assert.equal(blood.lastDrawCandidates,1); assert.equal(blood.getActiveCount(),51);
 });
 
-test('a chicken death leaves blood under the corpse until the meat chunk is picked up', () => {
-  const scene = new GameScene({ seed: 42, generateWater: false });
+test('a chicken death leaves permanent blood at the resting place, including after collecting meat', () => {
+  const scene = new GameScene({ seed: 42, map: ground(), playerSpawn:{x:500,y:500},
+    encounters:{shambler:0,runner:0,vaccines:0},chickenCount:0 });
   scene.loaded = true;
-  scene.map = ground();
   scene.player.x = 500;
   scene.player.y = 500;
   scene.player.applyConfig({ shooting: {
@@ -175,7 +163,7 @@ test('a chicken death leaves blood under the corpse until the meat chunk is pick
   assert.ok(Math.hypot(stain.x - cx, stain.y - cy) > 1e-6, 'blood marks the final resting place');
   assert.ok(Math.hypot(stain.x - cx, stain.y - cy) < 120);
 
-  for (let frame = 0; frame < 60 * (BLOOD_HOLD_SECONDS - 0.5); frame++) scene.update(1 / 60, idle);
+  for (let frame = 0; frame < 60 * 3.5; frame++) scene.update(1 / 60, idle);
   assert.equal(blood.getActiveCount(), 1, 'blood still marks the spot while the meat lies there');
   assert.equal(blood.getStains()[0].alpha, 1);
 
@@ -185,16 +173,15 @@ test('a chicken death leaves blood under the corpse until the meat chunk is pick
   assert.equal(blood.getActiveCount(), 1, 'blood waits with the uncollected chunk');
   assert.equal(blood.getStains()[0].alpha, 1);
 
-  // 捡走肉块（按键交互本身由拾取系统的单测覆盖），血迹这时才开始正常的保留与淡出。
+  // 拾取肉块只结算物品效果，血迹继续保留。
   const meat = scene.meatPickups[0];
   scene.collectMeatPickup(meat);
   assert.equal(scene.meatPickups.length, 0, 'the chunk is collected');
   scene.update(1 / 60, idle);
-  assert.equal(blood.getActiveCount(), 1, 'the blood is released, not dropped');
+  assert.equal(blood.getActiveCount(), 1, 'collecting meat preserves its blood');
   assert.equal(blood.getStains()[0].alpha, 1);
 
-  for (let frame = 0; frame < 60 * (BLOOD_HOLD_SECONDS - 0.5); frame++) scene.update(1 / 60, idle);
-  assert.equal(blood.getStains()[0].alpha, 1, 'the hold restarts after the pickup');
-  for (let frame = 0; frame < 60 * (BLOOD_FADE_SECONDS + 1); frame++) scene.update(1 / 60, idle);
-  assert.equal(blood.getActiveCount(), 0, 'blood fades out once the chunk is gone');
+  blood.update(1800); scene.update(1/60,idle);
+  assert.equal(blood.getStains()[0].alpha, 1, 'blood stays opaque after thirty minutes');
+  assert.equal(blood.getActiveCount(), 1, 'blood remains after collecting meat');
 });

@@ -13,6 +13,14 @@ import { ZombieRenderer } from './ZombieRenderer';
 import type { ZombiePose } from './ZombieRenderer';
 import { MeleeAttackController } from './MeleeAttackController';
 import { hitFlashAlpha } from '../combat/CombatFeedbackConfig';
+import { snapshotBulletImpact } from '../combat/CombatTypes';
+
+export interface ZombieDeathEvent extends DeathFinished {
+  readonly id: string;
+  readonly kind: ZombieConfig['kind'];
+  readonly pose: Readonly<ZombiePose>;
+  readonly impact: Readonly<BulletImpact>;
+}
 
 export class Zombie extends Entities {
   readonly attack: MeleeAttackController;
@@ -23,9 +31,7 @@ export class Zombie extends Entities {
   private direction = new Vector2();
   private phase = 0;
   private hitAge = 10;
-  private deathAge = 0;
-  private deathDeadline = 0;
-  private deathFinished: DeathFinished | null = null;
+  private deathFinished: ZombieDeathEvent | null = null;
   private knockback?: KnockbackMotion;
   constructor(readonly id: string, x: number, y: number, readonly config: Readonly<ZombieConfig>, facing = 0) {
     super(x, y); this.health = config.maxHealth; this.size = config.size; this.rotationSpeed = config.turnSpeed;
@@ -55,20 +61,21 @@ export class Zombie extends Entities {
     if (!this.isAlive() || !Number.isFinite(impact?.damage) || impact.damage <= 0) return 'ignored';
     this.health = Math.max(0, this.health - impact.damage); this.hitAge = 0;
     const lethal = this.health === 0;
-    if (lethal) this.attack.cancel();
-    else if (this.stunCooldownLeft <= 1e-9) {
+    if (lethal) {
+      const pose = Object.freeze(this.getPose());
+      this.attack.cancel(); this.stopMovement(); this.knockback?.stop(); this.life = 'removed';
+      this.deathFinished = Object.freeze({ ...this.getCenter(), elapsedSeconds: 0, id: this.id, kind: this.config.kind,
+        pose, impact: snapshotBulletImpact(impact) });
+      return 'killed';
+    }
+    if (this.stunCooldownLeft <= 1e-9) {
       this.stunLeft = this.config.knockback.hitStunSeconds; this.stunCooldownLeft = this.config.stunCooldown;
       this.attack.cancel(); this.stopMovement();
     }
     if (world && !this.knockback) this.knockback = new KnockbackMotion(this, world, this.config.knockback,
       body => world.getShapeSpeedFactor(body) > 0);
-    const speed = this.knockback?.addImpact(impact, lethal) ?? 0;
-    if (lethal) {
-      this.life = 'dying'; this.stopMovement(); this.deathAge = 0;
-      const p = this.config.knockback;
-      this.deathDeadline = Math.max(p.minDeathSeconds, Math.min(p.maxDeathSeconds, speed > 0 ? Math.log(speed / Math.max(p.stopSpeed, p.damping * p.deathSettleDistance)) / p.damping : 0));
-    }
-    return lethal ? 'killed' : 'damaged';
+    this.knockback?.addImpact(impact);
+    return 'damaged';
   }
   hitTestSegment(x0: number, y0: number, x1: number, y1: number, radius: number): number | null {
     if (!this.isAlive()) return null;
@@ -80,21 +87,13 @@ export class Zombie extends Entities {
     if (!Number.isFinite(delta) || delta < 0 || this.life === 'removed') return;
     this.hitAge += delta;
     this.stunLeft = Math.max(0, this.stunLeft - delta); this.stunCooldownLeft = Math.max(0, this.stunCooldownLeft - delta);
-    if (this.life === 'dying') {
-      this.knockback?.update(Math.min(delta, Math.max(0, this.deathDeadline - this.deathAge)));
-      this.deathAge += delta;
-      if (this.deathAge + 1e-9 >= this.deathDeadline) {
-        this.life = 'removed'; this.knockback?.stop(); this.deathFinished = { ...this.getCenter(), elapsedSeconds: this.deathDeadline };
-      }
-      return;
-    }
     const x = this.x, y = this.y;
     if (!this.isStunned() && this.direction.length() > 0) super.update(delta, input, map);
     else this.velocity.set(0, 0);
     this.knockback?.update(delta);
     this.phase += Math.hypot(this.x - x, this.y - y) * .18;
   }
-  consumeDeathFinished(): DeathFinished | null { const event = this.deathFinished; this.deathFinished = null; return event; }
+  consumeDeathFinished(): ZombieDeathEvent | null { const event = this.deathFinished; this.deathFinished = null; return event; }
   getPose(): ZombiePose { return { x: this.x, y: this.y, size: this.size, facing: this.getFacingDirection(), kind: this.config.kind,
     phase: this.phase, speed: this.velocity.length(), hit: Math.exp(-this.hitAge * 12) * .8, flash: hitFlashAlpha(this.hitAge), attack: this.attack.getPoseSnapshot(), life: this.life }; }
   getRenderBounds() { return ZombieRenderer.bounds(this.getPose()); }

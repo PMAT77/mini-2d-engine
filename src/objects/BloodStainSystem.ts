@@ -1,19 +1,14 @@
 import type { TileMap } from "../map/TileMap";
 import { WATER_TYPES } from "../map/WaterTerrain";
 import { circleCollider } from "../physics/Collider";
+import { GroundEffectGrid } from './GroundEffectGrid';
 
-/** 血迹完整显示的时长（秒）。 */
-export const BLOOD_HOLD_SECONDS = 4;
-/** 血迹淡出的时长（秒）。 */
-export const BLOOD_FADE_SECONDS = 1.6;
 /**
  * 每摊血迹的最小、最大半径（世界像素）。
  * 最小直径也要宽过掉落的肉块（16 像素），肉块落在血泊正中时才不会把血迹整个盖住。
  */
 export const BLOOD_MIN_RADIUS = 11;
 export const BLOOD_MAX_RADIUS = 18;
-/** 同屏血迹软上限，避免长时间刷鸡后无界增长。 */
-const BLOOD_MAX_COUNT = 48;
 /** 每摊血迹的斑块数量范围：主体几块，再加几滴溅点。 */
 const BLOOD_MIN_BLOBS = 4;
 const BLOOD_MAX_BLOBS = 7;
@@ -43,17 +38,18 @@ interface BloodStain {
   y: number;
   radius: number;
   blobs: BloodBlob[];
-  age: number;
-  /** 肉块还没被捡走时一直保留，不进入淡出计时。 */
-  sustained: boolean;
+  sprite?: HTMLCanvasElement;
 }
+export interface BloodStyle { scale?: number; direction?: Readonly<{ x: number; y: number }>; }
 
 /**
- * 地面血迹装饰：小鸡死亡收尾时在尸体位置留下几块不规则暗红斑块，完整保留后淡出。
+ * 本局永久地面血迹：只在退出场景时清理。视口查询与小画布缓存限制绘制成本。
  * 纯视觉层，不参与碰撞、拾取、挡光或子弹阻挡。
  */
 export class BloodStainSystem {
   private stains: BloodStain[] = [];
+  private readonly grid = new GroundEffectGrid<BloodStain>();
+  lastDrawCandidates = 0;
 
   constructor(private readonly random: () => number = Math.random) {}
 
@@ -61,27 +57,15 @@ export class BloodStainSystem {
    * 尝试在尸体位置留下血迹；贴墙或贴岸线时自动缩小，缩到最小仍放不下就不留。
    * @returns 是否成功放置
    */
-  spawn(x: number, y: number, map: TileMap): boolean {
-    return this.place(x, y, map, false) !== null;
+  spawn(x: number, y: number, map: TileMap, style: BloodStyle = {}): boolean {
+    return this.place(x, y, map, style) !== null;
   }
 
-  /**
-   * 血泊与肉块绑定：只要肉块还留在地上，血迹就一直停在完整显示状态；
-   * 返回的函数用于在肉块被捡走后恢复正常的保留与淡出计时。
-   * @returns 放置失败时返回 null
-   */
-  spawnSustained(x: number, y: number, map: TileMap): (() => void) | null {
-    const stain = this.place(x, y, map, true);
-    if (!stain) return null;
-    return () => {
-      stain.sustained = false;
-      stain.age = 0;
-    };
-  }
-
-  private place(x: number, y: number, map: TileMap, sustained: boolean): BloodStain | null {
+  private place(x: number, y: number, map: TileMap, style: BloodStyle): BloodStain | null {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    const target = BLOOD_MIN_RADIUS + (BLOOD_MAX_RADIUS - BLOOD_MIN_RADIUS) * this.random();
+    const scale = style.scale ?? 1;
+    if (!Number.isFinite(scale) || scale < 1 || scale > 2) return null;
+    const target = (BLOOD_MIN_RADIUS + (BLOOD_MAX_RADIUS - BLOOD_MIN_RADIUS) * this.random()) * scale;
     if (!Number.isFinite(target) || target <= 0) return null;
     // 斑块轮廓最远到 1.07 倍半径，仍小于 r+2 的余量，保证血迹不会压到墙顶或水面。
     // 按 0.8 缩小不一定正好落在最小半径上，所以最后单独试一次最小值。
@@ -89,13 +73,8 @@ export class BloodStainSystem {
     while (radius > BLOOD_MIN_RADIUS && !this.isDryGround(map, x, y, radius + 2)) radius *= 0.8;
     radius = Math.max(radius, BLOOD_MIN_RADIUS);
     if (!this.isDryGround(map, x, y, radius + 2)) return null;
-    // 到上限时优先淘汰没压着肉块的旧血迹，别把还在等拾取的痕迹挤掉。
-    if (this.stains.length >= BLOOD_MAX_COUNT) {
-      const expired = this.stains.findIndex(stain => !stain.sustained);
-      this.stains.splice(expired >= 0 ? expired : 0, 1);
-    }
-    const stain = this.createStain(x, y, radius, sustained);
-    this.stains.push(stain);
+    const stain = this.createStain(x, y, radius, style.direction);
+    this.stains.push(stain); this.grid.add(stain);
     return stain;
   }
 
@@ -110,7 +89,7 @@ export class BloodStainSystem {
     return covered >= 1 - 1e-6;
   }
 
-  private createStain(x: number, y: number, radius: number, sustained: boolean): BloodStain {
+  private createStain(x: number, y: number, radius: number, direction?: BloodStyle['direction']): BloodStain {
     const count = BLOOD_MIN_BLOBS + Math.min(BLOOD_MAX_BLOBS - BLOOD_MIN_BLOBS,
       Math.floor(this.random() * (BLOOD_MAX_BLOBS - BLOOD_MIN_BLOBS + 1)));
     const blobs: BloodBlob[] = [];
@@ -118,7 +97,8 @@ export class BloodStainSystem {
       // 第一块是压在尸体下方、基本填满半径的血泊主体，之后是边缘血块，
       // 最后两块是更小、更靠外的溅点：有主有次才像一滩血，而不是几颗圆点。
       const splatter = i >= count - 2;
-      const angle = this.random() * TAU;
+      const directionValid = direction && Number.isFinite(direction.x) && Number.isFinite(direction.y) && Math.hypot(direction.x, direction.y) > 1e-6;
+      const angle = directionValid && splatter ? Math.atan2(direction!.y, direction!.x) + (this.random() - .5) * 1.3 : this.random() * TAU;
       let distance: number;
       let blobRadius: number;
       if (i === 0) {
@@ -138,7 +118,7 @@ export class BloodStainSystem {
         vertices: this.createVertices(8 + Math.floor(this.random() * 5)),
       });
     }
-    return { x, y, radius, blobs, age: 0, sustained };
+    return { x, y, radius, blobs };
   }
 
   /** 半径系数在 0.65–1 之间抖动的不规则轮廓：血斑边缘不能像圆规画的。 */
@@ -152,26 +132,34 @@ export class BloodStainSystem {
     return vertices;
   }
 
-  update(delta: number): void {
-    if (!Number.isFinite(delta) || delta <= 0) return;
-    const total = BLOOD_HOLD_SECONDS + BLOOD_FADE_SECONDS;
-    // 压着肉块的血迹不累计时间：肉块一直没捡，血迹就一直留在原地。
-    this.stains = this.stains.filter(stain => stain.sustained || (stain.age += delta) < total);
-  }
+  update(_delta: number): void { /* Permanent stains have no simulation work. */ }
 
   draw(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number,
     viewWidth: number, viewHeight: number, visibleAt?: (x: number, y: number) => boolean): void {
-    for (const stain of this.stains) {
+    this.lastDrawCandidates = 0;
+    for (const stain of this.grid.query(cameraX, cameraY, viewWidth, viewHeight)) {
+      this.lastDrawCandidates++;
       if (visibleAt && !visibleAt(stain.x, stain.y)) continue;
-      const alpha = stain.sustained ? 1 : BloodStainSystem.getAlpha(stain.age);
-      if (alpha <= 0) continue;
       const x = stain.x - cameraX, y = stain.y - cameraY;
       const padding = stain.radius + 12;
       if (x + padding < 0 || y + padding < 0 || x - padding > viewWidth || y - padding > viewHeight) continue;
 
       ctx.save();
-      ctx.globalAlpha = alpha;
-      for (const blob of stain.blobs) {
+      ctx.globalAlpha = 1;
+      const pad = Math.ceil(stain.radius * 1.1) + 3;
+      if (!stain.sprite && typeof ctx.drawImage === 'function' && typeof document !== 'undefined') {
+        const sprite = document.createElement('canvas'); sprite.width = sprite.height = pad * 2;
+        const buffer = sprite.getContext('2d');
+        if (buffer) { this.paint(buffer, stain, pad, pad); stain.sprite = sprite; }
+      }
+      if (stain.sprite) ctx.drawImage(stain.sprite, x - pad, y - pad);
+      else this.paint(ctx, stain, x, y);
+      ctx.restore();
+    }
+  }
+
+  private paint(ctx: CanvasRenderingContext2D, stain: BloodStain, x: number, y: number): void {
+    for (const blob of stain.blobs) {
         const bx = x + blob.x, by = y + blob.y;
         const gradient = ctx.createRadialGradient(bx, by, 0, bx, by, blob.radius);
         // 中心近于干涸的暗红；靠边仍留一点不透明度，肉块压住中间时四周的血边才看得见。
@@ -182,8 +170,6 @@ export class BloodStainSystem {
         this.tracePath(ctx, blob, bx, by);
         ctx.fillStyle = gradient;
         ctx.fill();
-      }
-      ctx.restore();
     }
   }
 
@@ -205,18 +191,12 @@ export class BloodStainSystem {
     return this.stains.map(stain => ({
       x: stain.x, y: stain.y, radius: stain.radius,
       blobs: stain.blobs.length,
-      alpha: stain.sustained ? 1 : BloodStainSystem.getAlpha(stain.age),
+      alpha: 1,
     }));
   }
 
   clear(): void {
-    this.stains = [];
-  }
-
-  private static getAlpha(age: number): number {
-    if (age <= BLOOD_HOLD_SECONDS) return 1;
-    const progress = (age - BLOOD_HOLD_SECONDS) / BLOOD_FADE_SECONDS;
-    if (progress >= 1) return 0;
-    return 1 - progress * progress * (3 - 2 * progress);
+    for (const stain of this.stains) if (stain.sprite) stain.sprite.width = stain.sprite.height = 0;
+    this.stains = []; this.grid.clear(); this.lastDrawCandidates = 0;
   }
 }

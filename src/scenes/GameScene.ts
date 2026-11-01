@@ -181,9 +181,10 @@ export interface GameSceneOptions extends TileMapOptions {
 export class GameScene extends Scene {  private player!: Player;
   private readonly actorWorld: ActorCollisionWorld;
   private readonly enemies: EnemySystem;
-  private readonly enemyBlood = new BloodStainSystem();
+  private readonly enemyBlood: BloodStainSystem;
   private readonly zombieGore: ZombieGoreSystem;
   private readonly damageFeedback = new DamageFeedbackOverlay();
+  private feedbackResetVersion = 0;
   private readonly survival: PlayerSurvivalSystem;
   private readonly statusHud = new PlayerStatusHud();
   private vaccinePickups: VaccinePickup[] = [];
@@ -327,8 +328,6 @@ export class GameScene extends Scene {  private player!: Player;
   private goldDroppedByTile = new Map<number, number>();
   /** 小鸡死亡后掉落的肉块，落地后才可收集。 */
   private meatPickups: MeatPickup[] = [];
-  /** 与未捡走的肉块绑定的血迹：肉块还在时血迹一直保留，被捡走后才开始淡出。 */
-  private sustainedBlood = new Map<MeatPickup, () => void>();
 
   // 粒子系统
   private particleSystem: ParticleSystem;
@@ -393,6 +392,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.actorWorld = new ActorCollisionWorld(this.map);
     this.enemies = new EnemySystem(this.map, this.actorWorld, this.runSeed ^ 0x7a6f6d62, this.noiseSystem);
     this.zombieGore = new ZombieGoreSystem(this.map, seededRandom(this.runSeed ^ 0x676f7265));
+    this.enemyBlood = new BloodStainSystem(seededRandom(this.runSeed ^ 0x626c6f64));
     if (this.visionMode === "three-layer") {
       this.perception = new PerceptionSystem({
         map: this.map,
@@ -1020,8 +1020,8 @@ export class GameScene extends Scene {  private player!: Player;
   /** 尸体滑行收尾时的统一表现：血迹、白烟与肉块同帧落在收尾位置。 */
   private resolveDeathPresentation(finished: DeathFinished): void {
     const center = new Vector2(finished.x, finished.y);
-    // 血迹落在尸体收尾的位置：肉块没被捡走前一直保留，捡走后恢复正常的保留与淡出。
-    const releaseBlood = this.bloodStainSystem.spawnSustained(finished.x, finished.y, this.map);
+    // 小鸡仍在滑行收尾后留下血迹，拾取肉块不再改变血迹寿命。
+    this.bloodStainSystem.spawn(finished.x, finished.y, this.map);
     // 慢速大颗粒形成白色气团，再补一圈快速白点。
     this.particleSystem.createExplosion(center, 28, 70, 7, 0.9,
       ["#ffffff", "#f7f7f7", "#e8e8e8"]);
@@ -1029,7 +1029,6 @@ export class GameScene extends Scene {  private player!: Player;
     // 肉块与白烟同帧出现：击杀反馈要跟着击退收尾一起到，而不是再等烟散。
     const meat = new MeatPickup(finished.x - MeatPickup.SIZE / 2, finished.y - MeatPickup.SIZE / 2);
     this.meatPickups.push(meat);
-    if (releaseBlood) this.sustainedBlood.set(meat, releaseBlood);
   }
 
   /** 只推进肉块的下落动画；拾取由交互控制器在感知更新之后判定。 */
@@ -1166,18 +1165,6 @@ export class GameScene extends Scene {  private player!: Player;
     });
   }
 
-
-  /**
-   * 肉块被捡走（或不再存在于场景里）后才释放绑定的血迹，
-   * 让血迹从完整显示开始重新走 4 秒保留＋1.6 秒淡出。
-   */
-  private releasePickedUpBlood(): void {
-    for (const [pickup, release] of this.sustainedBlood) {
-      if (this.meatPickups.includes(pickup)) continue;
-      release();
-      this.sustainedBlood.delete(pickup);
-    }
-  }
 
   /** 在角色身边蹦出一行拾取提示（例如 "金块+3"、"HP+5"）；左右位置由飘字系统随机散开。 */
   private showPickupText(text: string): void {
@@ -1546,6 +1533,10 @@ export class GameScene extends Scene {  private player!: Player;
 
     if (!this.loaded) return;
     this.debugPanel?.update(delta);
+    const lifeReset = this.player.getLifeResetVersion();
+    if (lifeReset !== this.feedbackResetVersion) {
+      this.feedbackResetVersion = lifeReset; this.damageFeedback.clear(); this.camera.clearDamageKick();
+    }
     if (this.paused || !Number.isFinite(delta) || delta < 0) return;
     // Advance existing feedback before this frame's hits so a new flash is always displayed.
     this.damageFeedback.update(delta); this.zombieGore.update(delta); this.camera.advanceDamageKick(delta);
@@ -1674,7 +1665,10 @@ export class GameScene extends Scene {  private player!: Player;
       this.reloadVoice?.stop(0); this.reloadVoice = null;
       this.crosshairOverlay?.setVisible(false);
     }
-    for (const death of this.enemies.consumeDeaths()) this.enemyBlood.spawn(death.x, death.y, this.map);
+    for (const death of this.enemies.consumeDeaths()) {
+      this.zombieGore.burst(death);
+      this.enemyBlood.spawn(death.x, death.y, this.map, { scale: 1.55, direction: death.impact.direction });
+    }
 
     // 小鸡只在干地自由游荡，不读取玩家输入；感知刺激由场景统一提供。
     this.chickens.forEach(chicken => chicken.update(delta, input, this.map, {
@@ -1724,7 +1718,6 @@ export class GameScene extends Scene {  private player!: Player;
     // 拾取放在所有可能打断它的动作之后：本帧的开火/切枪/翻滚会立即取消进度。
     this.updateInteraction(delta, input);
     // 肉块本帧被移除后，绑定的血迹从下一帧开始走正常的保留与淡出。
-    this.releasePickedUpBlood();
     // 切枪输入结算完再推进 HUD：第一帧的武器顺序与动画起点必须同源，
     // 否则会先用旧进度画新顺序、下一帧才重新开始交换。
     this.weaponListHud.update(delta, this.player.getWeaponLoadoutView());
@@ -2023,7 +2016,7 @@ export class GameScene extends Scene {  private player!: Player;
    */
   private drawEnemyHitFlashes(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
     const flashing = this.enemies.zombies.filter(z => z.getPose().flash > 0 && this.getEntityAlpha(z) > .002);
-    if (!flashing.length) return;
+    if (!flashing.length && !this.zombieGore.getStats().flying) return;
     ctx.save(); ctx.translate(-ox, -oy);
     ctx.clip(this.map.getGroundContour(ox, oy, ctx.canvas.width, ctx.canvas.height), "evenodd");
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -2033,10 +2026,15 @@ export class GameScene extends Scene {  private player!: Player;
       ctx.globalAlpha = zombie.getPose().flash * this.getEntityAlpha(zombie);
       zombie.drawSilhouette(ctx, ox, oy);
     }
+    ctx.globalAlpha = 1;
+    this.zombieGore.drawFlashes(ctx, ox, oy, (x, y) => !this.perception || this.perception.canIdentify("player", x, y));
     ctx.restore();
   }
 
-  getCombatFeedbackState() { return { player: this.damageFeedback.snapshot(), gore: this.zombieGore.snapshot() }; }
+  getCombatFeedbackState() { return { player: this.damageFeedback.snapshot(), gore: this.zombieGore.snapshot(),
+    blood: { zombies: this.enemyBlood.getStains(), chickens: this.bloodStainSystem.getStains() } }; }
+  getCombatFeedbackMetrics() { return { ...this.zombieGore.getStats(), blood: this.enemyBlood.getActiveCount() + this.bloodStainSystem.getActiveCount(),
+    bloodDrawCandidates: this.enemyBlood.lastDrawCandidates + this.bloodStainSystem.lastDrawCandidates }; }
 
   private drawPerceptionSilhouettes(ctx: CanvasRenderingContext2D,
     cameraX: number, cameraY: number): void {
