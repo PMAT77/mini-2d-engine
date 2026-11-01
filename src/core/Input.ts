@@ -11,6 +11,7 @@ export interface PointerState {
 export class Input {
   private keys = new Set<string>();
   private blocked = false;
+  private resetVersion = 0;
   private pointerEnabled = false;
   private previousCursor = '';
   /** 需要拦截浏览器默认行为、交给游戏处理的键（例如场景里的 Tab）。 */
@@ -24,6 +25,8 @@ export class Input {
     window.addEventListener('keydown', (event: KeyboardEvent) => {
       if (this.blocked || event.defaultPrevented) return;
       const code = event.code || this.keyCode(event.key);
+      // A held key cannot reacquire gameplay ownership after pause/blur/menu handoff.
+      if (event.repeat && !this.keys.has(code)) return;
       this.keys.add(code);
       // 只拦截游戏实际使用的特殊键，不无条件吞掉整页的键盘默认行为。
       if (code === 'Space' || this.capturedKeys.has(code)) event.preventDefault();
@@ -89,8 +92,17 @@ export class Input {
   }
 
   isBlocked(): boolean { return this.blocked; }
+  /** One immutable-in-practice sample per world step; does not install event listeners. */
+  captureFrame(): Input {
+    const frame = Object.create(Input.prototype) as Input;
+    frame.keys = new Set(this.keys); frame.blocked = this.blocked;
+    frame.pointer = this.consumePointerState(); frame.pointerEnabled = this.pointerEnabled;
+    frame.capturedKeys = this.capturedKeys; frame.previousCursor = ''; frame.resetVersion = this.resetVersion;
+    return frame;
+  }
 
-  clear(): void { this.keys.clear(); this.clearPointer(); }
+  clear(): void { this.resetVersion++; this.keys.clear(); this.clearPointer(); }
+  getResetVersion(): number { return this.resetVersion; }
 
   private clearPointer(): void {
     this.pointer.active = false; this.pointer.leftDown = false;

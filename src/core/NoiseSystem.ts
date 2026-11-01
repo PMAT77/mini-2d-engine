@@ -14,6 +14,9 @@ export type NoiseKind =
   | "roll"
   | "gunshot"
   | "cluck"
+  | "zombieStep"
+  | "zombieGroan"
+  | "zombieAttack"
   | "impact"
   | "mining";
 
@@ -24,6 +27,9 @@ export const NOISE_PROFILES: Record<NoiseKind, { radius: number; loudness: numbe
   roll: { radius: 210, loudness: 0.5 },
   gunshot: { radius: 560, loudness: 1 },
   cluck: { radius: 240, loudness: 0.45 },
+  zombieStep: { radius: 200, loudness: .35 },
+  zombieGroan: { radius: 340, loudness: .55 },
+  zombieAttack: { radius: 300, loudness: .65 },
   impact: { radius: 180, loudness: 0.5 },
   mining: { radius: 320, loudness: 0.7 },
 };

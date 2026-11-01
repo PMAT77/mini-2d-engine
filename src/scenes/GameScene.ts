@@ -184,6 +184,11 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly statusHud = new PlayerStatusHud();
   private vaccinePickups: VaccinePickup[] = [];
   private vaccineHeld = false;
+  private paused = false;
+  private readonly zombieDebugPaths: boolean;
+  private readonly runSeed: number;
+  private readonly spawnRandom: () => number;
+  private inputResetVersion = 0;
   private deathAcknowledged = false;
   private deathEnterHeld = true;
   private chickens: Chicken[] = [];
@@ -335,7 +340,7 @@ export class GameScene extends Scene {  private player!: Player;
   // 地图边界反馈：贴边往里推时在接触点打一圈波纹
   private readonly boundaryRippleSystem = new BoundaryRippleSystem();
   // 世界噪声总线：脚步、涉水、翻滚、枪声与小鸡叫声都记录成可查询事件。
-  private readonly noiseSystem = new NoiseSystem();
+  private readonly noiseSystem = new NoiseSystem(8, 1024);
   // 听觉位置提示：只把“玩家听见了”的声音画成短暂弧线，不揭示目标本体。
   private readonly soundRippleSystem = new SoundRippleSystem();
   // 玩家自己的听觉判定与敌人共用同一套传感器；每个事件只消费一次。
@@ -376,11 +381,14 @@ export class GameScene extends Scene {  private player!: Player;
     super();
     this.visionMode = resolveVisionMode();
     this.visionDebugLayer = resolveVisionDebugLayer();
+    this.zombieDebugPaths = isDevelopmentBuild() && new URLSearchParams(window.location?.search ?? "").get("zombieDebug") === "paths";
+    this.runSeed = sceneOptions.seed ?? Math.floor(Math.random() * 4294967296);
+    this.spawnRandom = seededRandom(this.runSeed ^ 0x706c6179);
 
     // 100×100 个瓦片，每格 50 像素
-    this.map = sceneOptions.map ?? new TileMap(100, 100, sceneOptions);
+    this.map = sceneOptions.map ?? new TileMap(100, 100, { ...sceneOptions, seed: this.runSeed });
     this.actorWorld = new ActorCollisionWorld(this.map);
-    this.enemies = new EnemySystem(this.map, this.actorWorld, sceneOptions.seed ?? Math.floor(Math.random() * 4294967296));
+    this.enemies = new EnemySystem(this.map, this.actorWorld, this.runSeed ^ 0x7a6f6d62, this.noiseSystem);
     if (this.visionMode === "three-layer") {
       this.perception = new PerceptionSystem({
         map: this.map,
@@ -477,13 +485,13 @@ export class GameScene extends Scene {  private player!: Player;
     this.flashlight.setInnerRadius(torch.innerRadius, torch.innerFade);
     this.lightingSystem.addLightSource(this.flashlight);
 
-    this.torches = Torch.generate(this.map, sceneOptions.seed === undefined ? Math.random : seededRandom(sceneOptions.seed ^ 0x746f7263));
+    this.torches = Torch.generate(this.map, seededRandom(this.runSeed ^ 0x746f7263));
     this.torches.forEach(torch => this.lightingSystem.addLightSource(torch.light));
 
     // 小鸡围绕出生点随机生成，平时只在干地上自由活动；属于单位层，会被迷雾裁剪。
     const chickenCount = sceneOptions.chickenCount ?? GameScene.CHICKEN_COUNT;
     if (!Number.isSafeInteger(chickenCount) || chickenCount < 0 || chickenCount > 1000) throw new Error("小鸡数量必须为 0–1000 的整数");
-    this.chickens = Chicken.spawn(this.map, chickenCount, playerCenter);
+    this.chickens = Chicken.spawn(this.map, chickenCount, playerCenter, seededRandom(this.runSeed ^ 0x63686963));
     for (const chicken of this.chickens) {
       chicken.setOnStepCallback((x, y) => this.playChickenStep(x, y));
       chicken.setOnCluckCallback((x, y, startled) => this.playChickenCluck(chicken, x, y, startled === true));
@@ -745,7 +753,7 @@ export class GameScene extends Scene {  private player!: Player;
     for (const stimulus of heard) {
       // 自己的脚步与枪声不需要提示：位置本来就知道。
       if (stimulus.sourceId === "player") continue;
-      const chicken = this.findChickenBySoundId(stimulus.sourceId);
+      const chicken = this.findChickenBySoundId(stimulus.sourceId) ?? this.enemies.findBySoundId(stimulus.sourceId);
       // 已完整看见的目标不再重复画声音提示；只看见剪影时仍保留，避免信息突然断档。
       if (chicken && this.perception && this.getEntityVisibility(chicken) === "identified") continue;
       const cue = SoundRippleSystem.resolveCue(stimulus.x, stimulus.y,
@@ -1376,8 +1384,8 @@ export class GameScene extends Scene {  private player!: Player;
     let attempts = 0;
 
     while (attempts < MAX_ATTEMPTS) {
-      const posX = x + Math.random() * (width - size);
-      const posY = y + Math.random() * (height - size);
+      const posX = x + this.spawnRandom() * (width - size);
+      const posY = y + this.spawnRandom() * (height - size);
 
       if (this.map.isShapeWalkable(transformCollider(compiled, { x: posX + size / 2, y: posY + size / 2, size, rotation: 0 }))) {
         return { x: posX, y: posY };
@@ -1413,7 +1421,7 @@ export class GameScene extends Scene {  private player!: Player;
       this.enemies.spawn(this.sceneOptions.encounters ?? {}, this.player.getVisionState());
       const vaccines = this.sceneOptions.encounters?.vaccines ?? 2;
       if (!Number.isSafeInteger(vaccines) || vaccines < 0 || vaccines > 1000) throw new Error("疫苗生成数量无效");
-      const origin = this.player.getVisionState(), spawner = new EncounterSpawning(this.map, origin, seededRandom((this.sceneOptions.seed ?? 0x3a62) ^ 0x76616363));
+      const origin = this.player.getVisionState(), spawner = new EncounterSpawning(this.map, origin, seededRandom(this.runSeed ^ 0x76616363));
       const occupied: { center: { x: number; y: number }; radius: number }[] = [{ center: origin, radius: this.player.getCollider().radius }];
       for (let i = 0; i < vaccines; i++) {
         const center = spawner.find(this.player.getCollider().radius, 100, 350, occupied);
@@ -1423,6 +1431,7 @@ export class GameScene extends Scene {  private player!: Player;
       }
       this.enemies.spawnReports.push({ kind: "vaccine", requested: vaccines, spawned: this.vaccinePickups.length, skipped: vaccines - this.vaccinePickups.length,
         ...(vaccines > this.vaccinePickups.length ? { reason: "200 次候选中没有玩家体型可达的干地位置" } : {}) });
+      for (const report of this.enemies.spawnReports) if (report.skipped) console.warn(`遭遇生成: ${report.kind} ${report.spawned}/${report.requested}; ${report.reason}`);
       onProgress?.(1, 1);
       this.loaded = true;
     })();
@@ -1466,6 +1475,7 @@ export class GameScene extends Scene {  private player!: Player;
         // 三层视野不读 fog.range/fog.feather，留着这两根滑杆只会误导调参。
         hiddenSections: this.visionMode === "three-layer" ? ["fog"] : [],
         onReset: () => this.survival.resetLife(),
+        onOpenChange: open => this.setWorldPaused(open),
       });
       window.addEventListener('resize', this.resizeListener);
       if (typeof document !== 'undefined') document.addEventListener('keydown', this.cursorKeyListener);
@@ -1480,7 +1490,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.enemies.dispose();
     this.survival.dispose(); this.vaccinePickups = []; this.enemyBlood.clear();
     // 循环音效不会自己停，离开场景时立即收掉，免得声音跟着残留。
-    this.sfx.stopLoops();
+    this.sfx.stopAll();
     // 换弹声也要跟着停，否则重进场景后还会响到采样结束。
     this.reloadVoice?.stop(0);
     this.reloadVoice = null;
@@ -1491,6 +1501,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 声音提示与听觉水位都是本局状态：重进场景不继承上一局的弧线与去重表。
     this.soundRippleSystem.clear();
     this.playerHearing.reset();
+    this.noiseSystem.clear();
     // 冷却表跟着场景一起丢弃，重进场景时不继承上一局的叫声节奏。
     this.chickenCluckCooldowns.clear();
     this.game?.input?.setPointerEnabled(false);
@@ -1524,9 +1535,15 @@ export class GameScene extends Scene {  private player!: Player;
    * @param input 输入状态对象
    */
   update(delta: number, input: Input) {
-    this.deltaSinceLastFrame = delta;
+    this.deltaSinceLastFrame = this.paused ? 0 : delta;
 
     if (!this.loaded) return;
+    this.debugPanel?.update(delta);
+    if (this.paused || !Number.isFinite(delta) || delta < 0) return;
+    input = input.captureFrame?.() ?? input;
+    const reset = input.getResetVersion?.();
+    if (reset !== undefined && reset !== this.inputResetVersion) { this.inputResetVersion = reset; this.interaction.reset(); }
+    this.noiseSystem.update(delta);
     this.player.advanceDamageTimers(delta);
     if (!this.player.isAlive()) {
       this.flashlightOn = false;
@@ -1558,6 +1575,35 @@ export class GameScene extends Scene {  private player!: Player;
     const prevX = this.player.x, prevY = this.player.y;
     this.actorWorld.sync();
     this.player.update(delta, input, this.map, aim);
+    // R 键换弹同样只认下沿，按住不会反复起手。
+    const reloadDown = input.isKeyDown("r");
+    if (reloadDown && !this.reloadHeld) this.player.requestReload();
+    this.reloadHeld = reloadDown;
+
+    // Tab 在主副枪械之间切换（Q 不再绑定），C 收枪/空手；都只认下沿。
+    const tabDown = input.isKeyDown("Tab");
+    if (this.player.isAlive() && tabDown && !this.tabHeld) {
+      this.player.cycleFirearm(1);
+      this.weaponSwitchedThisFrame = true;
+      // 与手电开关同一声轻响；单声部保证快速连按时只留最后一次的尾音。
+      this.sfx.play(SWITCH_CLICK_SOUND, this.volume(this.audio.weapon.switchVolume), 1, { count: 1 });
+    }
+    this.tabHeld = tabDown;
+    const cDown = input.isKeyDown("c");
+    if (this.player.isAlive() && cDown && !this.cHeld) {
+      this.player.toggleMelee();
+      this.weaponSwitchedThisFrame = true;
+    }
+    this.cHeld = cDown;
+
+    // 空格翻滚只认下沿：按住不会连续起滚，连滚需要松开再按。
+    const spaceDown = input.isKeyDown(" ");
+    if (spaceDown && !this.spaceHeld && this.player.requestRoll(input)) {
+      this.noiseSystem.emit("roll", this.player.x + this.player.getSize() / 2,
+        this.player.y + this.player.getSize() / 2, { sourceId: "player" });
+    }
+    this.spaceHeld = spaceDown;
+
     // 换弹完成、被翻滚打断或切走时收掉没放完的换弹声，别压到下面那声枪响。
     if (this.reloadVoice && !this.player.getWeaponView().isReloading) {
       this.reloadVoice.stop(0.12);
@@ -1570,7 +1616,6 @@ export class GameScene extends Scene {  private player!: Player;
     this.updateFootstepSound(movedSpeed);
     // 两条循环音效的目标音量都设好了，统一推进一步淡入淡出，各自都是 120 毫秒。
     this.sfx.update(delta);
-    this.noiseSystem.update(delta);
     this.chickenStepDelay = Math.max(0, this.chickenStepDelay - delta);
     this.updateChickenCluckCooldowns(delta);
 
@@ -1644,7 +1689,6 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 更新属性修改器
     this.modifierManager.update(delta);
-    this.debugPanel?.update(delta);
 
     // 更新道具状态
     this.updatePickupItems(delta, input);
@@ -1662,45 +1706,16 @@ export class GameScene extends Scene {  private player!: Player;
     // 声音提示只消费世界噪声事件，不参与感知，也不会被感知遮罩擦掉。
     this.updateSoundRipples(delta);
 
-    // R 键换弹同样只认下沿，按住不会反复起手。
-    const reloadDown = input.isKeyDown("r");
-    if (reloadDown && !this.reloadHeld) this.player.requestReload();
-    this.reloadHeld = reloadDown;
-
-    // Tab 在主副枪械之间切换（Q 不再绑定），C 收枪/空手；都只认下沿。
-    const tabDown = input.isKeyDown("Tab");
-    if (this.player.isAlive() && tabDown && !this.tabHeld) {
-      this.player.cycleFirearm(1);
-      this.weaponSwitchedThisFrame = true;
-      // 与手电开关同一声轻响；单声部保证快速连按时只留最后一次的尾音。
-      this.sfx.play(SWITCH_CLICK_SOUND, this.volume(this.audio.weapon.switchVolume), 1, { count: 1 });
-    }
-    this.tabHeld = tabDown;
-    const cDown = input.isKeyDown("c");
-    if (this.player.isAlive() && cDown && !this.cHeld) {
-      this.player.toggleMelee();
-      this.weaponSwitchedThisFrame = true;
-    }
-    this.cHeld = cDown;
-
+    // 拾取放在所有可能打断它的动作之后：本帧的开火/切枪/翻滚会立即取消进度。
+    this.updateInteraction(delta, input);
+    // 肉块本帧被移除后，绑定的血迹从下一帧开始走正常的保留与淡出。
+    this.releasePickedUpBlood();
     // 切枪输入结算完再推进 HUD：第一帧的武器顺序与动画起点必须同源，
     // 否则会先用旧进度画新顺序、下一帧才重新开始交换。
     this.weaponListHud.update(delta, this.player.getWeaponLoadoutView());
     // 手电开关已在感知之前结算，这里同帧推进状态条渐变，避免 HUD 慢一帧。
     this.flashlightHud.update(delta, this.flashlightOn);
 
-    // 空格翻滚只认下沿：按住不会连续起滚，连滚需要松开再按。
-    const spaceDown = input.isKeyDown(" ");
-    if (spaceDown && !this.spaceHeld && this.player.requestRoll(input)) {
-      this.noiseSystem.emit("roll", this.player.x + this.player.getSize() / 2,
-        this.player.y + this.player.getSize() / 2, { sourceId: "player" });
-    }
-    this.spaceHeld = spaceDown;
-
-    // 拾取放在所有可能打断它的动作之后：本帧的开火/切枪/翻滚会立即取消进度。
-    this.updateInteraction(delta, input);
-    // 肉块本帧被移除后，绑定的血迹从下一帧开始走正常的保留与淡出。
-    this.releasePickedUpBlood();
   }
 
   /** 供敌人听觉、调试面板与测试读取的噪声总线（只读用途，写入仍由场景负责）。 */
@@ -1709,6 +1724,20 @@ export class GameScene extends Scene {  private player!: Player;
   getSurvivalSystem(): PlayerSurvivalSystem { return this.survival; }
   getPlayer(): Player { return this.player; }
   getVaccinePickups(): readonly VaccinePickup[] { return this.vaccinePickups; }
+  isWorldPaused(): boolean { return this.paused; }
+  private setWorldPaused(paused: boolean): void {
+    if (this.paused === paused) return;
+    this.paused = paused; this.deltaSinceLastFrame = 0;
+    this.interaction.reset(); this.pickupCandidates = []; this.pickupMarkers = []; this.completedPickupFeedback = null;
+    this.tabHeld = this.cHeld = this.spaceHeld = this.reloadHeld = this.vaccineHeld = this.flashlightHeld = false;
+    this.game?.input.clear();
+    if (paused) this.sfx.pauseAll(); else this.sfx.resumeAll();
+  }
+  getZombieDebugState() {
+    if (!isDevelopmentBuild()) return null;
+    return { seed: this.runSeed, paused: this.paused, audioPaused: this.sfx.isPaused(), enemies: this.enemies.snapshot(), navigation: { ...this.enemies.navigation.stats },
+      cpu: { ...this.enemies.metrics }, survival: this.survival.snapshot(), spawns: this.enemies.spawnReports.map(r => ({ ...r })), actors: this.actorWorld.size };
+  }
 
   /**
    * 重建本帧感知光源：玩家微光、手电与点燃的火把。
@@ -2301,7 +2330,10 @@ export class GameScene extends Scene {  private player!: Player;
     }
     for (const zombie of this.enemies.zombies) {
       if (visible(zombie.x, zombie.y, 80) && drawn(zombie)) {
-        units.globalAlpha = this.getEntityDrawAlpha(zombie); zombie.draw(units, cameraOffset.x, cameraOffset.y);
+        units.save(); units.translate(-cameraOffset.x, -cameraOffset.y);
+        units.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), "evenodd");
+        units.setTransform(1, 0, 0, 1, 0, 0);
+        units.globalAlpha = this.getEntityDrawAlpha(zombie); zombie.draw(units, cameraOffset.x, cameraOffset.y); units.restore();
       }
     }
     for (const chicken of this.chickens) {
@@ -2449,6 +2481,16 @@ export class GameScene extends Scene {  private player!: Player;
     ctx.restore();
     // 拾取标记与 E 提示放在 HUD 之后：交互提示优先于静态信息，且布局已避让 HUD 区域。
     this.drawPickupPrompts(screenContext, cameraOffset);
+    if (this.zombieDebugPaths) {
+      const scale = screenContext.canvas.width / this.camera.width;
+      ctx.save(); ctx.scale(scale, scale); ctx.translate(-cameraOffset.x, -cameraOffset.y);
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#72e2bd';
+      for (const z of this.enemies.snapshot()) {
+        if (!z.path.length) continue;
+        ctx.beginPath(); ctx.moveTo(z.x, z.y); for (const p of z.path) ctx.lineTo(p.x, p.y); ctx.stroke();
+      }
+      ctx.restore();
+    }
     if (!this.player.isAlive()) {
       const dpr = window.devicePixelRatio || 1;
       ctx.save(); ctx.scale(dpr, dpr);

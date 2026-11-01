@@ -247,3 +247,18 @@ test('没有 Audio 的 Node 环境里所有播放静默跳过', () => {
     if (previous !== undefined) globalThis.Audio = previous;
   }
 });
+
+test('世界音频暂停保留位置和淡出状态，恢复后续播，完整停止使旧句柄失效', () => withAudio(() => {
+  const sfx = new SoundPlayer(), handle = sfx.play('/shot.wav', .5, 1, { count: 1 });
+  sfx.loop('/water.wav', .7); sfx.update(.06);
+  const [shot, water] = FakeAudio.instances; shot.currentTime = .35; water.currentTime = 1.2;
+  const volume = water.volume;
+  sfx.pauseAll(); sfx.update(100);
+  assert.equal(sfx.isPaused(), true); assert.equal(shot.paused, true); assert.equal(water.paused, true);
+  assert.equal(shot.currentTime, .35); assert.equal(water.currentTime, 1.2); assert.equal(water.volume, volume);
+  assert.equal(sfx.play('/ignored.wav', 1), null);
+  sfx.resumeAll(); assert.equal(shot.paused, false); assert.equal(water.paused, false);
+  assert.equal(shot.currentTime, .35); assert.equal(water.currentTime, 1.2);
+  sfx.pauseAll(); sfx.stopAll(); sfx.resumeAll();
+  assert.equal(handle.isPlaying(), false); assert.equal(shot.paused, true); assert.equal(water.paused, true); assert.equal(shot.currentTime, 0);
+}));

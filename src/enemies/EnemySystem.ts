@@ -1,5 +1,5 @@
 import type { Input } from '../core/Input';
-import type { NoiseEvent } from '../core/NoiseSystem';
+import type { NoiseEvent, NoiseSystem } from '../core/NoiseSystem';
 import type { TileMap } from '../map/TileMap';
 import { seededRandom } from '../map/WaterTerrain';
 import type { Point } from '../physics/Collider';
@@ -26,6 +26,7 @@ interface EnemyRecord {
   zombie: Zombie; behavior: ZombieBehavior; vision: VisionSensor; hearing: HearingSensor; random: () => number;
   result?: NavigationResult; adopted?: NavigationResult; path: Point[]; pathIndex: number;
   requestedGoal: Point | null; replanLeft: number; targetAlive: boolean;
+  stepDistance: number; groanLeft: number;
 }
 export interface EnemyContext {
   target: Point & { alive: boolean; radius: number; emittingLightId?: string };
@@ -46,7 +47,7 @@ export class EnemySystem {
   private deathEvents: DeathFinished[] = [];
   readonly spawnReports: SpawnReport[] = [];
   readonly metrics = { perceptionMs: 0, navigationMs: 0, movementMs: 0 };
-  constructor(readonly map: TileMap, private readonly actors: ActorCollisionWorld, private readonly seed: number) {
+  constructor(readonly map: TileMap, private readonly actors: ActorCollisionWorld, private readonly seed: number, private readonly noises?: NoiseSystem) {
     this.navigation = new NavigationScheduler(map);
   }
   get zombies(): readonly Zombie[] { return this.records.map(r => r.zombie); }
@@ -56,7 +57,7 @@ export class EnemySystem {
     this.actors.register(id, zombie);
     zombie.setMotionResolver((body, move, angle) => this.actors.resolve(id, body, move, angle));
     this.records.push({ zombie, behavior: new ZombieBehavior(config, random), vision: new VisionSensor(config.senses), hearing: new HearingSensor(config.senses),
-      random, path: [], pathIndex: 0, requestedGoal: null, replanLeft: 0, targetAlive: true });
+      random, path: [], pathIndex: 0, requestedGoal: null, replanLeft: 0, targetAlive: true, stepDistance: 0, groanLeft: 4 + random() * 6 });
     return zombie;
   }
   spawn(counts: { shambler?: number; runner?: number }, origin: Point): void {
@@ -84,6 +85,7 @@ export class EnemySystem {
     if (!zombie.isAlive()) this.navigation.cancel(zombie.id);
     return result;
   }
+  findBySoundId(id?: string): Zombie | undefined { return this.records.find(r => r.zombie.id === id)?.zombie; }
   update(delta: number, context: EnemyContext): void {
     if (!Number.isFinite(delta) || delta <= 0) return;
     this.time += delta; this.intents = [];
@@ -101,7 +103,9 @@ export class EnemySystem {
       if (moment && !z.isStunned() && context.target.alive) this.intents.push({ ...moment, zombie: z });
       if (context.target.alive && sight?.visible && !z.isStunned() && z.attack.canStart(this.time) &&
         sectorIntersectsCircle(center, z.getFacingDirection(), z.config.attackRadius, z.config.attackHalfAngle, context.target, context.target.radius) &&
-        hasLineOfSight(this.map, center.x, center.y, context.target.x, context.target.y)) z.attack.start(this.time, z.getFacingDirection());
+        hasLineOfSight(this.map, center.x, center.y, context.target.x, context.target.y)) {
+        if (z.attack.start(this.time, z.getFacingDirection())) this.noises?.emit('zombieAttack', center.x, center.y, { sourceId: z.id });
+      }
       if (!context.target.alive) z.attack.cancel();
       if (z.isStunned() || z.attack.isBusy(this.time)) { z.stopMovement(); continue; }
       const goal = r.behavior.getGoal();
@@ -133,7 +137,17 @@ export class EnemySystem {
     this.navigation.update(delta);
     const moveStart = clock(); this.metrics.navigationMs = moveStart - navStart;
     for (const r of this.records) {
+      const before = r.zombie.getCenter();
       r.zombie.update(delta, idleInput, this.map);
+      if (r.zombie.isAlive()) {
+        const after = r.zombie.getCenter();
+        r.stepDistance += Math.hypot(after.x - before.x, after.y - before.y);
+        if (r.stepDistance >= 28 && r.zombie.getVelocity().length() > 1) {
+          r.stepDistance %= 28; this.noises?.emit('zombieStep', after.x, after.y, { sourceId: r.zombie.id });
+        }
+        r.groanLeft -= delta;
+        if (r.groanLeft <= 0) { r.groanLeft = 4 + r.random() * 6; this.noises?.emit('zombieGroan', after.x, after.y, { sourceId: r.zombie.id }); }
+      }
       const death = r.zombie.consumeDeathFinished();
       if (death) { this.deathEvents.push(death); this.actors.unregister(r.zombie.id); this.navigation.cancel(r.zombie.id); }
     }
@@ -154,6 +168,13 @@ export class EnemySystem {
       if (r) onHit?.(result, z, intent.attackId, r.random);
     }
     this.intents = [];
+    if (!player.isAlive()) this.forgetPlayer();
+  }
+  private forgetPlayer(): void {
+    for (const r of this.records) if (r.targetAlive) {
+      r.targetAlive = false; r.behavior.clearTarget(); r.vision.reset(); r.hearing.reset(); r.zombie.attack.cancel(); r.path = [];
+      this.navigation.cancel(r.zombie.id);
+    }
   }
   snapshot() {
     return this.records.map(r => ({ id: r.zombie.id, kind: r.zombie.config.kind, ...r.zombie.getCenter(), life: r.zombie.getLifeState(), health: r.zombie.getHealth(),

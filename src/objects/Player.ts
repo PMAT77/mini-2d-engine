@@ -262,6 +262,10 @@ export class Player extends Entities {
       this.velocity.set(0, 0); this.sprinting = false; this.rollTimeLeft = 0;
       this.pointerAim = undefined; this.isShooting = false; this.muzzleFlashTime = 0;
       this.cancelReload();
+      this.rollActive = false; this.rollSpeed = 0; this.shotPoseTime = 0;
+      for (const slot of Object.values(this.weapons)) {
+        slot.isReloading = false; slot.reloadRemaining = slot.reloadTotal = slot.reloadBase = 0; slot.reloadMode = null;
+      }
     }
     this.onStatsChangeCallback?.();
     return { appliedAmount, killed, blocked: false };
@@ -270,6 +274,9 @@ export class Player extends Entities {
     this.lifeState = 'alive'; this.health = this.maxHealth; this.meleeGrace = 0;
     this.deathCause = this.deathEvent = null;
     this.hitReactTime = 0; this.velocity.set(0, 0);
+    this.sprinting = false; this.sprintTime = this.movementTime = this.stopTime = this.rollTimeLeft = 0;
+    this.stopVelocity.set(0, 0); this.rollActive = false; this.rollSpeed = 0; this.pointerAim = undefined;
+    this.onStatsChangeCallback?.();
   }
   heal(amount: number): void {
     if (!Number.isFinite(amount) || amount < 0) throw new Error("回血量必须是非负有限数值");
@@ -446,6 +453,7 @@ export class Player extends Entities {
    * 撞墙后 Entities 会把向内速度清零，getVelocity() 读不到“还在往里推”。
    */
   getMoveIntent(input: Input): Vector2 {
+    if (!this.isAlive()) return new Vector2();
     return this.getMoveDirection(input);
   }
 

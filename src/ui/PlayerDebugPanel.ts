@@ -32,6 +32,7 @@ interface ColorField {
 
 export interface PlayerDebugPanelOptions {
   onReset?: () => void;
+  onOpenChange?: (open: boolean) => void;
   player: Player;
   input: Input;
   canvas: HTMLCanvasElement;
@@ -679,6 +680,7 @@ export class PlayerDebugPanel {
     this.refresh(true);
   }
 
+  isOpen(): boolean { return this.open; }
   private setOpen(open: boolean): void {
     if (this.open === open) return;
     this.open = open;
@@ -695,6 +697,7 @@ export class PlayerDebugPanel {
       if (this.lastFocus instanceof HTMLElement && document.contains(this.lastFocus)) this.lastFocus.focus();
       this.lastFocus = undefined;
     }
+    this.options.onOpenChange?.(open);
   }
 
   private blockInput = (event: Event): void => {

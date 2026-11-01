@@ -52,6 +52,8 @@ interface LoopVoice {
  * Node 单元测试环境没有 Audio，所有播放静默跳过。
  */
 export class SoundPlayer {
+  private paused = false;
+  private pausedClips = new Set<HTMLAudioElement>();
   /** 一次性音效：url -> 轮换的元素池、每个声部的复用代数与下一个待用下标 */
   private readonly voices = new Map<string, { clips: HTMLAudioElement[]; generations: number[]; next: number }>();
   /** 循环音效：url -> 单个元素与当前/目标音量 */
@@ -68,10 +70,13 @@ export class SoundPlayer {
    * @returns 这一次播放的句柄；没有 Audio 的环境返回 null
    */
   play(url: string, volume: number, rate = 1, options: PlayOptions = {}): SoundHandle | null {
-    if (typeof Audio === "undefined") return null;
+    if (typeof Audio === "undefined" || this.paused) return null;
     const count = Math.max(1, Math.floor(options.count ?? 2));
     let voice = this.voices.get(url);
     if (!voice || voice.clips.length !== count) {
+      if (voice) voice.clips.forEach((clip, i) => {
+        voice!.generations[i]++; clip.pause(); this.stops.delete(clip); this.pausedClips.delete(clip);
+      });
       voice = {
         clips: Array.from({ length: count }, () => {
           const clip = new Audio(url);
@@ -105,6 +110,7 @@ export class SoundPlayer {
         pool.generations[index] += 1;
         const fade = Number.isFinite(fadeSeconds) ? Math.max(0, fadeSeconds) : 0;
         if (fade === 0) {
+          this.pausedClips.delete(clip);
           this.stops.delete(clip);
           clip.volume = 0;
           clip.pause();
@@ -124,7 +130,7 @@ export class SoundPlayer {
    * @param rate 播放速率；跟移动速度成正比时，循环采样里的脚步节拍才不会和实际步伐脱节
    */
   loop(url: string, volume: number, rate = 1): void {
-    if (typeof Audio === "undefined") return;
+    if (typeof Audio === "undefined" || this.paused) return;
     let voice = this.loops.get(url);
     if (!voice) {
       const clip = new Audio(url);
@@ -159,7 +165,7 @@ export class SoundPlayer {
 
   /** 按帧推进循环音效的淡入淡出；降到 0 后暂停元素，不留下半截尾音。 */
   update(delta: number): void {
-    if (!(delta > 0)) return;
+    if (!(delta > 0) || this.paused) return;
     for (const voice of this.loops.values()) {
       const step = voice.fade * delta;
       if (voice.volume < voice.target) voice.volume = Math.min(voice.target, voice.volume + step);
@@ -188,6 +194,7 @@ export class SoundPlayer {
   /** 立即停掉所有循环音效，离开场景时用。 */
   stopLoops(): void {
     for (const voice of this.loops.values()) {
+      this.pausedClips.delete(voice.clip);
       voice.target = 0;
       voice.volume = 0;
       voice.clip.volume = 0;
@@ -196,6 +203,28 @@ export class SoundPlayer {
       voice.clip.currentTime = 0;
     }
   }
+  pauseAll(): void {
+    if (this.paused) return;
+    this.paused = true;
+    const clips: HTMLAudioElement[] = [];
+    for (const pool of this.voices.values()) clips.push(...pool.clips);
+    for (const voice of this.loops.values()) clips.push(voice.clip);
+    for (const clip of clips) if (!clip.paused && !clip.ended) { this.pausedClips.add(clip); clip.pause(); }
+  }
+  resumeAll(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    for (const clip of this.pausedClips) void clip.play().catch(() => {});
+    this.pausedClips.clear();
+  }
+  stopAll(): void {
+    this.stopLoops();
+    for (const pool of this.voices.values()) pool.clips.forEach((clip, i) => {
+      pool.generations[i]++; clip.pause(); clip.currentTime = 0;
+    });
+    this.stops.clear(); this.pausedClips.clear(); this.voices.clear(); this.loops.clear(); this.paused = false;
+  }
+  isPaused(): boolean { return this.paused; }
 }
 
 const clamp01 = (value: number): number => (Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0);
