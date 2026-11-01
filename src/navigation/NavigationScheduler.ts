@@ -39,6 +39,7 @@ interface Job {
   open: Heap; g: Map<number, number>; parent: Map<number, number>; closed: Set<number>;
   goals: { point: Point; connections: Map<number, number> }[]; order: number;
   alternatives: Point[]; best?: { key: number; goal: Point; cost: number };
+  finishing?: { key?: number; reverse: Point[]; source?: Point[]; output: Point[]; index: number; scan: number; chosen: number; original: number };
 }
 
 export class NavigationScheduler {
@@ -49,7 +50,7 @@ export class NavigationScheduler {
   private accumulator = 0;
   private tick = 0;
   private rotation = 0;
-  readonly stats = { ticks: 0, started: 0, expanded: 0, lastExpanded: 0, lastStarted: 0, active: 0, queued: 0, maxWaitSeconds: 0 };
+  readonly stats = { ticks: 0, started: 0, expanded: 0, workUnits: 0, lastWorkUnits: 0, lastExpanded: 0, lastStarted: 0, active: 0, queued: 0, maxWaitSeconds: 0 };
   constructor(readonly map: TileMap, readonly limits: Readonly<NavigationLimits> = DEFAULT_NAVIGATION_LIMITS) {
     if (Object.values(limits).some(n => !Number.isSafeInteger(n) || n <= 0)) throw new Error('非法导航预算');
   }
@@ -61,7 +62,9 @@ export class NavigationScheduler {
   request(request: NavigationRequest): NavigationResult {
     const old = this.jobs.get(request.id);
     if (old?.result.status === 'pending' && old.grid.valid() && old.request.radius === request.radius && distance(old.request.goal, request.goal) < 25) return old.result;
-    const age = old?.result.status === 'pending' ? old.age : this.tick;
+    // Preserve time actually spent waiting, not time spent actively searching.
+    // Otherwise repeatedly replaced high-priority active jobs age forever and starve the queue.
+    const age = old?.result.status === 'pending' && this.queued.includes(old) ? old.age : this.tick;
     this.cancel(request.id);
     const result: NavigationResult = { status: 'pending', path: [], radius: request.radius, revision: this.map.getNavigationRevision(), expanded: 0 };
     if (!Number.isFinite(request.radius) || request.radius <= 0 || ![request.start.x, request.start.y, request.goal.x, request.goal.y].every(Number.isFinite)) { result.status = 'invalid'; return result; }
@@ -77,7 +80,11 @@ export class NavigationScheduler {
     this.jobs.delete(id);
     this.queued = this.queued.filter(j => j !== job); this.active = this.active.filter(j => j !== job);
   }
-  clear(): void { for (const id of [...this.jobs.keys()]) this.cancel(id); this.grids.clear(); this.accumulator = 0; }
+  clear(): void {
+    for (const id of [...this.jobs.keys()]) this.cancel(id);
+    this.grids.clear(); this.accumulator = 0;
+    this.stats.active = this.stats.queued = this.stats.lastExpanded = this.stats.lastWorkUnits = this.stats.lastStarted = 0;
+  }
   get(id: string): NavigationResult | undefined { return this.jobs.get(id)?.result; }
   update(delta: number): void {
     if (!Number.isFinite(delta) || delta <= 0) return;
@@ -104,13 +111,15 @@ export class NavigationScheduler {
     while (remaining > 0 && this.active.length && stalled < this.active.length) {
       this.rotation %= this.active.length;
       const job = this.active[this.rotation++];
+      const before = job.result.expanded;
       const used = this.expand(job, Math.min(this.limits.slice, remaining));
-      remaining -= used; expanded += used;
+      remaining -= used; expanded += job.result.expanded - before;
       if (!used) stalled++; else stalled = 0;
       this.active = this.active.filter(j => j.result.status === 'pending');
     }
     this.stats.started += starts; this.stats.expanded += expanded;
     this.stats.lastStarted = starts; this.stats.lastExpanded = expanded;
+    this.stats.lastWorkUnits = this.limits.nodes - remaining; this.stats.workUnits += this.stats.lastWorkUnits;
     this.stats.active = this.active.length; this.stats.queued = this.queued.length;
   }
   private initialize(job: Job): void {
@@ -134,19 +143,23 @@ export class NavigationScheduler {
     if (!job.open.length) this.finish(job, 'unreachable');
   }
   private heuristic(job: Job, p: Point): number {
-    // Octile is admissible on the grid. Subtract one tile for arbitrary endpoint connections.
-    return Math.max(0, Math.min(...job.goals.map(g => {
-      const dx = Math.abs(p.x - g.point.x), dy = Math.abs(p.y - g.point.y);
-      return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy);
-    })) - job.grid.map.tileSize);
+    // Exact endpoint connector cost + Octile between grid nodes is admissible and consistent.
+    let best = Infinity;
+    for (const goal of job.goals) for (const [key, cost] of goal.connections) {
+      const point = job.grid.point(key), dx = Math.abs(p.x - point.x), dy = Math.abs(p.y - point.y);
+      best = Math.min(best, cost + Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy));
+    }
+    return best;
   }
   private expand(job: Job, quota: number): number {
+    if (job.finishing) return this.finalize(job, quota);
     let used = 0;
     while (used < quota && job.open.length) {
-      if (job.best && job.open.first!.f >= job.best.cost - 1e-9) { this.finishPath(job); return used; }
+      if (job.best && job.open.first!.f >= job.best.cost - 1e-9) { this.finishPath(job); return used + this.finalize(job, quota - used); }
       const node = job.open.pop();
+      used++;
       if (job.closed.has(node.key) || node.g !== job.g.get(node.key)) continue;
-      job.closed.add(node.key); used++; job.result.expanded++;
+      job.closed.add(node.key); job.result.expanded++;
       const reached = job.goals.find(g => g.connections.has(node.key));
       if (reached) {
         const cost = node.g + reached.connections.get(node.key)!;
@@ -161,16 +174,34 @@ export class NavigationScheduler {
       }
     }
     if (!job.open.length && job.result.status === 'pending') {
-      if (job.best) this.finishPath(job);
+      if (job.best) { this.finishPath(job); used += this.finalize(job, quota - used); }
       else if (job.alternatives.length) this.startCandidate(job);
       else this.finish(job, 'unreachable');
     }
     return used;
   }
   private finishPath(job: Job): void {
-    const path: Point[] = [job.best!.goal]; let key: number | undefined = job.best!.key;
-    while (key !== undefined) { path.push(job.grid.point(key)); key = job.parent.get(key); }
-    path.push(job.request.start); path.reverse();
-    this.finish(job, 'found', job.grid.smooth(path));
+    job.finishing = { key: job.best!.key, reverse: [job.best!.goal], output: [], index: 0, scan: 1, chosen: 1, original: 0 };
+  }
+  private finalize(job: Job, quota: number): number {
+    const state = job.finishing!; let used = 0;
+    while (used < quota && job.result.status === 'pending') {
+      used++;
+      if (!state.source) {
+        if (state.key !== undefined) { state.reverse.push(job.grid.point(state.key)); state.key = job.parent.get(state.key); }
+        else { state.reverse.push(job.request.start); state.source = state.reverse.reverse(); state.output.push(state.source[0]); }
+        continue;
+      }
+      const points = state.source, j = state.scan;
+      state.original += job.grid.segmentCost(points[j - 1], points[j]);
+      if (job.grid.segmentCost(points[state.index], points[j]) <= state.original * 1.05 + 1e-6) state.chosen = j;
+      state.scan++;
+      if (state.scan >= Math.min(points.length, state.index + 9)) {
+        state.output.push({ ...points[state.chosen] }); state.index = state.chosen;
+        if (state.index === points.length - 1) { this.finish(job, 'found', state.output); break; }
+        state.scan = state.index + 1; state.chosen = state.scan; state.original = 0;
+      }
+    }
+    return used;
   }
 }

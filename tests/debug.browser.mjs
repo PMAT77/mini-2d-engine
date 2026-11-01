@@ -27,8 +27,8 @@ try {
     await page.evaluate(async () => {
       window.requestAnimationFrame = () => 0;
       const { TileMap } = await import('/src/map/TileMap.ts');
-      const scene = debugGame.sceneManager.getCurrentScene();
-      scene.map = new TileMap(40, 30, { generateWater: false });
+      const { createFixedScene } = await import('/tests/fixed-scene.ts');
+      const scene = await createFixedScene(debugGame, 40, 30, 200, 250);
       scene.map.tiles.forEach(row => row.fill('default'));
       scene.pickupItems = [];
       scene.torches.forEach(torch => scene.lightingSystem.removeLightSource(torch.light)); scene.torches = [];
@@ -172,7 +172,10 @@ try {
     await edit('reloadProgress', 50);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), true);
     await page.evaluate(() => debugTest.tick(0.5));
+    assert.ok(Math.abs(await page.evaluate(() => debugTest.scene.player.getReloadProgress()) - .5) < 1e-6, 'F2 freezes reload progress');
+    await page.keyboard.press('F2'); await page.evaluate(() => debugTest.tick(.5));
     assert.ok(Math.abs(await page.evaluate(() => debugTest.scene.player.getReloadProgress()) - .75) < 1e-6);
+    await page.keyboard.press('F2');
     await page.getByRole('button', { name: '打空弹匣', exact: true }).click();
     assert.equal(await page.evaluate(() => debugTest.scene.player.getMagazineAmmo()), 0);
     assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), false);
@@ -187,7 +190,10 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.getAutoReload()), true);
     await page.getByRole('button', { name: '打空弹匣', exact: true }).click();
     await page.evaluate(() => debugTest.tick(0.01));
+    assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), false, 'auto reload waits until the paused world resumes');
+    await page.keyboard.press('F2'); await page.evaluate(() => debugTest.tick(.01));
     assert.equal(await page.evaluate(() => debugTest.scene.player.getIsReloading()), true);
+    await page.keyboard.press('F2');
     await field('autoReload').uncheck();
     assert.equal(await page.evaluate(() => debugTest.scene.player.getAutoReload()), false);
     await page.getByRole('button', { name: '补满弹匣', exact: true }).click();

@@ -189,7 +189,6 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly runSeed: number;
   private readonly spawnRandom: () => number;
   private inputResetVersion = 0;
-  private deathAcknowledged = false;
   private deathEnterHeld = true;
   private chickens: Chicken[] = [];
   private map!: TileMap;
@@ -440,7 +439,8 @@ export class GameScene extends Scene {  private player!: Player;
       Math.min(deadZoneHeight, this.map.height * this.map.tileSize), GameScene.PLAYER_SIZE, { type: "circle", radius: 0.5 });
     this.player = new Player(sceneOptions.playerSpawn?.x ?? spawn.x, sceneOptions.playerSpawn?.y ?? spawn.y, undefined, this.particleSystem);
     this.survival = new PlayerSurvivalSystem(this.player);
-    this.actorWorld.register("player", this.player);
+    // Preserve the sampled player/light/camera pose during the later NPC separation pass.
+    this.actorWorld.register("player", this.player, false);
     this.player.setMotionResolver((body, move, rotation) => this.actorWorld.resolve("player", body, move, rotation));
     // 子弹自然落地时尝试在干燥地面留下弹坑。
     this.player.setOnBulletLanded((x, y) => this.craterSystem.spawn(x, y, this.map));
@@ -1550,13 +1550,12 @@ export class GameScene extends Scene {  private player!: Player;
       this.flashlight?.setActive(false);
       this.interaction.reset();
       const enter = input.isKeyDown("Enter");
-      if (this.deathAcknowledged && enter && !this.deathEnterHeld) {
+      if (enter && !this.deathEnterHeld) {
         this.game?.sceneManager.changeScene(new MenuScene(true), 0);
         return;
       }
       this.deathEnterHeld = enter;
-      this.deathAcknowledged = true;
-    } else { this.deathAcknowledged = false; this.deathEnterHeld = true; }
+    } else { this.deathEnterHeld = input.isKeyDown("Enter"); }
 
     // 开火/切枪都只在本帧有效：交互取消只消费当帧信号。
     this.shotThisFrame = false;
@@ -1655,6 +1654,7 @@ export class GameScene extends Scene {  private player!: Player;
       if (this.survival.onMeleeDamage(result, zombie.config.infectionChance, random)) this.showPickupText("已感染");
     });
     if (this.player.consumeDeathEvent()) {
+      this.deathEnterHeld = input.isKeyDown("Enter");
       this.interaction.reset(); this.flashlightOn = false; this.flashlight.setActive(false);
       this.reloadVoice?.stop(0); this.reloadVoice = null;
       this.crosshairOverlay?.setVisible(false);

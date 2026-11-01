@@ -111,13 +111,16 @@ export class EnemySystem {
       const goal = r.behavior.getGoal();
       if (!goal) { z.setMovement({ x: 0, y: 0 }, false); continue; }
       const grid = this.navigation.grid(z.getSize() / 2);
-      if (r.result && r.result.revision !== this.map.getNavigationRevision()) { r.path = []; r.replanLeft = 0; this.navigation.cancel(z.id); }
+      if (r.result && (r.result.revision !== this.map.getNavigationRevision() || r.result.radius !== z.getSize() / 2)) {
+        this.navigation.cancel(z.id); r.result = undefined; r.adopted = undefined; r.path = []; r.replanLeft = 0;
+      }
       if (r.result?.status === 'found' && r.result !== r.adopted) { r.path = r.result.path; r.pathIndex = 1; r.adopted = r.result; }
       if (r.result && ['invalid', 'unreachable', 'budgetExceeded', 'cancelled'].includes(r.result.status) && r.result !== r.adopted) {
         r.adopted = r.result; r.path = []; r.replanLeft = 1;
         if (r.behavior.getState() === 'wander' || r.behavior.getState() === 'search') r.behavior.rejectGoal();
       }
-      if (r.replanLeft <= 0 && r.result?.status !== 'pending' && (!r.path.length || !r.requestedGoal || Math.hypot(goal.x - r.requestedGoal.x, goal.y - r.requestedGoal.y) >= 25)) {
+      const movedGoal = !r.requestedGoal || Math.hypot(goal.x - r.requestedGoal.x, goal.y - r.requestedGoal.y) >= 25;
+      if (r.replanLeft <= 0 && (r.result?.status === 'pending' ? movedGoal : !r.path.length || movedGoal)) {
         r.result = this.navigation.request({ id: z.id, start: center, goal, radius: z.getSize() / 2,
           priority: r.behavior.getState() === 'chase' ? (r.path.length ? 1 : 3) : 0 });
         r.requestedGoal = goal; r.replanLeft = .45;

@@ -23,8 +23,9 @@ try {
     const scene = await page.evaluate(async () => {
       const { TileMap } = await import('/src/map/TileMap.ts');
       const { GoldPickup } = await import('/src/objects/GoldPickup.ts');
-      const game = window.visionGame, scene = game.sceneManager.getCurrentScene();
-      scene.map = new TileMap(40, 30, { generateWater: false });
+      const game = window.visionGame;
+      const { createFixedScene } = await import('/tests/fixed-scene.ts');
+      const scene = await createFixedScene(game, 40, 30);
       scene.map.tiles.forEach(row => row.fill('default'));
       scene.map.tileHp.forEach(row => row.fill(0));
       scene.torches.forEach(t => scene.lightingSystem.removeLightSource(t.light)); scene.torches = [];

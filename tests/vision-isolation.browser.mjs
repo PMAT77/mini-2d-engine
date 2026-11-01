@@ -63,8 +63,8 @@ try {
     const { PerceptionSystem } = await import('/src/vision/PerceptionSystem.ts');
     const { PerceptionRenderer } = await import('/src/vision/PerceptionRenderer.ts');
     const game = window.visionGame;
-    const scene = game.sceneManager.getCurrentScene();
-    scene.map = new TileMap(40, 30, { generateWater: false });
+    const { createFixedScene } = await import('/tests/fixed-scene.ts');
+    const scene = await createFixedScene(game, 40, 30);
     scene.map.tiles.forEach(row => row.fill('default'));
     scene.map.tileHp.forEach(row => row.fill(0));
     scene.map.water = undefined;

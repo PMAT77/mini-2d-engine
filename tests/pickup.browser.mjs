@@ -31,12 +31,12 @@ try {
     });
     await page.keyboard.up('Enter');
 
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       window.requestAnimationFrame = () => 0;
       const game = window.pickupGame;
-      const scene = game.sceneManager.getCurrentScene();
+      const { createFixedScene } = await import('/tests/fixed-scene.ts');
+      const scene = await createFixedScene(game, 60, 40, 400, 400);
       // 固定地图与感知，避免种子生成的水/墙/火把随机影响采样。
-      scene.map = new scene.map.constructor(60, 40, { generateWater: false });
       scene.map.tiles.forEach(row => row.fill('default'));
       // 截图验收需要能看清肉块本体：交给环境光，不影响感知与交互判定。
       scene.setAmbientLight('rgba(255, 255, 255, 0.45)');

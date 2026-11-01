@@ -14,7 +14,7 @@ try {
     const result = await page.evaluate(() => {
       const f = window.fixture, enemy = f.scene.getEnemySystem();
       const initial = enemy.snapshot();
-      f.addEnemy('shambler', 900, 750, Math.PI); f.addEnemy('runner', 740, 800, -Math.PI/2);
+      f.addEnemy('shambler', 700, 750, 0); f.addEnemy('runner', 670, 710, 0);
       f.tick(40);
       return { initial, after: enemy.snapshot(), budget: enemy.navigation.stats };
     });
@@ -104,5 +104,69 @@ try {
     assert.equal(await page.locator('[data-player-debug]').count(), 1);
     assert.deepEqual(errors, []); cases++; await page.close();
   }
-  console.log(`Zombie browser: ${cases} encounter, pickup, responsive layout, pause and lifecycle cases passed.`);
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    const errors = []; page.on('pageerror', e => errors.push(e.message));
+    await page.goto(`${process.env.TEST_BASE_URL || 'http://127.0.0.1:5173'}/tests/zombie-fixture.html?count=0&seed=8`);
+    await page.waitForFunction(() => window.fixture);
+    const infected = await page.evaluate(() => {
+      const f = window.fixture; window.attackingZombie = f.addEnemy('runner', 750, 750, 0);
+      f.tick(36);
+      return { status: f.scene.getSurvivalSystem().snapshot(), hp: f.scene.getPlayer().getHealth() };
+    });
+    assert.equal(infected.hp, 91); assert.equal(infected.status.infected, true, 'default 18% Runner infection occurs from an actual seeded melee hit');
+    assert.ok(infected.status.infectionRemainder < .2, 'new infection starts after its melee frame');
+    await page.screenshot({ path: `${output}/actual-melee-infection.png` });
+    const shot = await page.evaluate(() => {
+      const f = window.fixture, p = f.scene.getPlayer(), z = window.attackingZombie;
+      p.applyConfig({ shooting: { spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 } });
+      for (let i=0; i<7 && z.isAlive(); i++) { p.shootAt(z.getCenter(), 10, f.map); f.tick(13); }
+      f.tick(45);
+      const vaccine = f.scene.getVaccinePickups()[0].getPickupAnchor();
+      p.x = vaccine.x - p.getSize()/2 - 45; p.y = vaccine.y - p.getSize()/2; f.tick(20);
+      return { life: z.getLifeState(), vaccines: f.scene.getVaccinePickups().length };
+    });
+    assert.equal(shot.life, 'removed'); assert.equal(shot.vaccines, 2, 'a zombie death adds no vaccine');
+    await page.keyboard.down('e'); await page.evaluate(() => window.fixture.tick(31)); await page.keyboard.up('e'); await page.evaluate(() => window.fixture.tick());
+    const beforeUse = await page.evaluate(() => ({ hp: window.fixture.scene.getPlayer().getHealth(), status: window.fixture.scene.getSurvivalSystem().snapshot() }));
+    assert.equal(beforeUse.status.vaccines, 1); assert.equal(beforeUse.status.infected, true);
+    await page.keyboard.down('v'); await page.evaluate(() => window.fixture.tick()); await page.keyboard.up('v');
+    const cured = await page.evaluate(() => ({ hp: window.fixture.scene.getPlayer().getHealth(), status: window.fixture.scene.getSurvivalSystem().snapshot() }));
+    assert.equal(cured.hp, beforeUse.hp); assert.equal(cured.status.infected, false); assert.equal(cured.status.vaccines, 0);
+    assert.deepEqual(errors, []); cases++; await page.close();
+  }
+  for (const dpr of [1, 1.25, 2]) {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: dpr });
+    const errors = []; page.on('pageerror', e => errors.push(e.message));
+    await page.goto(`${process.env.TEST_BASE_URL || 'http://127.0.0.1:5173'}/tests/zombie-fixture.html?count=0`);
+    await page.waitForFunction(() => window.fixture);
+    await page.evaluate(() => { window.exposedZombie = window.fixture.addEnemy('shambler', 640, 750, 0); });
+    await page.keyboard.down('g'); await page.evaluate(() => window.fixture.tick(1, .3)); await page.keyboard.up('g'); await page.evaluate(() => window.fixture.tick(1, 0));
+    assert.equal(await page.evaluate(() => window.fixture.scene.getEnemySystem().snapshot()[0].state), 'wander');
+    await page.keyboard.down('g'); await page.evaluate(() => window.fixture.tick(1, .3)); await page.keyboard.up('g');
+    assert.equal(await page.evaluate(() => window.fixture.scene.getEnemySystem().snapshot()[0].state), 'chase', 'G exposes the player in the same frame');
+    const clientPoint = async (x,y) => page.evaluate(([x,y]) => { const f=window.fixture, v=f.scene.displayedView, r=f.game.renderer.ctx.canvas.getBoundingClientRect(); return {x:r.left+(x-v.x)*r.width/v.width,y:r.top+(y-v.y)*r.height/v.height}; }, [x,y]);
+    let point = await clientPoint(640,750); await page.mouse.move(point.x,point.y); await page.evaluate(() => window.fixture.tick(1,0));
+    assert.equal(await page.locator('[data-crosshair="root"]').getAttribute('data-crosshair-target'), '1');
+    await page.evaluate(() => { window.fixture.addEnemy('runner',1200,750,Math.PI); window.fixture.tick(1,0); });
+    point = await clientPoint(1200,750); await page.mouse.move(point.x,point.y); await page.evaluate(() => window.fixture.tick(1,0));
+    assert.equal(await page.locator('[data-crosshair="root"]').getAttribute('data-crosshair-target'), '0', 'hidden enemies do not reveal themselves through the reticle');
+    await page.keyboard.press('F2'); await page.getByRole('tab', { name: '画面', exact: true }).click();
+    const zoom = page.locator('[data-debug-field="graphics.camera.zoom"]'); await zoom.fill('1.2'); await zoom.press('Enter'); await page.keyboard.press('F2');
+    await page.evaluate(() => { window.fixture.scene.camera.shake(12,.5,.7); window.fixture.tick(1,0); });
+    point = await clientPoint(640,750); await page.mouse.move(point.x,point.y); await page.evaluate(() => window.fixture.tick(1,0));
+    assert.equal(await page.locator('[data-crosshair="root"]').getAttribute('data-crosshair-target'), '1', 'recognized target feedback survives zoom and camera shake');
+    const wall = await page.evaluate(() => {
+      const f=window.fixture,p=f.scene.getPlayer(); p.x=1000-24.5;p.y=750-24.5;
+      const z=f.addEnemy('shambler',1075,750,0); f.tick(1,0); f.scene.updatePerception(.3); f.scene.draw(f.game.renderer.ctx);
+      const before=z.getPose(), view=f.scene.getPerceptionView(z), v=f.scene.displayedView;
+      const alpha=f.scene.unitContext.getImageData(Math.round(1110-v.x),Math.round(750-v.y),1,1).data[3];
+      f.scene.draw(f.game.renderer.ctx); return {before,after:z.getPose(),view,alpha};
+    });
+    assert.equal(wall.alpha,0,'partially occluded body details never paint onto the wall top'); assert.deepEqual(wall.before,wall.after,'drawing does not advance enemy pose');
+    assert.ok(wall.view.alpha > 0 || wall.view.silhouette > 0);
+    await page.screenshot({ path: `${output}/wall-occlusion-zoom-shake-dpr-${dpr}.png` });
+    assert.deepEqual(errors, []); cases++; await page.close();
+  }
+  console.log(`Zombie browser: ${cases} encounter, combat/infection/cure, rendering, pause and lifecycle cases passed.`);
 } finally { await browser.close(); }

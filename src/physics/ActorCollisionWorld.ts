@@ -9,7 +9,7 @@ export interface CollisionActor {
   getSize(): number;
   getCollider(): Collider;
 }
-interface Entry { id: string; actor: CollisionActor; body: Collider; cells: string[]; }
+interface Entry { id: string; actor: CollisionActor; body: Collider; cells: string[]; separates: boolean; }
 
 /** Static terrain and nearby actors are swept together, including rolls and knockback. */
 export class ActorCollisionWorld {
@@ -18,9 +18,9 @@ export class ActorCollisionWorld {
   private cells = new Map<string, Set<string>>();
   constructor(readonly map: TileMap) {}
 
-  register(id: string, actor: CollisionActor): void {
+  register(id: string, actor: CollisionActor, separates = true): void {
     if (this.entries.has(id)) throw new Error(`重复角色 ID: ${id}`);
-    this.entries.set(id, { id, actor, body: actor.getCollider(), cells: [] });
+    this.entries.set(id, { id, actor, body: actor.getCollider(), cells: [], separates });
     this.sync(id);
   }
   unregister(id: string): void {
@@ -77,6 +77,7 @@ export class ActorCollisionWorld {
           if (depth <= .01) continue;
           const nx = distance > 1e-9 ? dx / distance : 1, ny = distance > 1e-9 ? dy / distance : 0;
           for (const [e, sign] of [[a, -1], [b, 1]] as const) {
+            if (!e.separates) continue;
             const amount = Math.min(4, depth / 2 + .001);
             const result = this.map.resolveMotion(e.body, { x: nx * sign * amount, y: ny * sign * amount });
             if (result.exhausted || !this.map.isShapeWalkable(result.collider)) continue;

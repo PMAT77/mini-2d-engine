@@ -25,9 +25,9 @@ try {
     await page.mouse.move(500, 300);
     await page.waitForFunction(() => document.querySelector('[data-crosshair="root"]')?.dataset.crosshairImage === 'loaded', null, { timeout: 5000 });
     await page.screenshot({ path: join(output, 'mouse-gameplay-dpr' + dpr + '.png') });
-    await page.evaluate(() => {
-      const s = shootingGame.sceneManager.getCurrentScene();
-      s.map = new s.map.constructor(100, 100, { generateWater: false }); s.map.tiles.forEach(row => row.fill('default'));
+    await page.evaluate(async () => {
+      const { createFixedScene } = await import('/tests/fixed-scene.ts');
+      const s = await createFixedScene(shootingGame,100,100,200.5,200.5,1);
       s.pickupItems = []; s.goldPickups = []; s.player.x = s.player.y = 200.5;
       s.player.applyConfig({ shooting: { spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 } });
       window.liveShots = 0; s.player.setOnShootCallback(() => liveShots++);

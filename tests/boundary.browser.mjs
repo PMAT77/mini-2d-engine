@@ -46,10 +46,10 @@ try {
     assert.equal(isolated.count, 1);
     assert.ok(isolated.warm > 0, `boundary ripple must paint warm arc pixels: ${JSON.stringify(isolated)}`);
 
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
       const game = window.boundaryGame;
-      const scene = game.sceneManager.getCurrentScene();
-      scene.map = new scene.map.constructor(20, 20, { generateWater: false });
+      const { createFixedScene } = await import('/tests/fixed-scene.ts');
+      const scene = await createFixedScene(game, 20, 20, 0, 400);
       scene.map.tiles.forEach(row => row.fill('default'));
       scene.map.tileHighlight.forEach(row => row.fill(0));
       scene.chickens = [];

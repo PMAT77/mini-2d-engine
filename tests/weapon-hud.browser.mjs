@@ -51,11 +51,11 @@ async function openGame({ dpr = 1, width = 1100, height = 800, failImages = fals
   });
   await page.keyboard.up('Enter');
 
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     window.requestAnimationFrame = () => 0;
     const game = window.hudGame;
-    const scene = game.sceneManager.getCurrentScene();
-    scene.map = new scene.map.constructor(60, 40, { generateWater: false });
+    const { createFixedScene } = await import('/tests/fixed-scene.ts');
+    const scene = await createFixedScene(game, 60, 40, 200, 250);
     scene.map.tiles.forEach(row => row.fill('default'));
     scene.pickupItems = [];
     scene.player.x = 200;

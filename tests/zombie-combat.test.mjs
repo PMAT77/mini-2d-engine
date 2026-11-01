@@ -71,3 +71,38 @@ test('fatal bullets cancel attacks and navigation; corpse blocks until exactly o
   for (let i = 0; i < 35; i++) tick(f, 1 / 60);
   assert.equal(f.actors.size, 1); assert.equal(f.enemies.consumeDeaths().length, 1); assert.equal(f.enemies.consumeDeaths().length, 0); assert.equal(f.enemies.zombies.length, 0);
 });
+
+test('real player rolls cannot pass a zombie group and a fixed player is never moved by overlap repair', () => {
+  const f = setup(), p = f.player; p.x = 125 - 24.5;
+  const z = f.enemies.add('shambler', { x: 225, y: 225 }, Math.PI);
+  f.enemies.add('runner', { x: 225, y: 275 }, Math.PI);
+  p.setMotionResolver((body, move, rotation) => f.actors.resolve('player', body, move, rotation)); f.actors.sync();
+  assert.equal(p.requestRoll({ isKeyDown: k => k === 'd' }), true);
+  for (let i = 0; i < 40; i++) p.update(1/60, idle, f.map);
+  assert.ok(p.getCollider().pose.x <= 177.52); assert.ok(f.map.isShapeWalkable(p.getCollider()));
+  f.actors.unregister('player'); f.actors.register('player', p, false);
+  z.x = p.getCollider().pose.x - 23 + 10; z.y = p.y;
+  f.actors.sync(); const x = p.x; f.actors.separate(); assert.equal(p.x, x);
+});
+
+test('zombie knockback can enter walkable water and corpse deadlines remain consistent across FPS', () => {
+  for (const fps of [30, 60, 144]) {
+    const f = setup(); for (const row of f.map.tiles) for (let x = 4; x < 16; x++) row[x] = 'water'; f.map.invalidateNavigation();
+    const z = f.enemies.add('runner', { x: 150, y: 225 }, 0);
+    f.enemies.receiveHit(z, { ...impact(1), impulse: 400 });
+    for (let i = 0; i < fps; i++) z.update(1/fps, idle, f.map);
+    assert.ok(z.getCenter().x > 185, `water knockback at ${fps} FPS`);
+    f.enemies.receiveHit(z, { ...impact(100), impulse: 100 });
+    let elapsed = 0, event = null;
+    for (let i = 0; i < fps && !event; i++) { z.update(1/fps, idle, f.map); elapsed += 1/fps; event = z.consumeDeathFinished(); }
+    assert.ok(event); assert.ok(Math.abs(elapsed - event.elapsedSeconds) <= 1/fps + 1e-9); assert.equal(z.consumeDeathFinished(), null);
+  }
+});
+
+test('a stationary dynamic crowd does not cause repeated static-map path requests', () => {
+  const f = setup(), center = f.player.getCollider().pose;
+  for (let i = 0; i < 20; i++) { const angle = i*Math.PI/10; f.enemies.add('runner', { x: center.x + Math.cos(angle)*200, y: center.y + Math.sin(angle)*200 }, angle+Math.PI); }
+  const context = { target: { x: center.x, y: center.y, radius: 24.5, alive: true }, lights: [], playerNoises: [] };
+  for (let i = 0; i < 300; i++) f.enemies.update(1/60, context);
+  assert.ok(f.enemies.navigation.stats.started < 100, `${f.enemies.navigation.stats.started} tasks`);
+});

@@ -160,10 +160,10 @@ async function checkWaterBullets(page,dpr){
   for(const wet of [true,false]){
     await page.evaluate(async wet=>{
       const {TileMap}=await import('/src/map/TileMap.ts');
-      const scene=waterBulletGame.sceneManager.getCurrentScene(),p=scene.player;
-      if(window.waterBulletRun){p.update=waterBulletRun.original;scene.particleSystem.createExplosion=waterBulletRun.originalExplosion;}
-      scene.map=new TileMap(30,24,{generateWater:false});
+      const {createFixedScene}=await import('/tests/fixed-scene.ts');
+      const scene=await createFixedScene(waterBulletGame,30,24,(wet?245:225)-24.5,500-24.5),p=scene.player;
       scene.map.tiles.forEach(row=>row.forEach((_,col)=>row[col]=col<5?'default':col===5?'shallow_water':col===6?'water':col===7?'deep_water':'ultra_deep_water'));
+      scene.map.invalidateNavigation();
       scene.pickupItems=[];scene.goldPickups=[];scene.particleSystem.clear();
       p.bullets=[];p.fireCooldown=0;p.setDebugState({magazineAmmo:p.getMagazineSize(),chambered:true});
       p.applyConfig({shooting:{fireRate:5,reloadDuration:.02}});

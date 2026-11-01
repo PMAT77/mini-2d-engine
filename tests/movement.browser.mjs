@@ -27,14 +27,14 @@ try {
     });
     await page.keyboard.up('Enter');
     // Exercise the real game and rendering order, with a fixed map and a manually stepped clock.
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       const game = window.movementTestGame;
-      const scene = game.sceneManager.getCurrentScene(), sprite = scene.player.sprite;
+      const { createFixedScene } = await import('/tests/fixed-scene.ts');
+      const scene = await createFixedScene(game, 100, 100, 200, 250), sprite = scene.player.sprite;
       const Player = scene.player.constructor, Vector2 = scene.player.getVelocity().constructor;
       scene.update = () => {};
       // 换弹圆环靠近屏幕左上角时会落在小地图 HUD 下面；这里只验证世界层渲染，小地图自身由 minimap.browser.mjs 覆盖。
       scene.minimap.draw = () => {};
-      scene.map = new scene.map.constructor(100, 100, { generateWater: false });
       scene.map.tiles.forEach(row => row.fill('default'));
       scene.map.tileHighlight.forEach(row => row.fill(0));
       scene.pickupItems = [];

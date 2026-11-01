@@ -861,8 +861,8 @@ export class TileMap {
   breakTile(col: number, row: number) {
     if (row >= 0 && col >= 0 && row < this.height && col < this.width) {
       const type = this.tiles[row][col];
-    this.tiles[row][col] = TileTypeId.DEFAULT;
-    this.invalidateNavigation();
+      this.tiles[row][col] = TileTypeId.DEFAULT;
+      if (type !== TileTypeId.DEFAULT) this.invalidateNavigation();
       this.tileHp[row][col] = 0; // 血量清零
       this.tileHighlight[row][col] = 0;
       this.mineralDamage.delete(row * this.width + col);

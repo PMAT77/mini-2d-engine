@@ -19,12 +19,13 @@ try {
     await page.keyboard.down('Enter');
     await page.waitForFunction(() => miningGame.sceneManager.getCurrentScene()?.loaded);
     await page.keyboard.up('Enter');
-    await page.evaluate(() => {
-      const game = miningGame, scene = game.sceneManager.getCurrentScene();
+    await page.evaluate(async () => {
+      const game = miningGame;
+      const { createFixedScene } = await import('/tests/fixed-scene.ts');
+      const scene = await createFixedScene(game, 100, 100, 200, 200);
       const update = scene.update.bind(scene), oldMap = scene.map;
       window.miningCallbacks = { onTileDestroyed: oldMap.onTileDestroyed, onTileDamaged: oldMap.onTileDamaged };
       scene.update = () => {};
-      scene.map = new oldMap.constructor(100, 100, { generateWater: false });
       scene.map.onTileDestroyed = oldMap.onTileDestroyed;
       scene.map.onTileDamaged = oldMap.onTileDamaged;
       scene.map.tiles.forEach(row => row.fill('default'));
@@ -85,8 +86,8 @@ try {
     console.log(JSON.stringify({ dpr, stagedMining: gold }));
     await page.evaluate(() => {
       const game = miningGame, scene = game.sceneManager.getCurrentScene();
-      scene.map = new scene.map.constructor(100, 100, { generateWater: false });
       scene.map.tiles.forEach(row => row.fill('default'));
+      scene.map.tileHp.forEach(row => row.fill(0)); scene.map.invalidateNavigation();
       scene.map.tiles[4][6] = scene.map.tiles[5][6] = 'mineral';
       scene.map.tileHp[4][6] = scene.map.tileHp[5][6] = 100;
       scene.map.tiles[4][7] = 'wall';
@@ -180,7 +181,7 @@ try {
         const perception = scene.perception;
         scene.perception = null;
         const { onTileDestroyed, onTileDamaged } = scene.map;
-        scene.map = new scene.map.constructor(100, 100, { generateWater: false });
+        scene.map.tiles.forEach(row => row.fill('default')); scene.map.tileHp.forEach(row => row.fill(0)); scene.map.invalidateNavigation();
         scene.map.onTileDestroyed = onTileDestroyed;
         scene.map.onTileDamaged = onTileDamaged;
         scene.map.tiles.forEach(row => row.fill('default'));

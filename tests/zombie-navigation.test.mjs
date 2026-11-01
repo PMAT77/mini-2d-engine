@@ -57,7 +57,7 @@ test('scheduler enforces per-tick starts, active and node limits at 30/60/144 FP
     const a = nav.request({ id: 'new', start: { x: 125, y: 125 }, goal: { x: 2200, y: 125 }, radius: 22 });
     assert.equal(nav.request({ id: 'new', start: { x: 125, y: 125 }, goal: { x: 2205, y: 125 }, radius: 22 }), a);
     nav.request({ id: 'new', start: { x: 125, y: 125 }, goal: { x: 2300, y: 125 }, radius: 22 }); assert.equal(a.status, 'cancelled');
-    nav.clear(); assert.equal(nav.get('new'), undefined);
+    nav.clear(); assert.equal(nav.get('new'), undefined); assert.equal(nav.stats.active, 0); assert.equal(nav.stats.queued, 0);
   }
 });
 
@@ -67,6 +67,7 @@ test('mineral damage does not invalidate paths until topology changes; blocked g
   const nav = new NavigationScheduler(m), r = run(nav, nav.request({ id: 'blocked-goal', start: { x: 125, y: 125 }, goal: { x: 225, y: 225 }, radius: 23 }));
   assert.equal(r.status, 'found'); assert.ok(Math.hypot(r.path.at(-1).x - 225, r.path.at(-1).y - 225) <= 100);
   m.damageTile(4, 4, 100); assert.equal(m.getNavigationRevision(), rev + 1);
+  m.breakTile(4, 4); assert.equal(m.getNavigationRevision(), rev + 1, 'breaking an already empty tile does not invalidate navigation');
 });
 
 test('swept actors block fast rolls and terrain-constrained separation never crosses a wall', () => {
@@ -77,4 +78,21 @@ test('swept actors block fast rolls and terrain-constrained separation never cro
   m.tiles[2][3] = 'wall'; m.invalidateNavigation(); a.x = 105 - 23; b.x = 125 - 23; world.sync(); world.separate();
   assert.ok(m.isShapeWalkable(a.getCollider())); assert.ok(m.isShapeWalkable(b.getCollider()));
   world.unregister('z1'); assert.equal(world.size, 1);
+});
+
+test('path reconstruction and weighted smoothing also obey the scheduler work quota', () => {
+  const m = makeMap(30); for (let y = 0; y < 28; y++) m.tiles[y][15] = 'wall'; m.invalidateNavigation();
+  const nav = new NavigationScheduler(m, { starts: 2, active: 4, nodes: 12, slice: 4, searchNodes: 10000 });
+  const r = nav.request({ id: 'long', start: { x: 125, y: 125 }, goal: { x: 1300, y: 125 }, radius: 23 });
+  for (let i = 0; i < 2000 && r.status === 'pending'; i++) { nav.update(1/30); assert.ok(nav.stats.lastWorkUnits <= 12); }
+  assert.equal(r.status, 'found'); assert.ok(nav.stats.workUnits > r.expanded);
+});
+
+test('continuous replacement of high-priority active work cannot starve an old low-priority request', () => {
+  const m = makeMap(80); for (let y = 0; y < 79; y++) m.tiles[y][40] = 'wall'; m.invalidateNavigation();
+  const nav = new NavigationScheduler(m, { starts: 1, active: 1, nodes: 1, slice: 1, searchNodes: 10000 });
+  const start = { x: 125, y: 125 }, high = i => ({ id: 'high', start, goal: { x: 3550 + (i%2)*50, y: 125 }, radius: 23, priority: 3 });
+  nav.request(high(0)); const low = nav.request({ id: 'low', start, goal: { x: 175, y: 125 }, radius: 23, priority: 0 });
+  for (let i=0; i<150 && low.status==='pending'; i++) { if(i) nav.request(high(i)); nav.update(1/30); }
+  assert.equal(low.status, 'found'); assert.ok(nav.stats.maxWaitSeconds >= 3);
 });

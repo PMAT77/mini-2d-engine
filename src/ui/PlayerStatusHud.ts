@@ -11,7 +11,7 @@ export class PlayerStatusHud {
     ctx.save(); ctx.fillStyle = 'rgba(9,19,21,.82)'; ctx.fillRect(r.x, r.y, r.width, r.height);
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '12px "Microsoft YaHei",sans-serif';
     ctx.fillStyle = status.infected ? '#ed998d' : '#b6d6c6';
-    const infection = status.infected ? '感染中 · 1 HP/s' : '未感染';
+    const infection = !status.alive ? '已死亡' : status.infected ? '感染中 · 1 HP/s' : '未感染';
     if (narrow) ctx.fillText(`${infection}  ·  疫苗 ${status.vaccines}  ·  V 治疗`, r.x + 10, r.y + 14, Math.max(0, r.width - 20));
     else {
       ctx.fillText(infection, r.x + 12, r.y + 13);
