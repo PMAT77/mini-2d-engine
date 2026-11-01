@@ -7,6 +7,8 @@ import { ActorCollisionWorld } from "../physics/ActorCollisionWorld";
 import { EnemySystem, selectPlayerNoises } from "../enemies/EnemySystem";
 import type { DamageableEntry } from "../combat/HitTargetResolver";
 import { Zombie } from "../enemies/Zombie";
+import { ZombieGoreSystem } from "../enemies/ZombieGoreSystem";
+import { DamageFeedbackOverlay } from "../ui/DamageFeedbackOverlay";
 import { EncounterSpawning } from "../enemies/EncounterSpawning";
 import { PlayerSurvivalSystem } from "../survival/PlayerSurvivalSystem";
 import { PlayerStatusHud } from "../ui/PlayerStatusHud";
@@ -180,6 +182,8 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly actorWorld: ActorCollisionWorld;
   private readonly enemies: EnemySystem;
   private readonly enemyBlood = new BloodStainSystem();
+  private readonly zombieGore: ZombieGoreSystem;
+  private readonly damageFeedback = new DamageFeedbackOverlay();
   private readonly survival: PlayerSurvivalSystem;
   private readonly statusHud = new PlayerStatusHud();
   private vaccinePickups: VaccinePickup[] = [];
@@ -388,6 +392,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.map = sceneOptions.map ?? new TileMap(100, 100, { ...sceneOptions, seed: this.runSeed });
     this.actorWorld = new ActorCollisionWorld(this.map);
     this.enemies = new EnemySystem(this.map, this.actorWorld, this.runSeed ^ 0x7a6f6d62, this.noiseSystem);
+    this.zombieGore = new ZombieGoreSystem(this.map, seededRandom(this.runSeed ^ 0x676f7265));
     if (this.visionMode === "three-layer") {
       this.perception = new PerceptionSystem({
         map: this.map,
@@ -1474,7 +1479,7 @@ export class GameScene extends Scene {  private player!: Player;
         initialAudio: this.initialAudio,
         // 三层视野不读 fog.range/fog.feather，留着这两根滑杆只会误导调参。
         hiddenSections: this.visionMode === "three-layer" ? ["fog"] : [],
-        onReset: () => this.survival.resetLife(),
+        onReset: () => { this.survival.resetLife(); this.damageFeedback.clear(); this.camera.clearDamageKick(); },
         onOpenChange: open => this.setWorldPaused(open),
       });
       window.addEventListener('resize', this.resizeListener);
@@ -1489,6 +1494,8 @@ export class GameScene extends Scene {  private player!: Player;
     this.actorWorld.clear();
     this.enemies.dispose();
     this.survival.dispose(); this.vaccinePickups = []; this.enemyBlood.clear();
+    this.zombieGore.clear(); this.damageFeedback.clear(); this.player.consumeDamageEvents();
+    this.bloodStainSystem.clear(); this.particleSystem.clear(); this.camera.clearDamageKick();
     // 循环音效不会自己停，离开场景时立即收掉，免得声音跟着残留。
     this.sfx.stopAll();
     // 换弹声也要跟着停，否则重进场景后还会响到采样结束。
@@ -1540,6 +1547,8 @@ export class GameScene extends Scene {  private player!: Player;
     if (!this.loaded) return;
     this.debugPanel?.update(delta);
     if (this.paused || !Number.isFinite(delta) || delta < 0) return;
+    // Advance existing feedback before this frame's hits so a new flash is always displayed.
+    this.damageFeedback.update(delta); this.zombieGore.update(delta); this.camera.advanceDamageKick(delta);
     input = input.captureFrame?.() ?? input;
     const reset = input.getResetVersion?.();
     if (reset !== undefined && reset !== this.inputResetVersion) { this.inputResetVersion = reset; this.interaction.reset(); }
@@ -1650,9 +1659,15 @@ export class GameScene extends Scene {  private player!: Player;
       lights: this.perceptionLights,
       playerNoises: selectPlayerNoises(this.noiseSystem.getEvents()),
     });
+    for (const impact of this.enemies.consumeHitEffects()) this.zombieGore.hit(impact);
     this.enemies.settleAttacks(this.player, (result, zombie, _id, random) => {
       if (this.survival.onMeleeDamage(result, zombie.config.infectionChance, random)) this.showPickupText("已感染");
     });
+    for (const event of this.player.consumeDamageEvents()) {
+      this.damageFeedback.push(event);
+      if (event.kind === 'melee' && event.sourcePosition) this.camera.kickFromDamage(Math.atan2(
+        event.targetPosition.y - event.sourcePosition.y, event.targetPosition.x - event.sourcePosition.x));
+    }
     if (this.player.consumeDeathEvent()) {
       this.deathEnterHeld = input.isKeyDown("Enter");
       this.interaction.reset(); this.flashlightOn = false; this.flashlight.setActive(false);
@@ -2006,6 +2021,23 @@ export class GameScene extends Scene {  private player!: Player;
    * 整层按地面轮廓裁剪：鸡只画合并后的主体轮廓，部分身体被墙挡住时不会把完整
    * 剪影画到墙顶。轮廓来自对象自身的姿态/动画，物理与碰撞完全不受影响。
    */
+  private drawEnemyHitFlashes(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const flashing = this.enemies.zombies.filter(z => z.getPose().flash > 0 && this.getEntityAlpha(z) > .002);
+    if (!flashing.length) return;
+    ctx.save(); ctx.translate(-ox, -oy);
+    ctx.clip(this.map.getGroundContour(ox, oy, ctx.canvas.width, ctx.canvas.height), "evenodd");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for (const zombie of flashing) {
+      const b = zombie.getRenderBounds();
+      if (b.x + b.width < ox || b.y + b.height < oy || b.x > ox + ctx.canvas.width || b.y > oy + ctx.canvas.height) continue;
+      ctx.globalAlpha = zombie.getPose().flash * this.getEntityAlpha(zombie);
+      zombie.drawSilhouette(ctx, ox, oy);
+    }
+    ctx.restore();
+  }
+
+  getCombatFeedbackState() { return { player: this.damageFeedback.snapshot(), gore: this.zombieGore.snapshot() }; }
+
   private drawPerceptionSilhouettes(ctx: CanvasRenderingContext2D,
     cameraX: number, cameraY: number): void {
     if (!this.perception) return;
@@ -2144,6 +2176,12 @@ export class GameScene extends Scene {  private player!: Player;
     this.bloodStainSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.enemyBlood.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height,
       (x, y) => !this.perception || this.perception.canIdentify("player", x, y));
+    ctx.save(); ctx.translate(-cameraOffset.x, -cameraOffset.y);
+    ctx.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height), "evenodd");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.zombieGore.draw(ctx, cameraOffset.x, cameraOffset.y,
+      (x, y) => !this.perception || this.perception.canIdentify("player", x, y));
+    ctx.restore();
     this.torches.forEach(torch => torch.draw(ctx, cameraOffset.x, cameraOffset.y));
 
     // 单位层：只有迷雾范围内的单位才绘制，地形不参与裁剪。
@@ -2374,6 +2412,8 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 应用光照效果
     this.applyLighting(ctx, cameraOffset.x, cameraOffset.y);
+    // A local white mask remains readable under ambient lighting, still below the perception mask.
+    this.drawEnemyHitFlashes(ctx, cameraOffset.x, cameraOffset.y);
     // 边界反馈画在光照之后：贴边本身是玩法信号，不能在暗处被乘暗。
     // 三层模式下它会被感知遮罩压暗，所以移到遮蔽之后绘制。
     if (!threeLayer) {
@@ -2433,6 +2473,11 @@ export class GameScene extends Scene {  private player!: Player;
     this.player.drawUI(ctx, cameraOffset.x, cameraOffset.y);
     screenContext.drawImage(this.worldCanvas, 0, 0, screenContext.canvas.width, screenContext.canvas.height);
     ctx = screenContext;
+    ctx.save();
+    const feedbackDpr = window.devicePixelRatio || 1;
+    ctx.scale(feedbackDpr, feedbackDpr);
+    this.damageFeedback.draw(ctx, ctx.canvas.width / feedbackDpr, ctx.canvas.height / feedbackDpr);
+    ctx.restore();
     // 拾取飘字画在屏幕层：沿用 HUD 的 dpr 约定，白字不随光照变暗。
     ctx.save();
     const textDpr = window.devicePixelRatio || 1;

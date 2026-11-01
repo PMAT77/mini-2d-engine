@@ -1,3 +1,5 @@
+import { COMBAT_FEEDBACK as C } from '../combat/CombatFeedbackConfig';
+
 /**
  * 相机类，负责游戏场景的视角控制、跟随目标和震动效果
  */
@@ -38,6 +40,21 @@ export class Camera {
 
   /** 震动频率（Hz） */
   private shakeFrequency: number = 20;
+  /** Damage is independent of gun recoil, so automatic fire cannot replace it. */
+  private damageKickAge = 1;
+  private damageKickAngle = 0;
+
+  public kickFromDamage(angle: number): void {
+    if (!Number.isFinite(angle)) return;
+    this.damageKickAngle = angle; this.damageKickAge = 0;
+  }
+
+  public clearDamageKick(): void { this.damageKickAge = 1; }
+
+  /** Also called for a dead player, whose camera no longer follows movement. */
+  public advanceDamageKick(delta: number): void {
+    if (Number.isFinite(delta) && delta > 0) this.damageKickAge += delta;
+  }
 
   /** 震动衰减模式枚举类型定义 */
   public shakeDecayMode: 'linear' | 'quadratic' | 'exponential' = 'quadratic';
@@ -92,6 +109,10 @@ export class Camera {
    * @returns 包含震动偏移的相机位置坐标
    */
   public getOffset(): { x: number; y: number } {
+    const progress = this.damageKickAge / C.damageKickSeconds;
+    const kick = progress < 1 ? C.damageKick * Math.cos(progress * Math.PI * 2) * (1 - progress) : 0;
+    const baseX = this.x + Math.cos(this.damageKickAngle) * kick;
+    const baseY = this.y + Math.sin(this.damageKickAngle) * kick;
     if (this.shakeTime < this.shakeDuration && this.shakeMagnitude > 0) {
       // 计算衰减系数
       const decayFactor = this.calculateDecayFactor();
@@ -105,11 +126,11 @@ export class Camera {
       const offsetY = Math.sin(timeFactor) * currentMagnitude * Math.sin(this.shakeAngle);
 
       return {
-        x: this.x + offsetX,
-        y: this.y + offsetY
+        x: baseX + offsetX,
+        y: baseY + offsetY
       };
     }
-    return { x: this.x, y: this.y };
+    return { x: baseX, y: baseY };
   }
 
   /**
@@ -218,6 +239,7 @@ export class Camera {
    * 清除震动效果并将相机位置重置为原点
    */
   public reset(): void {
+    this.clearDamageKick();
     this.x = 0;
     this.y = 0;
     this.shakeMagnitude = 0;

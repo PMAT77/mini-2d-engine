@@ -34,6 +34,11 @@ export interface BulletImpact {
   readonly source: HitSource;
 }
 
+/** Copy nested vectors so presentation never follows a subsequently mutated bullet. */
+export function snapshotBulletImpact(impact: BulletImpact): Readonly<BulletImpact> {
+  return Object.freeze({ ...impact, point: Object.freeze({ ...impact.point }), direction: Object.freeze({ ...impact.direction }) });
+}
+
 /**
  * 击退参数。每个目标自带一份，与武器无关；`immuneToDisplacement` 的目标
  * 只播放受击姿态，不接受位置冲量。

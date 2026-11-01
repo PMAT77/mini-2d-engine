@@ -1,6 +1,6 @@
 import { Input } from "../core/Input";
 import { MELEE_DAMAGE_GRACE_SECONDS, validatePlayerDamage } from '../combat/PlayerDamage';
-import type { PlayerDamageEvent, PlayerDamageResult, PlayerLifeState } from '../combat/PlayerDamage';
+import type { PlayerDamageEvent, PlayerDamageApplied, PlayerDamageResult, PlayerLifeState } from '../combat/PlayerDamage';
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { IdleState } from "../status/IdleState";
@@ -158,6 +158,8 @@ export class Player extends Entities {
   private lifeState: PlayerLifeState = 'alive';
   private deathEvent: Readonly<PlayerDamageEvent> | null = null;
   private deathCause: Readonly<PlayerDamageEvent> | null = null;
+  private damageEvents: PlayerDamageApplied[] = [];
+  private damageSequence = 0;
   private meleeGrace = 0;
   private maxHealth = 100;
   private gold = 0;
@@ -242,6 +244,9 @@ export class Player extends Entities {
   consumeDeathEvent(): Readonly<PlayerDamageEvent> | null {
     const event = this.deathEvent; this.deathEvent = null; return event;
   }
+  consumeDamageEvents(): readonly PlayerDamageApplied[] {
+    const events = this.damageEvents; this.damageEvents = []; return events;
+  }
   advanceDamageTimers(delta: number): void {
     if (Number.isFinite(delta) && delta > 0) this.meleeGrace = Math.max(0, this.meleeGrace - delta);
   }
@@ -252,13 +257,17 @@ export class Player extends Entities {
     const appliedAmount = Math.min(this.health, event.amount);
     this.health -= appliedAmount;
     if (appliedAmount > 0) {
+      const sourcePosition = event.sourcePosition ? Object.freeze({ ...event.sourcePosition }) : undefined;
+      this.damageEvents.push(Object.freeze({ ...event, sourcePosition, sequence: ++this.damageSequence, appliedAmount,
+        targetPosition: Object.freeze({ x: this.x + this.size / 2, y: this.y + this.size / 2 }) }));
       this.hitReactTime = HIT_REACT_SECONDS;
       if (event.kind === 'melee') this.meleeGrace = MELEE_DAMAGE_GRACE_SECONDS;
     }
     const killed = this.health === 0;
     if (killed) {
       this.lifeState = 'dead';
-      this.deathCause = this.deathEvent = Object.freeze({ ...event });
+      this.deathCause = this.deathEvent = Object.freeze({ ...event,
+        ...(event.sourcePosition ? { sourcePosition: Object.freeze({ ...event.sourcePosition }) } : {}) });
       this.velocity.set(0, 0); this.sprinting = false; this.rollTimeLeft = 0;
       this.pointerAim = undefined; this.isShooting = false; this.muzzleFlashTime = 0;
       this.cancelReload();
@@ -273,6 +282,7 @@ export class Player extends Entities {
   resetLifeState(): void {
     this.lifeState = 'alive'; this.health = this.maxHealth; this.meleeGrace = 0;
     this.deathCause = this.deathEvent = null;
+    this.damageEvents = [];
     this.hitReactTime = 0; this.velocity.set(0, 0);
     this.sprinting = false; this.sprintTime = this.movementTime = this.stopTime = this.rollTimeLeft = 0;
     this.stopVelocity.set(0, 0); this.rollActive = false; this.rollSpeed = 0; this.pointerAim = undefined;
