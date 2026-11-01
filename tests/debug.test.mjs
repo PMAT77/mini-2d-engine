@@ -98,6 +98,7 @@ test('restoring a detached initial configuration refills resources without remov
   player.addModifier('maxSpeed', 0.5, 0, true); player.addModifier('damage', 1, 0, true);
   player.applyConfig({ base: { maxSpeed: 600, maxHealth: 50 }, shooting: { damage: 40 } });
   player.setDebugState({ health: 0, stamina: 0, magazineAmmo: 0, chambered: false });
+  player.resetLifeState(); // Explicit reset is required; editing health does not resurrect a dead player.
   player.applyConfig(initial);
   player.setDebugState({ health: player.getMaxHealth(), stamina: player.getMaxStamina(),
     magazineAmmo: player.getMagazineSize(), chambered: true });

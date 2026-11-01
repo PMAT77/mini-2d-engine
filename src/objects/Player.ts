@@ -1,4 +1,6 @@
 import { Input } from "../core/Input";
+import { MELEE_DAMAGE_GRACE_SECONDS, validatePlayerDamage } from '../combat/PlayerDamage';
+import type { PlayerDamageEvent, PlayerDamageResult, PlayerLifeState } from '../combat/PlayerDamage';
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { IdleState } from "../status/IdleState";
@@ -153,6 +155,10 @@ export class Player extends Entities {
   public setCollider(shape: ColliderShape): void { super.setCollider(parsePlayerCollider(shape)); }
   protected getBodyRotation(): number { return this.currentRotation - Math.PI / 2; }
   private health = 100;
+  private lifeState: PlayerLifeState = 'alive';
+  private deathEvent: Readonly<PlayerDamageEvent> | null = null;
+  private deathCause: Readonly<PlayerDamageEvent> | null = null;
+  private meleeGrace = 0;
   private maxHealth = 100;
   private gold = 0;
 
@@ -228,13 +234,46 @@ export class Player extends Entities {
   getHealth(): number { return this.health; }
   getMaxHealth(): number { return this.maxHealth; }
   takeDamage(amount: number): void {
-    if (!Number.isFinite(amount) || amount < 0) throw new Error("伤害必须是非负有限数值");
-    this.health = Math.max(0, this.health - amount);
-    if (amount > 0) this.hitReactTime = HIT_REACT_SECONDS;
+    this.applyDamage({ amount, kind: 'script' });
+  }
+  isAlive(): boolean { return this.lifeState === 'alive'; }
+  getLifeState(): PlayerLifeState { return this.lifeState; }
+  getDeathCause(): Readonly<PlayerDamageEvent> | null { return this.deathCause; }
+  consumeDeathEvent(): Readonly<PlayerDamageEvent> | null {
+    const event = this.deathEvent; this.deathEvent = null; return event;
+  }
+  advanceDamageTimers(delta: number): void {
+    if (Number.isFinite(delta) && delta > 0) this.meleeGrace = Math.max(0, this.meleeGrace - delta);
+  }
+  applyDamage(event: PlayerDamageEvent): PlayerDamageResult {
+    validatePlayerDamage(event);
+    if (!this.isAlive() || (event.kind === 'melee' && this.meleeGrace > 1e-9))
+      return { appliedAmount: 0, killed: false, blocked: true };
+    const appliedAmount = Math.min(this.health, event.amount);
+    this.health -= appliedAmount;
+    if (appliedAmount > 0) {
+      this.hitReactTime = HIT_REACT_SECONDS;
+      if (event.kind === 'melee') this.meleeGrace = MELEE_DAMAGE_GRACE_SECONDS;
+    }
+    const killed = this.health === 0;
+    if (killed) {
+      this.lifeState = 'dead';
+      this.deathCause = this.deathEvent = Object.freeze({ ...event });
+      this.velocity.set(0, 0); this.sprinting = false; this.rollTimeLeft = 0;
+      this.pointerAim = undefined; this.isShooting = false; this.muzzleFlashTime = 0;
+      this.cancelReload();
+    }
     this.onStatsChangeCallback?.();
+    return { appliedAmount, killed, blocked: false };
+  }
+  resetLifeState(): void {
+    this.lifeState = 'alive'; this.health = this.maxHealth; this.meleeGrace = 0;
+    this.deathCause = this.deathEvent = null;
+    this.hitReactTime = 0; this.velocity.set(0, 0);
   }
   heal(amount: number): void {
     if (!Number.isFinite(amount) || amount < 0) throw new Error("回血量必须是非负有限数值");
+    if (!this.isAlive()) return;
     this.health = Math.min(this.maxHealth, this.health + amount);
     this.onStatsChangeCallback?.();
   }
@@ -559,6 +598,7 @@ export class Player extends Entities {
    * 返回 false 表示这次按下没有生效（正在翻滚、冷却中或体力不足）。
    */
   requestRoll(input: Input): boolean {
+    if (!this.isAlive()) return false;
     if (this.rollTimeLeft > 0 || this.rollCooldownLeft > 1e-9) return false;
     if (this.roll.staminaCost > 0 && this.stamina < this.roll.staminaCost) return false;
     const move = this.getMoveDirection(input);
@@ -982,7 +1022,11 @@ export class Player extends Entities {
       if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`无效调试值: ${key}`);
     }
     const clamp = (value: number, max: number) => Math.max(0, Math.min(max, value));
-    if (values.health !== undefined) this.health = clamp(values.health, this.maxHealth);
+    if (values.health !== undefined && this.isAlive()) {
+      const next = clamp(values.health, this.maxHealth);
+      if (next === 0) this.applyDamage({ amount: this.health, kind: 'script' });
+      else this.health = next;
+    }
     if (values.stamina !== undefined) {
       this.stamina = clamp(values.stamina, this.sprint.maxStamina);
       this.exhausted = this.stamina === 0;
@@ -1183,6 +1227,7 @@ export class Player extends Entities {
 
   /** 发射时冻结世界落点；方向辅助方法和鼠标输入共用弹药、散布与碰撞。 */
   shootAt(target: { x: number; y: number }, damage: number = this.damage, map?: TileMap): void {
+    if (!this.isAlive()) return;
     if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) return;
     const inputDir = new Vector2(target.x - this.x - this.size / 2, target.y - this.y - this.size / 2);
     // 验证射击方向
@@ -1325,6 +1370,7 @@ export class Player extends Entities {
    * 弹匣已满、手里没有枪或正在补弹时什么都不做。
    */
   requestReload(mode: ReloadMode = this.defaultReloadMode): void {
+    if (!this.isAlive()) return;
     if (!this.isArmed()) return;
     if (this.isReloading) return;
     if (mode === "load") {
@@ -1344,6 +1390,10 @@ export class Player extends Entities {
    */
   update(delta: number, input: Input, map?: TileMap, aim?: PlayerAimInput): void {
     if (!Number.isFinite(delta) || delta < 0) return;
+    if (!this.isAlive()) {
+      this.updateBullets(delta, map);
+      return;
+    }
     this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y) ? aim : undefined;
     this.isShooting = !!this.pointerAim?.fire && !this.isRolling() && !this.isReloading;
     this.updateRecoil(delta);
@@ -1410,11 +1460,7 @@ export class Player extends Entities {
 
     // 优化子弹更新和清理
     // 首先更新所有子弹
-    for (let i = 0; i < this.bullets.length; i++) {
-      this.bullets[i].update(delta, map);
-    }
-    // 然后清理已销毁的子弹
-    this.bullets = this.bullets.filter(bullet => !bullet.getIsDestroyed());
+    this.updateBullets(delta, map);
 
     // 动画后端推进：只在 rig 开关打开时运行，legacy 下不增加任何每帧工作。
     advancePlayerAnimation(this, delta);
@@ -1422,6 +1468,7 @@ export class Player extends Entities {
 
   /** 切到指定槽位；换弹进度留在原枪上，切回来会继续。 */
   switchWeapon(slot: WeaponSlot): void {
+    if (!this.isAlive()) return;
     if (slot === this.activeSlot) return;
     this.activeSlot = slot;
     if (slot !== "melee") this.lastFirearmSlot = slot;
@@ -1446,6 +1493,10 @@ export class Player extends Entities {
 
   getActiveWeaponSlot(): WeaponSlot {
     return this.activeSlot;
+  }
+  private updateBullets(delta: number, map?: TileMap): void {
+    for (const bullet of this.bullets) bullet.update(delta, map);
+    this.bullets = this.bullets.filter(bullet => !bullet.getIsDestroyed());
   }
 
   getLastFirearmSlot(): "primary" | "secondary" {

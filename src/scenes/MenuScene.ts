@@ -10,6 +10,7 @@ import { LoadingScene } from "./LoadingScene";
  */
 export class MenuScene extends Scene {
   private starting = false;
+  constructor(private waitForEnterRelease = false) { super(); }
   public onEnter(): void { this.starting = false; }
   /**
    * 更新场景逻辑
@@ -17,6 +18,10 @@ export class MenuScene extends Scene {
    * @param input 输入系统实例，用于检测玩家输入
    */
   public update(delta: number, input: Input): void {
+    if (this.waitForEnterRelease) {
+      if (!input.isKeyDown("Enter")) this.waitForEnterRelease = false;
+      return;
+    }
     // 检测玩家是否按下Enter键，如果是则切换到游戏场景
     if (!this.starting && input.isKeyDown("Enter")) {
       this.starting = true;

@@ -1,6 +1,8 @@
 import { Camera } from "../core/Camera";
 import { Input } from "../core/Input";
 import { Scene } from "../core/Scene";
+import { MenuScene } from "./MenuScene";
+import { resolveFirstDamageableHit } from "../combat/HitTargetResolver";
 import { TileMap, TileMapOptions } from "../map/TileMap";
 // 世界几何（实心地形轮廓）由 TileMap 统一提供，绘制时不再直接遍历多边形。
 import { TileTypeId, getTileType } from "../map/TileType";
@@ -158,6 +160,8 @@ function resolveVisionDebugLayer(): VisionDebugLayer | null {
  * 游戏主场景类，负责管理游戏的核心逻辑、渲染和交互
  */
 export class GameScene extends Scene {  private player!: Player;
+  private deathAcknowledged = false;
+  private deathEnterHeld = true;
   private chickens: Chicken[] = [];
   private map!: TileMap;
   private camera!: Camera;
@@ -873,20 +877,8 @@ export class GameScene extends Scene {  private player!: Player;
   /** 查找子弹线段上最早接触的小鸡；只有子弹真正走到命中点时才结算伤害。 */
   private findChickenHit(startX: number, startY: number, endX: number, endY: number,
     radius: number, damage: number): BulletEntityHit | null {
-    let best: { fraction: number; chicken: Chicken; x: number; y: number } | null = null;
-    for (const chicken of this.chickens) {
-      if (!chicken.isAlive()) continue;
-      const fraction = chicken.hitTestSegment(startX, startY, endX, endY, radius);
-      if (fraction === null) continue;
-      if (!best || fraction < best.fraction) {
-        best = {
-          fraction,
-          chicken,
-          x: startX + (endX - startX) * fraction,
-          y: startY + (endY - startY) * fraction,
-        };
-      }
-    }
+    const best = resolveFirstDamageableHit({ startX, startY, endX, endY, radius },
+      this.chickens.map((chicken, index) => ({ id: `chicken-${index}`, target: chicken })));
     if (!best) return null;
     const target = best;
     return {
@@ -894,7 +886,7 @@ export class GameScene extends Scene {  private player!: Player;
       x: target.x,
       y: target.y,
       // 伤害与命中点都取真实命中快照；准星在鸡身后不会改变任何一项。
-      apply: (impact: BulletImpact) => this.damageChicken(target.chicken, impact),
+      apply: (impact: BulletImpact) => this.damageChicken(target.entry.target, impact),
     };
   }
 
@@ -1021,7 +1013,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.pickupMarkers = [];
     this.completedPickupFeedback = null;
 
-    if (!this.interactionEnabled) {
+    if (!this.interactionEnabled || !this.player.isAlive()) {
       // 场景已退出：清空进度，不处理任何按键，也不产生结算。
       this.interaction.update({ delta: 0, pressed: false, blocked: true, candidates: [] });
       return;
@@ -1476,6 +1468,19 @@ export class GameScene extends Scene {  private player!: Player;
     this.deltaSinceLastFrame = delta;
 
     if (!this.loaded) return;
+    this.player.advanceDamageTimers(delta);
+    if (!this.player.isAlive()) {
+      this.flashlightOn = false;
+      this.flashlight?.setActive(false);
+      this.interaction.reset();
+      const enter = input.isKeyDown("Enter");
+      if (this.deathAcknowledged && enter && !this.deathEnterHeld) {
+        this.game?.sceneManager.changeScene(new MenuScene(true), 0);
+        return;
+      }
+      this.deathEnterHeld = enter;
+      this.deathAcknowledged = true;
+    } else { this.deathAcknowledged = false; this.deathEnterHeld = true; }
 
     // 开火/切枪都只在本帧有效：交互取消只消费当帧信号。
     this.shotThisFrame = false;
@@ -1507,7 +1512,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 玩家中心位置同时供相机、光源与小鸡感知使用，只在本帧算一次。
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
-    this.camera.follow(playerCenterX, playerCenterY, delta);
+    if (this.player.isAlive()) this.camera.follow(playerCenterX, playerCenterY, delta);
     const center = new Vector2(playerCenterX, playerCenterY);
     this.playerLight.setPosition(center);
     this.flashlight.setPosition(center);
@@ -1516,7 +1521,7 @@ export class GameScene extends Scene {  private player!: Player;
     // G 键是开关而不是常亮：只在下沿切换，避免按住时反复翻转。
     // 提前到感知之前，玩家视野与小鸡视觉才能在同一帧看到同一盏灯。
     const flashlightDown = input.isKeyDown("g");
-    if (flashlightDown && !this.flashlightHeld) {
+    if (this.player.isAlive() && flashlightDown && !this.flashlightHeld) {
       this.flashlightOn = !this.flashlightOn;
       this.flashlight.setActive(this.flashlightOn);
       // 开关共用一声轻响；单声部保证快速连按时只留最后一次的尾音。
@@ -2315,6 +2320,17 @@ export class GameScene extends Scene {  private player!: Player;
     ctx.restore();
     // 拾取标记与 E 提示放在 HUD 之后：交互提示优先于静态信息，且布局已避让 HUD 区域。
     this.drawPickupPrompts(screenContext, cameraOffset);
+    if (!this.player.isAlive()) {
+      const dpr = window.devicePixelRatio || 1;
+      ctx.save(); ctx.scale(dpr, dpr);
+      const width = ctx.canvas.width / dpr, height = ctx.canvas.height / dpr;
+      ctx.fillStyle = "rgba(12,8,10,.72)"; ctx.fillRect(0, height / 2 - 58, width, 116);
+      ctx.fillStyle = "#f2c7c7"; ctx.textAlign = "center"; ctx.font = "bold 24px sans-serif";
+      const cause = this.player.getDeathCause()?.kind;
+      ctx.fillText(cause === "infection" ? "感染致死" : cause === "melee" ? "遭丧尸袭击身亡" : "你已死亡", width / 2, height / 2 - 9);
+      ctx.fillStyle = "#fff"; ctx.font = "16px sans-serif";
+      ctx.fillText("Enter 返回菜单", width / 2, height / 2 + 26); ctx.restore();
+    }
     this.updateCrosshair();
   }
 

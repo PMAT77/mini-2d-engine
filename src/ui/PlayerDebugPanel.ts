@@ -663,6 +663,7 @@ export class PlayerDebugPanel {
   }
 
   private reset(): void {
+    this.player.resetLifeState();
     this.player.applyConfig(this.initialPlayer);
     this.player.setDebugState({
       health: this.player.getMaxHealth(), stamina: this.player.getMaxStamina(),
