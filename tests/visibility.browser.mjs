@@ -37,21 +37,34 @@ try {
       scene.flashlight.setDirection(-Math.PI / 2);
       scene.camera.x = px - scene.camera.width / 2; scene.camera.y = py - scene.camera.height / 2;
       // 迷雾内 150px、迷雾外 520px 各放一个金块。
-      scene.goldPickups = [new GoldPickup(px, py - 150, px, py - 150), new GoldPickup(px, py - 520, px, py - 520)];
-      scene.goldPickups.forEach(g => g.update(1));
+      const insideGold = new GoldPickup(px, py - 150, px, py - 150), outsideGold = new GoldPickup(px, py - 520, px, py - 520);
       window.visionTest = {
         scene, px, py,
         draw(flashlight = true) { scene.flashlight.setActive(flashlight); scene.draw(game.renderer.ctx); },
+        setGold(hasInside, hasOutside) {
+          scene.goldPickups = [];
+          if (hasInside) scene.goldPickups.push(insideGold);
+          if (hasOutside) scene.goldPickups.push(outsideGold);
+          scene.goldPickups.forEach(g => g.update(1));
+          this.draw(true);
+        },
         pixel(x, y, canvas = scene.worldContext) {
           const v = scene.displayedView;
           return [...canvas.getImageData(Math.round(x - v.x), Math.round(y - v.y), 1, 1).data];
         },
       };
-      window.visionTest.draw(true);
+      // 迷雾只藏单位：同一坐标在“有金块 / 无金块”两次绘制下的像素必须完全一致，才说明单位没被画出来。
+      window.visionTest.setGold(true, true);
+      const inside = window.visionTest.pixel(px + 4, py - 146);
+      const outside = window.visionTest.pixel(px + 4, py - 516);
+      window.visionTest.setGold(false, true);
+      const insideBase = window.visionTest.pixel(px + 4, py - 146);
+      window.visionTest.setGold(true, false);
+      const outsideBase = window.visionTest.pixel(px + 4, py - 516);
+      window.visionTest.setGold(true, true);
       return {
         vision: scene.player.getVisionState(),
-        inside: window.visionTest.pixel(px + 4, py - 146),
-        outside: window.visionTest.pixel(px + 4, py - 516),
+        inside, insideBase, outside, outsideBase,
         groundOutside: window.visionTest.pixel(px + 520, py),
         sizes: { world: [scene.worldCanvas.width, scene.worldCanvas.height],
           mask: [scene.visibilitySystem.getCanvas().width, scene.visibilitySystem.getCanvas().height] },
@@ -59,8 +72,8 @@ try {
     });
     assert.equal(scene.vision.range, 400, 'fog/vision radius is fixed');
     assert.equal('angle' in scene.vision, false, 'vision no longer exposes a focus-dependent angle');
-    assert.ok(scene.inside[0] > 40, 'a unit inside the fog is visible');
-    assert.equal(scene.outside[3], 0, 'a unit outside the fog is not drawn');
+    assert.ok(scene.inside[0] > scene.insideBase[0] + 20, `a unit inside the fog is visible: ${scene.inside} vs ${scene.insideBase}`);
+    assert.deepEqual(scene.outside, scene.outsideBase, 'a unit outside the fog is not drawn');
     assert.ok(scene.groundOutside[3] === 255 && scene.groundOutside[0] > 0, 'terrain behind the fog stays visible');
     assert.deepEqual(scene.sizes.mask, scene.sizes.world, 'fog mask uses the world canvas size');
 
