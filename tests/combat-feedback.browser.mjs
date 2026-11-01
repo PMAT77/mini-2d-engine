@@ -50,5 +50,32 @@ try {
     assert.equal(await page.evaluate(() => JSON.stringify(window.fixture.scene.getCombatFeedbackState())), frozen, 'feedback pauses with F2');
     assert.deepEqual(errors, []); cases++; await context.close();
   }
-  console.log(`Combat feedback browser: ${cases} DPR/layout, eight-direction, white-flash and pause cases passed.`);
+  {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 420 } });
+    await page.goto(`${process.env.TEST_BASE_URL || 'http://127.0.0.1:5173'}/tests/zombie-fixture.html?count=0`); await page.waitForFunction(() => window.fixture);
+    const poses = await page.evaluate(async () => {
+      const { Zombie } = await import('/src/enemies/Zombie.ts'), { ZombieRenderer } = await import('/src/enemies/ZombieRenderer.ts');
+      const { ZOMBIE_CONFIG } = await import('/src/enemies/ZombieConfig.ts');
+      const canvas = document.createElement('canvas'); canvas.width = 1100; canvas.height = 420;
+      document.querySelector('canvas').style.display = 'none'; document.body.append(canvas);
+      const ctx = canvas.getContext('2d'), samples = [];
+      ctx.fillStyle = '#26312c'; ctx.fillRect(0,0,1100,420);
+      for (const [row,kind] of ['shambler','runner'].entries()) {
+        const c = ZOMBIE_CONFIG[kind], z = new Zombie('preview',0,0,c); z.attack.start(0,0);
+        const times = [0, c.windup-c.swingSeconds-.01, c.windup-c.swingSeconds/2, c.windup, c.windup+c.followThroughSeconds/2, c.windup+c.recovery*.65];
+        times.forEach((t,col) => {
+          z.attack.advance(t); const pose = { ...z.getPose(), x: col*180+55, y: row*200+90 };
+          const before = JSON.stringify(pose); ZombieRenderer.shadow(ctx,pose); ZombieRenderer.draw(ctx,pose);
+          ctx.fillStyle = '#e9e5d9'; ctx.font = '14px sans-serif'; ctx.fillText(`${kind} ${t.toFixed(3)}s`, col*180+12,row*200+30);
+          ctx.fillText(pose.attack.phase,col*180+12,row*200+53);
+          samples.push({ phase:pose.attack.phase, stable:before===JSON.stringify(pose), parts:ZombieRenderer.parts(pose) });
+        });
+      }
+      return samples;
+    });
+    assert.ok(poses.every(p => p.stable)); assert.ok(poses.some(p => p.phase === 'strike')); assert.ok(poses.some(p => p.phase === 'followThrough'));
+    assert.notDeepEqual(poses[1].parts,poses[3].parts,'windup and impact have visibly distinct geometry');
+    await page.screenshot({ path: `${output}/attack-sequence.png` }); cases++; await page.close();
+  }
+  console.log(`Combat feedback browser: ${cases} DPR/layout, eight-direction, white-flash, attack-pose and pause cases passed.`);
 } finally { await browser.close(); }

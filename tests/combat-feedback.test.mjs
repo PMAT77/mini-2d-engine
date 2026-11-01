@@ -7,6 +7,8 @@ const { Player } = load('objects/Player'), { Camera } = load('core/Camera');
 const { DamageFeedbackOverlay } = load('ui/DamageFeedbackOverlay');
 const { Zombie } = load('enemies/Zombie'), { ZOMBIE_CONFIG } = load('enemies/ZombieConfig');
 const { hitFlashAlpha } = load('combat/CombatFeedbackConfig');
+const { MeleeAttackController } = load('enemies/MeleeAttackController');
+const { ZombieRenderer } = load('enemies/ZombieRenderer');
 const impact = damage => ({ damage, point: { x: 125, y: 125 }, direction: { x: 1, y: 0 }, impulse: 0, impactSpeed: 1, initialSpeed: 1, traveledDistance: 0, source: 'bullet' });
 
 test('only applied damage queues an immutable source/target snapshot, consumed once and cleared by reset', () => {
@@ -59,5 +61,32 @@ test('every valid zombie hit flashes even during stun cooldown and refreshes the
   for (const fps of [30, 60, 144]) {
     const frames = Math.ceil(.14 * fps); assert.equal(hitFlashAlpha(frames / fps), 0);
     assert.equal(hitFlashAlpha(.06), 1);
+  }
+});
+
+test('attack pose snaps through four phases at the real hit, alternates hands and never changes physical pose', () => {
+  for (const kind of ['shambler', 'runner']) {
+    const c = ZOMBIE_CONFIG[kind], z = new Zombie('pose', 100, 100, c, .7), attack = z.attack;
+    attack.start(0, .7); attack.advance(c.windup - c.swingSeconds - .001);
+    assert.equal(attack.getPoseSnapshot().phase, 'anticipation');
+    attack.advance(c.windup - c.swingSeconds / 2); assert.equal(attack.getPoseSnapshot().phase, 'strike');
+    const hit = attack.advance(c.windup); assert.ok(hit); assert.equal(attack.getPoseSnapshot().phase, 'followThrough');
+    assert.equal(attack.getPoseSnapshot().strike, 1); assert.equal(attack.getPoseSnapshot().trail, 1);
+    attack.advance(c.windup + c.followThroughSeconds + .001); assert.equal(attack.getPoseSnapshot().phase, 'recovery');
+    const hand = attack.getPoseSnapshot().hand;
+    attack.advance(c.windup + c.recovery); assert.equal(attack.getPoseSnapshot().phase, 'idle');
+    attack.start(2, .7); assert.equal(attack.getPoseSnapshot().hand, -hand);
+    const deadline = attack.getRecoveryDeadline(); attack.cancel(); assert.equal(attack.getPoseSnapshot().phase, 'idle'); assert.equal(attack.getRecoveryDeadline(), deadline);
+    for (const t of [0, c.windup / 2, c.windup - .01, c.windup, c.windup + .04, c.windup + c.recovery - .01]) {
+      const visual = new MeleeAttackController('bounds', c); visual.start(0, .7); visual.advance(t);
+      const pose = { ...z.getPose(), attack: visual.getPoseSnapshot() }, bounds = ZombieRenderer.bounds(pose);
+      for (const part of ZombieRenderer.parts(pose)) {
+        const ex = (part.width * Math.abs(Math.cos(part.angle)) + part.height * Math.abs(Math.sin(part.angle))) / 2;
+        const ey = (part.width * Math.abs(Math.sin(part.angle)) + part.height * Math.abs(Math.cos(part.angle))) / 2;
+        assert.ok(part.x - ex >= bounds.x && part.x + ex <= bounds.x + bounds.width);
+        assert.ok(part.y - ey >= bounds.y && part.y + ey <= bounds.y + bounds.height);
+      }
+    }
+    assert.equal(z.x, 100); assert.equal(z.y, 100); assert.ok(Math.abs(z.getFacingDirection() - .7) < 1e-8);
   }
 });

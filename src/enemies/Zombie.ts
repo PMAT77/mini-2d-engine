@@ -96,7 +96,7 @@ export class Zombie extends Entities {
   }
   consumeDeathFinished(): DeathFinished | null { const event = this.deathFinished; this.deathFinished = null; return event; }
   getPose(): ZombiePose { return { x: this.x, y: this.y, size: this.size, facing: this.getFacingDirection(), kind: this.config.kind,
-    phase: this.phase, speed: this.velocity.length(), hit: Math.exp(-this.hitAge * 12) * .8, flash: hitFlashAlpha(this.hitAge), attack: this.attack.getPoseAmount(), life: this.life }; }
+    phase: this.phase, speed: this.velocity.length(), hit: Math.exp(-this.hitAge * 12) * .8, flash: hitFlashAlpha(this.hitAge), attack: this.attack.getPoseSnapshot(), life: this.life }; }
   getRenderBounds() { return ZombieRenderer.bounds(this.getPose()); }
   draw(ctx: CanvasRenderingContext2D, ox = 0, oy = 0): void { ZombieRenderer.draw(ctx, this.getPose(), ox, oy); }
   drawSilhouette(ctx: CanvasRenderingContext2D, ox = 0, oy = 0): void { ZombieRenderer.draw(ctx, this.getPose(), ox, oy, true); }

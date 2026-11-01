@@ -26,10 +26,10 @@ test('attack sector touches a circle at the edge but never adds the attacker rad
 test('crossing large delta emits once, cancellation preserves committed recovery deadline', () => {
   const attack = new MeleeAttackController('a', ZOMBIE_CONFIG.shambler);
   assert.equal(attack.start(0, .4), true);
-  assert.deepEqual(attack.advance(10), { attackId: 'a:1', occurredAt: .55, facing: .4 });
+  assert.deepEqual(attack.advance(10), { attackId: 'a:1', occurredAt: ZOMBIE_CONFIG.shambler.windup, facing: .4 });
   assert.equal(attack.advance(11), null);
   attack.start(12, 0); const deadline = attack.getRecoveryDeadline(); attack.cancel();
-  assert.equal(attack.advance(13), null); assert.equal(attack.canStart(13), false); assert.equal(attack.getRecoveryDeadline(), deadline);
+  assert.equal(attack.advance(12.5), null); assert.equal(attack.canStart(12.5), false); assert.equal(attack.getRecoveryDeadline(), deadline);
 });
 
 test('windup, one-time melee damage and multi-enemy grace agree at 30/60/144 FPS', () => {

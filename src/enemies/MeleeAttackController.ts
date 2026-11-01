@@ -1,6 +1,13 @@
 import type { Point } from '../physics/Collider';
 import type { ZombieConfig } from './ZombieConfig';
 export interface AttackMoment { attackId: string; occurredAt: number; facing: number; }
+export interface AttackPose {
+  readonly phase: 'idle' | 'anticipation' | 'strike' | 'followThrough' | 'recovery';
+  readonly progress: number; readonly hand: -1 | 1;
+  readonly coil: number; readonly strike: number; readonly weight: number; readonly trail: number;
+}
+const IDLE_POSE: AttackPose = Object.freeze({ phase: 'idle', progress: 0, hand: 1, coil: 0, strike: 0, weight: 0, trail: 0 });
+const smooth = (t: number): number => t * t * (3 - 2 * t);
 interface Attack { id: string; start: number; hit: number; end: number; facing: number; emitted: boolean; cancelled: boolean; }
 const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -45,10 +52,25 @@ export class MeleeAttackController {
     if (!this.current || this.now + 1e-9 >= this.current.end) return 'idle';
     return !this.current.cancelled && this.now < this.current.hit ? 'windup' : 'recovery';
   }
-  getPoseAmount(): number {
+  getPoseSnapshot(): Readonly<AttackPose> {
     const a = this.current;
-    if (!a || a.cancelled || this.now >= a.end) return 0;
-    return this.now < a.hit ? Math.min(1, (this.now - a.start) / this.config.windup) : Math.max(0, 1 - (this.now - a.hit) / this.config.recovery);
+    if (!a || a.cancelled || this.now >= a.end) return IDLE_POSE;
+    const hand = this.sequence % 2 ? -1 : 1;
+    const swingStart = a.hit - this.config.swingSeconds, followEnd = a.hit + this.config.followThroughSeconds;
+    if (this.now < swingStart) {
+      const progress = Math.max(0, (this.now - a.start) / (swingStart - a.start));
+      return Object.freeze({ phase: 'anticipation', progress, hand, coil: smooth(progress), strike: 0, weight: 1, trail: 0 });
+    }
+    if (this.now < a.hit) {
+      const progress = (this.now - swingStart) / this.config.swingSeconds;
+      return Object.freeze({ phase: 'strike', progress, hand, coil: 1, strike: 1 - (1 - progress) ** 3, weight: 1, trail: progress * .8 });
+    }
+    if (this.now < followEnd) {
+      const progress = (this.now - a.hit) / this.config.followThroughSeconds;
+      return Object.freeze({ phase: 'followThrough', progress, hand, coil: 1, strike: 1 + .08 * Math.sin(progress * Math.PI), weight: 1, trail: 1 - progress });
+    }
+    const progress = Math.min(1, (this.now - followEnd) / (a.end - followEnd));
+    return Object.freeze({ phase: 'recovery', progress, hand, coil: 1, strike: 1, weight: 1 - smooth(progress), trail: 0 });
   }
   getRecoveryDeadline(): number { return this.current?.end ?? 0; }
 }
