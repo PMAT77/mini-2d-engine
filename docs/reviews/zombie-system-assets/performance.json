@@ -1,0 +1,871 @@
+{
+  "environment": {
+    "os": "win32 10.0.22631",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12600KF",
+    "logicalCpus": 16,
+    "memoryGiB": 31.9,
+    "node": "v24.19.0",
+    "browser": "156.0.8078.4",
+    "viewport": "1280x720",
+    "seed": 424242
+  },
+  "method": "1s warmup + 10s wall-clock rAF sampling; fixed 1/60 simulation steps, repeatable WASD square and player gunshot noise every .75 simulated seconds; full scene rendering. Player maxHealth=1000000 only in the harness so death cannot reduce stress workload.",
+  "goals": {
+    "aiAndNavigationMs": 2,
+    "frameMs": 16.67
+  },
+  "gpuMs": null,
+  "gcMs": null,
+  "cases": [
+    {
+      "count": 0,
+      "dpr": 1,
+      "spawned": 0,
+      "samples": 502,
+      "samplingMs": 10013.1,
+      "interval": {
+        "mean": 19.92,
+        "p50": 16.7,
+        "p95": 33.4,
+        "max": 33.4
+      },
+      "update": {
+        "mean": 4.274,
+        "p50": 3.4,
+        "p95": 8.3,
+        "max": 10.5
+      },
+      "draw": {
+        "mean": 13.893,
+        "p50": 13.8,
+        "p95": 15.5,
+        "max": 22
+      },
+      "frameCpu": {
+        "mean": 18.167,
+        "p50": 17.5,
+        "p95": 22.8,
+        "max": 27.3
+      },
+      "enemyPerception": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "navigation": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "movement": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "playerPerception": {
+        "mean": 3.338,
+        "p50": 2.5,
+        "p95": 7.3,
+        "max": 9.1
+      },
+      "aiAndNavigation": {
+        "mean": 0.003,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 0,
+        "startedDuringSample": 0,
+        "peakExpandedPerTick": 0,
+        "peakWorkPerTick": 0,
+        "peakStartsPerTick": 0,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0
+      },
+      "objects": {
+        "enemies": 0,
+        "actors": 1,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 134,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 35,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 4,
+      "dpr": 1,
+      "spawned": 4,
+      "samples": 487,
+      "samplingMs": 10001.3,
+      "interval": {
+        "mean": 20.533,
+        "p50": 16.7,
+        "p95": 33.4,
+        "max": 33.5
+      },
+      "update": {
+        "mean": 4.668,
+        "p50": 3.8,
+        "p95": 8.8,
+        "max": 11.4
+      },
+      "draw": {
+        "mean": 14.122,
+        "p50": 14,
+        "p95": 15.6,
+        "max": 17.7
+      },
+      "frameCpu": {
+        "mean": 18.79,
+        "p50": 18,
+        "p95": 23.2,
+        "max": 24.8
+      },
+      "enemyPerception": {
+        "mean": 0.152,
+        "p50": 0.1,
+        "p95": 0.3,
+        "max": 0.7
+      },
+      "navigation": {
+        "mean": 0.02,
+        "p50": 0,
+        "p95": 0,
+        "max": 1.9
+      },
+      "movement": {
+        "mean": 0.063,
+        "p50": 0.1,
+        "p95": 0.2,
+        "max": 0.4
+      },
+      "playerPerception": {
+        "mean": 3.485,
+        "p50": 2.6,
+        "p95": 7.5,
+        "max": 10.2
+      },
+      "aiAndNavigation": {
+        "mean": 0.171,
+        "p50": 0.1,
+        "p95": 0.3,
+        "max": 2.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 523,
+        "startedDuringSample": 13,
+        "peakExpandedPerTick": 107,
+        "peakWorkPerTick": 170,
+        "peakStartsPerTick": 1,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0.06666666666666667
+      },
+      "objects": {
+        "enemies": 4,
+        "actors": 5,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 172,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 48,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 20,
+      "dpr": 1,
+      "spawned": 20,
+      "samples": 452,
+      "samplingMs": 10011.6,
+      "interval": {
+        "mean": 22.123,
+        "p50": 16.7,
+        "p95": 33.4,
+        "max": 33.5
+      },
+      "update": {
+        "mean": 5.899,
+        "p50": 5.1,
+        "p95": 10.1,
+        "max": 13.5
+      },
+      "draw": {
+        "mean": 14.436,
+        "p50": 14.3,
+        "p95": 16.5,
+        "max": 19.8
+      },
+      "frameCpu": {
+        "mean": 20.335,
+        "p50": 19.8,
+        "p95": 24.8,
+        "max": 29.3
+      },
+      "enemyPerception": {
+        "mean": 0.583,
+        "p50": 0.5,
+        "p95": 1.1,
+        "max": 2.4
+      },
+      "navigation": {
+        "mean": 0.044,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 2.7
+      },
+      "movement": {
+        "mean": 0.253,
+        "p50": 0.2,
+        "p95": 0.5,
+        "max": 1.1
+      },
+      "playerPerception": {
+        "mean": 4.059,
+        "p50": 3.3,
+        "p95": 8.1,
+        "max": 11
+      },
+      "aiAndNavigation": {
+        "mean": 0.627,
+        "p50": 0.5,
+        "p95": 1.3,
+        "max": 4
+      },
+      "scheduler": {
+        "expandedDuringSample": 1141,
+        "startedDuringSample": 52,
+        "peakExpandedPerTick": 122,
+        "peakWorkPerTick": 205,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 3,
+        "maximumQueueWaitSeconds": 0.3333333333333333
+      },
+      "objects": {
+        "enemies": 20,
+        "actors": 21,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 238,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 65,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 50,
+      "dpr": 1,
+      "spawned": 50,
+      "samples": 413,
+      "samplingMs": 10011.8,
+      "interval": {
+        "mean": 24.212,
+        "p50": 16.7,
+        "p95": 33.4,
+        "max": 33.5
+      },
+      "update": {
+        "mean": 8.196,
+        "p50": 7.4,
+        "p95": 12.6,
+        "max": 16.2
+      },
+      "draw": {
+        "mean": 14.213,
+        "p50": 14.1,
+        "p95": 15.8,
+        "max": 18.5
+      },
+      "frameCpu": {
+        "mean": 22.409,
+        "p50": 21.8,
+        "p95": 27.3,
+        "max": 34.7
+      },
+      "enemyPerception": {
+        "mean": 1.246,
+        "p50": 1.1,
+        "p95": 2.1,
+        "max": 6.5
+      },
+      "navigation": {
+        "mean": 0.066,
+        "p50": 0,
+        "p95": 0.2,
+        "max": 3.5
+      },
+      "movement": {
+        "mean": 0.55,
+        "p50": 0.5,
+        "p95": 1,
+        "max": 2.1
+      },
+      "playerPerception": {
+        "mean": 5.231,
+        "p50": 4.6,
+        "p95": 9.6,
+        "max": 11.2
+      },
+      "aiAndNavigation": {
+        "mean": 1.312,
+        "p50": 1.1,
+        "p95": 2.3,
+        "max": 6.5
+      },
+      "scheduler": {
+        "expandedDuringSample": 821,
+        "startedDuringSample": 135,
+        "peakExpandedPerTick": 109,
+        "peakWorkPerTick": 176,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 18,
+        "maximumQueueWaitSeconds": 0.8333333333333334
+      },
+      "objects": {
+        "enemies": 50,
+        "actors": 51,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 319,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 62,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 100,
+      "dpr": 1,
+      "spawned": 100,
+      "samples": 369,
+      "samplingMs": 10013.4,
+      "interval": {
+        "mean": 27.144,
+        "p50": 33.3,
+        "p95": 33.4,
+        "max": 50
+      },
+      "update": {
+        "mean": 11.261,
+        "p50": 10.7,
+        "p95": 15.5,
+        "max": 20.3
+      },
+      "draw": {
+        "mean": 14.168,
+        "p50": 14.1,
+        "p95": 15.8,
+        "max": 20
+      },
+      "frameCpu": {
+        "mean": 25.429,
+        "p50": 25,
+        "p95": 29.9,
+        "max": 35.7
+      },
+      "enemyPerception": {
+        "mean": 2.089,
+        "p50": 2,
+        "p95": 3,
+        "max": 5
+      },
+      "navigation": {
+        "mean": 0.097,
+        "p50": 0,
+        "p95": 0.7,
+        "max": 3.1
+      },
+      "movement": {
+        "mean": 1.154,
+        "p50": 1.1,
+        "p95": 1.9,
+        "max": 5.1
+      },
+      "playerPerception": {
+        "mean": 6.685,
+        "p50": 6,
+        "p95": 10.5,
+        "max": 13.8
+      },
+      "aiAndNavigation": {
+        "mean": 2.186,
+        "p50": 2,
+        "p95": 3.4,
+        "max": 5
+      },
+      "scheduler": {
+        "expandedDuringSample": 1606,
+        "startedDuringSample": 232,
+        "peakExpandedPerTick": 244,
+        "peakWorkPerTick": 401,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 68,
+        "maximumQueueWaitSeconds": 1.7
+      },
+      "objects": {
+        "enemies": 100,
+        "actors": 101,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 404,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 84,
+      "longFrames50ms": 0,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 0,
+      "dpr": 2,
+      "spawned": 0,
+      "samples": 184,
+      "samplingMs": 10001.8,
+      "interval": {
+        "mean": 54.255,
+        "p50": 50,
+        "p95": 66.7,
+        "max": 66.8
+      },
+      "update": {
+        "mean": 4.43,
+        "p50": 3.5,
+        "p95": 8.5,
+        "max": 10.4
+      },
+      "draw": {
+        "mean": 44.418,
+        "p50": 44,
+        "p95": 47.4,
+        "max": 57.7
+      },
+      "frameCpu": {
+        "mean": 48.848,
+        "p50": 48.1,
+        "p95": 54.3,
+        "max": 60.7
+      },
+      "enemyPerception": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "navigation": {
+        "mean": 0.001,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "movement": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "playerPerception": {
+        "mean": 3.409,
+        "p50": 2.5,
+        "p95": 7.6,
+        "max": 9.3
+      },
+      "aiAndNavigation": {
+        "mean": 0.002,
+        "p50": 0,
+        "p95": 0,
+        "max": 0.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 0,
+        "startedDuringSample": 0,
+        "peakExpandedPerTick": 0,
+        "peakWorkPerTick": 0,
+        "peakStartsPerTick": 0,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0
+      },
+      "objects": {
+        "enemies": 0,
+        "actors": 1,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 70,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 184,
+      "longFrames50ms": 71,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 4,
+      "dpr": 2,
+      "spawned": 4,
+      "samples": 183,
+      "samplingMs": 10021.7,
+      "interval": {
+        "mean": 54.825,
+        "p50": 50,
+        "p95": 66.7,
+        "max": 83.3
+      },
+      "update": {
+        "mean": 4.743,
+        "p50": 3.8,
+        "p95": 8.7,
+        "max": 12.7
+      },
+      "draw": {
+        "mean": 44.644,
+        "p50": 44.3,
+        "p95": 47.2,
+        "max": 62.6
+      },
+      "frameCpu": {
+        "mean": 49.387,
+        "p50": 48.7,
+        "p95": 54.1,
+        "max": 71.4
+      },
+      "enemyPerception": {
+        "mean": 0.137,
+        "p50": 0.1,
+        "p95": 0.2,
+        "max": 0.5
+      },
+      "navigation": {
+        "mean": 0.01,
+        "p50": 0,
+        "p95": 0,
+        "max": 1.2
+      },
+      "movement": {
+        "mean": 0.066,
+        "p50": 0.1,
+        "p95": 0.1,
+        "max": 0.4
+      },
+      "playerPerception": {
+        "mean": 3.518,
+        "p50": 2.6,
+        "p95": 7.3,
+        "max": 11
+      },
+      "aiAndNavigation": {
+        "mean": 0.147,
+        "p50": 0.1,
+        "p95": 0.3,
+        "max": 1.6
+      },
+      "scheduler": {
+        "expandedDuringSample": 53,
+        "startedDuringSample": 3,
+        "peakExpandedPerTick": 53,
+        "peakWorkPerTick": 100,
+        "peakStartsPerTick": 1,
+        "peakActive": 0,
+        "peakQueued": 0,
+        "maximumQueueWaitSeconds": 0.06666666666666667
+      },
+      "objects": {
+        "enemies": 4,
+        "actors": 5,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 82,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 183,
+      "longFrames50ms": 73,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 20,
+      "dpr": 2,
+      "spawned": 20,
+      "samples": 178,
+      "samplingMs": 10001.7,
+      "interval": {
+        "mean": 56.084,
+        "p50": 50,
+        "p95": 66.7,
+        "max": 83.4
+      },
+      "update": {
+        "mean": 6.156,
+        "p50": 5.3,
+        "p95": 10.3,
+        "max": 18.5
+      },
+      "draw": {
+        "mean": 44.503,
+        "p50": 44.1,
+        "p95": 48.1,
+        "max": 54
+      },
+      "frameCpu": {
+        "mean": 50.659,
+        "p50": 49.7,
+        "p95": 56,
+        "max": 70
+      },
+      "enemyPerception": {
+        "mean": 0.561,
+        "p50": 0.5,
+        "p95": 1,
+        "max": 2.1
+      },
+      "navigation": {
+        "mean": 0.026,
+        "p50": 0,
+        "p95": 0.1,
+        "max": 3.1
+      },
+      "movement": {
+        "mean": 0.26,
+        "p50": 0.2,
+        "p95": 0.5,
+        "max": 1.3
+      },
+      "playerPerception": {
+        "mean": 4.23,
+        "p50": 3.3,
+        "p95": 8.1,
+        "max": 16.6
+      },
+      "aiAndNavigation": {
+        "mean": 0.587,
+        "p50": 0.5,
+        "p95": 1.1,
+        "max": 3.6
+      },
+      "scheduler": {
+        "expandedDuringSample": 96,
+        "startedDuringSample": 22,
+        "peakExpandedPerTick": 96,
+        "peakWorkPerTick": 174,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 4,
+        "maximumQueueWaitSeconds": 0.3333333333333333
+      },
+      "objects": {
+        "enemies": 20,
+        "actors": 21,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 97,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 178,
+      "longFrames50ms": 82,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 50,
+      "dpr": 2,
+      "spawned": 50,
+      "samples": 172,
+      "samplingMs": 10015.8,
+      "interval": {
+        "mean": 58.234,
+        "p50": 50.1,
+        "p95": 66.7,
+        "max": 83.3
+      },
+      "update": {
+        "mean": 8.057,
+        "p50": 7.3,
+        "p95": 12.2,
+        "max": 15.6
+      },
+      "draw": {
+        "mean": 44.691,
+        "p50": 44.5,
+        "p95": 47.9,
+        "max": 51.3
+      },
+      "frameCpu": {
+        "mean": 52.748,
+        "p50": 52.3,
+        "p95": 57.9,
+        "max": 66.9
+      },
+      "enemyPerception": {
+        "mean": 1.173,
+        "p50": 1.1,
+        "p95": 1.8,
+        "max": 2.5
+      },
+      "navigation": {
+        "mean": 0.074,
+        "p50": 0,
+        "p95": 0.2,
+        "max": 6
+      },
+      "movement": {
+        "mean": 0.562,
+        "p50": 0.5,
+        "p95": 1.1,
+        "max": 1.8
+      },
+      "playerPerception": {
+        "mean": 5.056,
+        "p50": 4.4,
+        "p95": 8.9,
+        "max": 11.7
+      },
+      "aiAndNavigation": {
+        "mean": 1.248,
+        "p50": 1.1,
+        "p95": 2,
+        "max": 6.5
+      },
+      "scheduler": {
+        "expandedDuringSample": 224,
+        "startedDuringSample": 78,
+        "peakExpandedPerTick": 119,
+        "peakWorkPerTick": 182,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 32,
+        "maximumQueueWaitSeconds": 0.8333333333333334
+      },
+      "objects": {
+        "enemies": 50,
+        "actors": 51,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 129,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 172,
+      "longFrames50ms": 96,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    },
+    {
+      "count": 100,
+      "dpr": 2,
+      "spawned": 100,
+      "samples": 164,
+      "samplingMs": 10054.2,
+      "interval": {
+        "mean": 60.973,
+        "p50": 66.6,
+        "p95": 66.7,
+        "max": 83.4
+      },
+      "update": {
+        "mean": 10.991,
+        "p50": 10.4,
+        "p95": 15,
+        "max": 25
+      },
+      "draw": {
+        "mean": 44.455,
+        "p50": 44.4,
+        "p95": 46.8,
+        "max": 53
+      },
+      "frameCpu": {
+        "mean": 55.447,
+        "p50": 54.8,
+        "p95": 60.6,
+        "max": 68.7
+      },
+      "enemyPerception": {
+        "mean": 1.787,
+        "p50": 1.8,
+        "p95": 2.9,
+        "max": 5.1
+      },
+      "navigation": {
+        "mean": 0.127,
+        "p50": 0,
+        "p95": 0.2,
+        "max": 7.4
+      },
+      "movement": {
+        "mean": 1.021,
+        "p50": 1,
+        "p95": 1.8,
+        "max": 4.4
+      },
+      "playerPerception": {
+        "mean": 6.863,
+        "p50": 6,
+        "p95": 10.9,
+        "max": 13.8
+      },
+      "aiAndNavigation": {
+        "mean": 1.914,
+        "p50": 1.8,
+        "p95": 3.2,
+        "max": 8.1
+      },
+      "scheduler": {
+        "expandedDuringSample": 247,
+        "startedDuringSample": 137,
+        "peakExpandedPerTick": 119,
+        "peakWorkPerTick": 182,
+        "peakStartsPerTick": 2,
+        "peakActive": 0,
+        "peakQueued": 82,
+        "maximumQueueWaitSeconds": 1.7
+      },
+      "objects": {
+        "enemies": 100,
+        "actors": 101,
+        "chickens": 60,
+        "vaccines": 2,
+        "peakParticles": 0,
+        "peakNoise": 149,
+        "peakBullets": 0
+      },
+      "longFrames33ms": 164,
+      "longFrames50ms": 112,
+      "playerAlive": true,
+      "gpuMs": null,
+      "gcMs": null
+    }
+  ]
+}
