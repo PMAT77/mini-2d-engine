@@ -31,7 +31,8 @@ export class EncounterSpawning {
     }
     if (scanFallback) for (const key of region.keys) {
       const point = region.grid.point(key), body = circleCollider(point.x, point.y, clearance);
-      if (Math.hypot(point.x - this.origin.x, point.y - this.origin.y) < minDistance || !this.map.isShapeWalkable(body) || this.map.getShapeSpeedFactor(body) !== 1) continue;
+      const distance = Math.hypot(point.x - this.origin.x, point.y - this.origin.y);
+      if (distance < minDistance || distance > maxDistance || !this.map.isShapeWalkable(body) || this.map.getShapeSpeedFactor(body) !== 1) continue;
       if (!occupied.some(o => Math.hypot(o.center.x - point.x, o.center.y - point.y) < o.radius + radius + 12)) return point;
     }
     return null;

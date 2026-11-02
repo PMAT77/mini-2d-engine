@@ -126,7 +126,10 @@ export class PickupPromptRenderer {
     promptCenter: null,
   };
 
-  constructor(private readonly iconUrl: string = PICKUP_ICON_URL) {}
+  constructor(
+    private readonly iconUrl: string = PICKUP_ICON_URL,
+    private readonly keyLabel = "E",
+  ) {}
 
   /** 预加载键帽图标；加载失败时退回矢量键帽，不影响交互逻辑。 */
   preload(): void {
@@ -377,7 +380,7 @@ export class PickupPromptRenderer {
     ctx.font = "700 13px system-ui, -apple-system, 'Segoe UI', sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("E", half, half + 1);
+    ctx.fillText(this.keyLabel, half, half + 1);
     ctx.restore();
   }
 }

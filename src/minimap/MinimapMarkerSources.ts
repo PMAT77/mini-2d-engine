@@ -2,6 +2,7 @@ import { getTileType } from "../map/TileType";
 import { MEMORY_TILE_ORDER, MEMORY_UNKNOWN_TILE, type TerrainMemory } from "../vision/TerrainMemory";
 import { mineralMarkerId } from "./MinimapMarkerStore";
 import type { MinimapMarkerSpec } from "./MinimapTypes";
+import type { Bounds } from "../physics/Collider";
 
 /**
  * 从“玩家已知地形快照”里整理出矿石标记。
@@ -10,16 +11,21 @@ import type { MinimapMarkerSpec } from "./MinimapTypes";
  * 观察到该瓦片、记忆被刷新时标记才会消失；否则地图上保留的是“最后一次看到它”
  * 的位置，符合三层视野对记忆的要求。
  *
- * 复杂度是 O(瓦片数)，所以只在 TerrainMemory.revision 变化时调用，不在每帧调用。
+ * 可限制到当前小地图的世界范围；省略范围时保留全量收集行为。
  */
 export function collectMineralMarkers(
   memory: TerrainMemory,
-  out: MinimapMarkerSpec[] = []
+  out: MinimapMarkerSpec[] = [],
+  bounds?: Bounds
 ): MinimapMarkerSpec[] {
   out.length = 0;
   const tileSize = memory.tileSize;
-  for (let row = 0; row < memory.rows; row++) {
-    for (let col = 0; col < memory.cols; col++) {
+  const left = bounds ? Math.max(0, Math.floor(bounds.x / tileSize)) : 0;
+  const top = bounds ? Math.max(0, Math.floor(bounds.y / tileSize)) : 0;
+  const right = bounds ? Math.min(memory.cols, Math.ceil((bounds.x + bounds.width) / tileSize)) : memory.cols;
+  const bottom = bounds ? Math.min(memory.rows, Math.ceil((bounds.y + bounds.height) / tileSize)) : memory.rows;
+  for (let row = top; row < bottom; row++) {
+    for (let col = left; col < right; col++) {
       const tile = memory.get(col, row);
       if (!tile || tile.typeIndex === MEMORY_UNKNOWN_TILE) continue;
       const typeId = MEMORY_TILE_ORDER[tile.typeIndex];

@@ -375,7 +375,7 @@ test('字号、文本宽度与基线对齐符合新规范', () => {
 test('主副武器与弹药的素材映射正确', () => {
   assert.equal(getWeaponSpriteForView(smgView()), 'smgTactical');
   assert.equal(getWeaponSpriteForView(pistolView()), 'pistolGlock');
-  assert.equal(getWeaponSpriteForView(emptyView()), null);
+  assert.equal(getWeaponSpriteForView(emptyView()), 'fistLeft');
   assert.equal(getWeaponSpriteForView(knifeView()), null);
   assert.equal(getAmmoSpriteForView(smgView()), 'ammoRifle');
   assert.equal(getAmmoSpriteForView(pistolView()), 'ammoPistol');
@@ -411,7 +411,7 @@ test('空手不显示子弹图标', () => {
   assert.equal(content.ammoBox, null);
 
   const { calls } = drawHud(loadout('melee'));
-  assert.equal(calls.drawImages.length, 0, '空手没有任何图片绘制');
+  assert.equal(calls.drawImages.length, 0, '无 DOM 时空手使用轮廓回退');
   assert.equal(calls.texts.length, 0, '空手不显示弹药数字');
 });
 

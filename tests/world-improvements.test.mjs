@@ -11,6 +11,7 @@ const { SoundRippleSystem } = load('objects/SoundRippleSystem');
 const { launchThrowable } = load('throwables/ThrowablePhysics');
 const { VACCINE_PICKUP_CONFIG } = load('interaction/PickupTypes');
 const { circleCollider } = load('physics/Collider');
+const { EncounterSpawning } = load('enemies/EncounterSpawning');
 globalThis.window = { innerWidth: 1200, innerHeight: 800, devicePixelRatio: 1 };
 const setup = (count = 0) => {
   const map = new TileMap(30, 24, { generateWater: false, seed: 42 });
@@ -89,11 +90,23 @@ test('stations use reproducible reachable dry positions, have solid bases, and T
   scene.spawnTradingStations(); other.spawnTradingStations();
   assert.equal(scene.getTradingStationState().stations.length, 2);
   assert.deepEqual(scene.getTradingStationState(), other.getTradingStationState());
-  const station = scene.tradingStations[0]; assert.equal(map.isShapeWalkable(circleCollider(station.x, station.y, 8)), false);
+  const station = scene.tradingStations[0], origin = scene.player.getVisionState();
+  const distance = Math.hypot(station.x - origin.x, station.y - origin.y);
+  assert.ok(distance >= 150 && distance <= 300, 'the first station stays near the player spawn');
+  assert.equal(map.isShapeWalkable(circleCollider(station.x, station.y, 8)), false);
   scene.player.x = station.x - 75; scene.player.y = station.y - 24.5;
   let requests = 0; scene.showPickupText = () => requests++;
   const input = { isKeyDown: () => true };
   scene.updateTradingStation(input); scene.updateTradingStation(input); assert.equal(requests, 1);
   assert.equal(scene.lastTradingStationId, station.id); assert.equal(scene.isWorldPaused(), false);
   scene.updateTradingStation({ isKeyDown: () => false }); scene.updateTradingStation(input); assert.equal(requests, 2);
+});
+
+test('station fallback scans stay within the requested spawn distance', () => {
+  const { map } = setup(), origin = { x: 750, y: 600 };
+  const spawner = new EncounterSpawning(map, origin, () => 0);
+  const point = spawner.find(24.5, 150, 300, [], 0, true, 55);
+  assert.ok(point && Math.hypot(point.x - origin.x, point.y - origin.y) <= 300);
+  assert.equal(spawner.find(24.5, 150, 300, [{ center: origin, radius: 300 }], 0, true, 55), null,
+    'blocked nearby candidates must not move the station far from the spawn');
 });

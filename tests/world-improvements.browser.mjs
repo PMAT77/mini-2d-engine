@@ -19,7 +19,7 @@ try {
       window.dispatchEvent(new Event('focus')); tick();
     });
     const tap = async key => { await page.keyboard.down(key); await page.evaluate(() => tick()); await page.keyboard.up(key); await page.evaluate(() => tick()); };
-    await page.keyboard.down('KeyW'); await page.keyboard.press('KeyB');
+    await page.keyboard.down('KeyW'); await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => s.backpackPanel.isOpen() && g.input.isBlocked() && !s.isWorldPaused()), true);
     const motion = await page.evaluate(() => {
       const root = document.querySelector('[data-backpack]'), animation = root.getAnimations()[0];
@@ -43,7 +43,7 @@ try {
     const bullets = await page.evaluate(() => s.player.getBullets().length);
     await page.mouse.down(); await page.evaluate(() => tick()); assert.equal(await page.evaluate(() => s.player.getBullets().length), bullets);
     await page.mouse.up(); await page.mouse.up({ button: 'right' });
-    await page.keyboard.press('KeyB'); await page.keyboard.press('Escape');
+    await page.keyboard.press('Tab'); await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => !s.backpackPanel.isOpen() && s.isWorldPaused() && s.sfx.isPaused()), true);
     const paused = await page.evaluate(() => s.survival.snapshot()); await page.evaluate(() => advance(2));
     assert.deepEqual(await page.evaluate(() => s.survival.snapshot()), paused);
@@ -59,7 +59,7 @@ try {
     await page.screenshot({ path: `.review/improvements-hotbar-dpr${dpr}.png` });
     await page.evaluate(() => { s.survival.inventory.add('grenade'); tick(); }); await tap('Digit1');
     assert.equal(await page.evaluate(() => s.throwable.held), 'grenade');
-    await page.keyboard.press('KeyB'); await dragSlot(3, slots[2]);
+    await page.keyboard.press('Tab'); await dragSlot(3, slots[2]);
     assert.equal(await page.evaluate(() => s.backpackPanel.isOpen()), false); assert.equal(await page.evaluate(() => s.quickSlotBindings[2]), 'vaccine');
     const count = await page.evaluate(() => s.survival.inventory.getVaccines());
     await page.mouse.click(slots[2].x, slots[2].y, { button: 'right' });
@@ -83,7 +83,7 @@ try {
     await tap('KeyT'); assert.equal(await page.evaluate(() => s.getTradingStationState().lastInteracted), 'test');
     await page.screenshot({ path: `.review/improvements-terminal-dpr${dpr}.png` });
     for (const [width, height] of [[640, 360], [390, 844]]) {
-      await page.setViewportSize({ width, height }); await page.keyboard.press('KeyB'); await page.waitForTimeout(200); await page.evaluate(() => tick());
+      await page.setViewportSize({ width, height }); await page.keyboard.press('Tab'); await page.waitForTimeout(200); await page.evaluate(() => tick());
       const b = await page.locator('.backpack-panel').boundingBox(); assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.width <= width && b.y + b.height <= height);
       const covered = await page.evaluate(() => {
         const l = s.quickSlotHud.layout, x = l.x + l.size / 2, y = l.y + l.size / 2;
@@ -93,18 +93,18 @@ try {
       const mini = await page.evaluate(() => s.minimap.getLayout());
       await page.mouse.move(mini.centerX, mini.centerY); await page.mouse.wheel(0, 100); await page.waitForTimeout(30);
       assert.equal(await page.evaluate(() => s.minimap.getLayout().worldRadius), mini.worldRadius, 'scrolling a panel covering the minimap cannot zoom the map');
-      await page.screenshot({ path: `.review/improvements-backpack-${width}-dpr${dpr}.png` }); await page.keyboard.press('KeyB');
+      await page.screenshot({ path: `.review/improvements-backpack-${width}-dpr${dpr}.png` }); await page.keyboard.press('Tab');
     }
     await page.evaluate(() => { for (let i = 0; i < 6; i++) { s.backpackPanel.setOpen(true); s.backpackPanel.setOpen(false); } });
     await page.waitForTimeout(150); assert.equal(await page.locator('[data-backpack]').isVisible(), false, 'interrupted transitions never reopen a closed panel');
-    await page.emulateMedia({ reducedMotion: 'reduce' }); await page.keyboard.press('KeyB');
+    await page.emulateMedia({ reducedMotion: 'reduce' }); await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.querySelector('[data-backpack]').getAnimations().length), 0);
-    await page.keyboard.press('KeyB'); assert.equal(await page.locator('[data-backpack]').isVisible(), false, 'reduced motion closes immediately');
+    await page.keyboard.press('Tab'); assert.equal(await page.locator('[data-backpack]').isVisible(), false, 'reduced motion closes immediately');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.evaluate(() => { s.survival.inventory.add('grenade'); s.activateInventoryItem('grenade', 'gameplay'); const p = s.player.getVisionState(); s.throwable.input({ aimedLeftPressed: true }, p); });
-    await page.keyboard.press('KeyB'); await page.evaluate(() => advance(4.1));
+    await page.keyboard.press('Tab'); await page.evaluate(() => advance(4.1));
     assert.equal(await page.evaluate(() => s.player.isAlive()), false); assert.equal(await page.evaluate(() => s.backpackPanel.isOpen()), false);
-    await page.keyboard.press('KeyB'); assert.equal(await page.evaluate(() => s.backpackPanel.isOpen()), false);
+    await page.keyboard.press('Tab'); assert.equal(await page.evaluate(() => s.backpackPanel.isOpen()), false);
     await page.evaluate(() => s.onExit()); assert.equal(await page.locator('[data-backpack],.pause-overlay').count(), 0);
     assert.equal(await page.evaluate(() => g.input.isBlocked()), false); assert.deepEqual(errors, []); await context.close();
   }

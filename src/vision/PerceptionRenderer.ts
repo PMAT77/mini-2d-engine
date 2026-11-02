@@ -58,6 +58,8 @@ export class PerceptionRenderer {
   private shadowCtx: CanvasRenderingContext2D | null = null;
   private terrainSolids: SolidTerrain | null = null;
   private terrainSolidRevision = -1;
+  private terrainMemory: TerrainMemory | null = null;
+  private terrainBlocking = new Uint8Array(0);
   private terrainPath: Path2D | null = null;
   private terrainPathKey = "";
   private debugLayer: VisionDebugLayer | null = null;
@@ -260,14 +262,15 @@ export class PerceptionRenderer {
   /**
    * 统一地形路径：记忆优先、建图快照兜底。
    *
-   * SolidTerrain 只在记忆 revision 变化时重建；路径再按瓦片对齐的视口缓存，
-   * 与旧的“未知轮廓”缓存策略保持一致，不随玩家每一帧移动重建。
+   * 保留局部拓扑缓存；记忆变化时只比较视口内的有效阻挡位。
+   * 新发现相同地形、损伤与远处探索都不改变轮廓。
    */
   private getTerrainPath(cameraX: number, cameraY: number, viewWidth: number,
     viewHeight: number, memory: TerrainMemory): Path2D | null {
-    if (!this.terrainSolids || this.terrainSolidRevision !== memory.revision) {
+    if (!this.terrainSolids || this.terrainMemory !== memory) {
       this.terrainSolids = new SolidTerrain((col, row) => this.isBlockingTile(col, row, memory));
-      this.terrainSolidRevision = memory.revision;
+      this.terrainMemory = memory;
+      this.terrainSolidRevision = -1;
       this.terrainPath = null;
       this.terrainPathKey = "";
     }
@@ -280,8 +283,22 @@ export class PerceptionRenderer {
     const endRow = Math.min(this.terrain.height, Math.ceil((cameraY + viewHeight + margin) / size));
     if (endCol <= startCol || endRow <= startRow) return null;
 
-    const key = `${memory.revision}:${startCol},${startRow},${endCol},${endRow}`;
-    if (this.terrainPath && this.terrainPathKey === key) return this.terrainPath;
+    const key = `${size}:${startCol},${startRow},${endCol},${endRow}`;
+    if (this.terrainPathKey === key && this.terrainSolidRevision === memory.revision) return this.terrainPath;
+    // query() includes touching cells, whose rounded topology also depends on their neighbours.
+    const left = Math.max(0, startCol - 2), top = Math.max(0, startRow - 2);
+    const right = Math.min(this.terrain.width, endCol + 3), bottom = Math.min(this.terrain.height, endRow + 3);
+    const count = (right - left) * (bottom - top);
+    let changed = this.terrainPathKey !== key || this.terrainBlocking.length !== count;
+    if (this.terrainBlocking.length !== count) this.terrainBlocking = new Uint8Array(count);
+    let index = 0;
+    for (let row = top; row < bottom; row++) for (let col = left; col < right; col++) {
+      const blocked = this.isBlockingTile(col, row, memory) ? 1 : 0;
+      if (this.terrainBlocking[index] !== blocked) changed = true;
+      this.terrainBlocking[index++] = blocked;
+    }
+    this.terrainSolidRevision = memory.revision;
+    if (!changed) return this.terrainPath;
 
     const polygons = this.terrainSolids.query({
       x: startCol * size,

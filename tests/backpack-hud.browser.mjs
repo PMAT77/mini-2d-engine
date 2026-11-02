@@ -74,8 +74,8 @@ try {
       assert.deepEqual(result.transform, [dpr, dpr, 0, 0], 'does not leak Canvas transforms');
       if (width === 1672 || width === 640) await page.screenshot({ path: `${output}/backpack-${width}x${height}-dpr${dpr}.png` });
     }
-    await page.keyboard.press('KeyB');
-    assert.equal(await page.evaluate(() => window.backpackGame.sceneManager.getCurrentScene() === window.backpackScene), true, 'B does not open a new screen');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => window.backpackGame.sceneManager.getCurrentScene() === window.backpackScene), true, 'Tab opens backpack within the current game scene');
     assert.deepEqual(errors, [], 'no browser runtime errors');
     await context.close();
   }

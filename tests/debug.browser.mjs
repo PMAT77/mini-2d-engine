@@ -334,8 +334,10 @@ try {
     const slotAfterGameplayTab = await page.evaluate(() => debugTest.scene.player.getActiveWeaponSlot());
     await page.keyboard.up('Tab');
     await page.evaluate(() => debugTest.tick(0));
-    assert.notEqual(slotAfterGameplayTab, slotBeforeGameplayTab, 'Tab cycles the two firearms during gameplay');
-    assert.equal(await page.evaluate(() => window.__tabPrevented), true, 'gameplay Tab is captured instead of moving browser focus');
+    assert.equal(slotAfterGameplayTab, slotBeforeGameplayTab, 'Tab no longer changes firearms');
+    assert.equal(await page.evaluate(() => debugTest.scene.backpackPanel.isOpen()), true, 'gameplay Tab opens backpack');
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => debugTest.scene.backpackPanel.isOpen()), false, 'second Tab closes backpack');
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), true, 'Escape pauses and reveals the system cursor');
     assert.equal(await page.locator('body > canvas').evaluate(element => getComputedStyle(element).cursor), 'default');

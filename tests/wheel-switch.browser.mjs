@@ -30,8 +30,8 @@ try {
   await page.keyboard.down('KeyC'); await page.evaluate(() => wheelTick()); await page.keyboard.up('KeyC');
   assert.equal(await slot(), 'melee');
   await scroll(100); assert.equal(await slot(), 'secondary', 'empty hands restore last gun');
-  await page.keyboard.down('Tab'); await scroll(100); await page.keyboard.up('Tab');
-  assert.equal(await slot(), 'primary', 'Tab and wheel combine into one switch');
+  await scroll(100);
+  assert.equal(await slot(), 'primary', 'wheel switches between firearms');
   await page.evaluate(() => { for (let i = 0; i < 5; i++) wheelGame.renderer.ctx.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, cancelable: true })); wheelTick(); });
   assert.equal(await slot(), 'secondary', 'scroll burst switches once per world frame');
   const ctrlPrevented = await page.evaluate(() => {
@@ -55,12 +55,12 @@ try {
   assert.equal(await page.evaluate(() => wheelScene.survival.inventory.getVaccines()), 1);
 
   await page.setViewportSize({ width: 640, height: 360 });
-  await page.keyboard.press('KeyB');
+  await page.keyboard.press('Tab');
   const before = await slot();
   await page.locator('.backpack-list').hover(); await page.mouse.wheel(0, 200); await page.waitForTimeout(100);
   assert.ok(await page.locator('.backpack-list').evaluate(node => node.scrollTop > 0), 'backpack still scrolls normally');
   await page.evaluate(() => wheelTick()); assert.equal(await slot(), before);
-  await page.keyboard.press('KeyB'); await page.evaluate(() => wheelTick());
+  await page.keyboard.press('Tab'); await page.evaluate(() => wheelTick());
   assert.equal(await slot(), before, 'closing backpack cannot replay scroll');
   await page.keyboard.press('F2');
   await page.evaluate(() => { wheelGame.renderer.ctx.canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, cancelable: true })); wheelTick(); });
@@ -69,5 +69,5 @@ try {
   await page.evaluate(() => { wheelScene.player.dropWeapon('secondary'); });
   await scroll(-100); assert.equal(await slot(), 'primary', 'dropped firearm is not restored');
   assert.deepEqual(errors, []);
-  console.log('Wheel switch: both directions, one-shot frame ownership, Tab combination, empty hands, dropped weapons, consumable cancellation and modal scrolling passed.');
+  console.log('Wheel switch: both directions, one-shot frame ownership, empty hands, dropped weapons, consumable cancellation and modal scrolling passed.');
 } finally { await browser.close(); }

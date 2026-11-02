@@ -84,13 +84,13 @@ export class BackpackHud {
     ctx.fillStyle = '#b6d6cf';
     ctx.fillText('背包', 194, 39);
     ctx.beginPath();
-    ctx.roundRect(236, 25, 27, 28, 8);
+    ctx.roundRect(236, 25, 42, 28, 8);
     ctx.fillStyle = 'rgba(69,137,113,.24)';
     ctx.fill();
-    ctx.font = `600 18px ${FONT}`;
+    ctx.font = `600 16px ${FONT}`;
     ctx.fillStyle = '#a0e7ca';
     ctx.textAlign = 'center';
-    ctx.fillText('B', 249.5, 39);
+    ctx.fillText('Tab', 257, 39);
 
     ctx.textAlign = 'left';
     ctx.font = `700 36px ${FONT}`;

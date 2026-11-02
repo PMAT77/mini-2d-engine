@@ -21,6 +21,8 @@ import { getRollPose, interpolateRollPose, rollEntryBlend, rollExitBlend, rollSt
 import { advancePlayerAnimation, createPlayerRenderSnapshot, getPlayerMuzzleWorld, renderPlayerSnapshot } from "./animation/PlayerVisualAdapter";
 import { drawCharacterShadow } from "../animation2d/render/CharacterCanvasRenderer";
 import type { RollPose } from "./RollPose";
+import { PlayerPunchController } from '../combat/PlayerPunchController';
+import { sampleBoxingPose } from './animation/PlayerPunchClip';
 
 interface WeaponState {
   slot: WeaponSlot;
@@ -123,6 +125,8 @@ export interface PlayerAimInput {
   fire: boolean;
   /** Active aiming; a fire request without it is ignored. */
   face: boolean;
+  /** Aimed mouse-down timestamps in milliseconds; held fire never queues punches. */
+  punchPressTimes?: readonly number[];
 }
 
 export interface PlayerDebugValues {
@@ -155,6 +159,10 @@ export interface PlayerRenderState {
  * 玩家类 - 处理玩家的移动、射击和状态管理
  */
 export class Player extends Entities {
+  private readonly punches = new PlayerPunchController();
+  getPunchSnapshot() { return this.punches.snapshot(); }
+  consumePunchImpacts() { return this.punches.consumeImpacts(); }
+  cancelPunch(): void { this.punches.cancel(); }
   protected maxSpeed = 160;
   public setCollider(shape: ColliderShape): void { super.setCollider(parsePlayerCollider(shape)); }
   protected getBodyRotation(): number { return this.currentRotation - Math.PI / 2; }
@@ -285,6 +293,7 @@ export class Player extends Entities {
     }
     const killed = this.health === 0;
     if (killed) {
+      this.cancelPunch();
       this.lifeState = 'dead';
       this.deathCause = this.deathEvent = Object.freeze({ ...event,
         ...(event.sourcePosition ? { sourcePosition: Object.freeze({ ...event.sourcePosition }) } : {}) });
@@ -301,6 +310,7 @@ export class Player extends Entities {
     return { appliedAmount, killed, blocked: false };
   }
   resetLifeState(): void {
+    this.cancelPunch();
     this.lifeResetVersion++;
     this.lifeState = 'alive'; this.health = this.maxHealth; this.meleeGrace = 0;
     this.deathCause = this.deathEvent = null;
@@ -644,6 +654,7 @@ export class Player extends Entities {
     if (!this.isAlive()) return false;
     if (this.rollTimeLeft > 0 || this.rollCooldownLeft > 1e-9) return false;
     if (this.roll.staminaCost > 0 && this.stamina < this.roll.staminaCost) return false;
+    this.cancelPunch();
     const move = this.getMoveDirection(input);
     if (move.length() > 0) {
       this.rollDirection = move.clone().normalize();
@@ -1441,7 +1452,7 @@ export class Player extends Entities {
     }
     this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y)
       ? { ...aim, fire: aim.face && aim.fire } : undefined;
-    this.isShooting = !!this.pointerAim?.fire && !this.isRolling() && !this.isReloading;
+    this.isShooting = this.isArmed() && !!this.pointerAim?.fire && !this.isRolling() && !this.isReloading;
     this.updateRecoil(delta);
     if (this.hitReactTime > 0) this.hitReactTime = Math.max(0, this.hitReactTime - delta);
     if (this.weaponSwapTime > 0) this.weaponSwapTime = Math.max(0, this.weaponSwapTime - delta);
@@ -1489,6 +1500,18 @@ export class Player extends Entities {
       this.reloadBarAlpha = Math.max(0, this.reloadBarAlpha - delta * this.fadeSpeed);
     }
 
+    // 空手只消费瞄准期间的真实按下沿；枪械继续使用原有按住连射。
+    if (this.activeSlot === 'melee' && !this.holdingThrowable && this.pointerAim?.face && !this.isRolling() && !input.isBlocked?.()) {
+      this.punches.update(delta, this.pointerAim.punchPressTimes ?? [], cost => {
+        if (this.stamina + 1e-9 < cost) return false;
+        this.stamina = Math.max(0, this.stamina - cost);
+        this.staminaRegenDelay = this.sprint.regenDelay;
+        if (this.stamina === 0) { this.exhausted = true; this.releasedAfterExhaustion = false; }
+        this.onStatsChangeCallback?.();
+        return true;
+      });
+    } else this.cancelPunch();
+
     // 处理射击逻辑
     if (this.pointerAim?.fire && !this.isRolling()) this.shootAt(this.pointerAim.target, this.damage, map);
 
@@ -1516,6 +1539,7 @@ export class Player extends Entities {
   switchWeapon(slot: WeaponSlot): void {
     if (!this.isAlive() || !this.hasWeapon(slot)) return;
     if (slot === this.activeSlot) return;
+    this.cancelPunch();
     this.cancelReload();
     this.activeSlot = slot;
     if (slot !== "melee") this.lastFirearmSlot = slot;
@@ -1523,7 +1547,7 @@ export class Player extends Entities {
     this.weaponSwapTime = WEAPON_SWAP_DURATION;
   }
 
-  /** Tab/滚轮：在持有的两把枪之间切换；空手时拔出最近用过的枪。 */
+  /** 滚轮：在持有的两把枪之间切换；空手时拔出最近用过的枪。 */
   cycleFirearm(_direction: 1 | -1): void {
     const available = (['primary', 'secondary'] as const).filter(slot => this.hasWeapon(slot));
     if (!available.length) { this.switchWeapon('melee'); return; }
@@ -1598,7 +1622,9 @@ export class Player extends Entities {
     return !this.holdingThrowable && this.weapon.kind === "firearm";
   }
   /** Separate hand mode; does not modify firearm ownership or active slot. */
-  holdingThrowable = false;
+  private throwableHeld = false;
+  get holdingThrowable(): boolean { return this.throwableHeld; }
+  set holdingThrowable(value: boolean) { if (value) this.cancelPunch(); this.throwableHeld = value; }
 
   getWeaponName(): string {
     return this.weaponName;
@@ -1694,7 +1720,10 @@ export class Player extends Entities {
     // The same local raster on land and water prevents a shading/resolution pop at the shoreline.
     // A fixed maximum extent avoids reallocating the buffer on every breathing/sway frame.
     const swayPad = this.size * this.runSwayAmplitude / 100 * RUN_SWAY_MAX_WEIGHT;
-    const extent = Math.ceil(this.size * 2 * (1 + this.breathingAmplitude / 100) + swayPad * 2) + 4;
+    // 重直拳伸至 1.3 个身位，另留拳头半径与躯干旋转余量，避免手端被裁掉。
+    const baseExtent = Math.ceil(this.size * 2 * (1 + this.breathingAmplitude / 100) + swayPad * 2) + 4;
+    // 对称增加整数像素边距，保持原有角色中心的像素对齐。
+    const extent = baseExtent + 2 * Math.ceil(this.size * .5 * (1 + this.breathingAmplitude / 100));
     const canvas = this.wadingCanvas ??= document.createElement('canvas');
     if (canvas.width !== extent || canvas.height !== extent) { canvas.width = extent; canvas.height = extent; }
     const buffer = canvas.getContext('2d')!;
@@ -1762,7 +1791,8 @@ export class Player extends Entities {
       [sx + (hx - sx) * NORMAL_ELBOW_T, sy + (hy - sy) * NORMAL_ELBOW_T];
     [pose.leftElbowX, pose.leftElbowY] = elbow(pose.leftShoulderX, pose.leftShoulderY, pose.leftHandX, pose.leftHandY);
     [pose.rightElbowX, pose.rightElbowY] = elbow(pose.rightShoulderX, pose.rightShoulderY, pose.rightHandX, pose.rightHandY);
-    return pose;
+    return this.activeSlot === 'melee' && !this.holdingThrowable
+      ? sampleBoxingPose(pose, this.getPunchSnapshot(), this.armLift) : pose;
   }
 
   /**

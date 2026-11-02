@@ -253,12 +253,11 @@ try {
     state = await page.evaluate(() => pickupTest.state());
     assert.equal(state.meatCount, 1, 'walking away from the key does not continue the pickup');
 
-    // 7) 按住时切枪（Tab）取消交互，且不会连续拾取。
+    // 7) 按住时切枪（滚轮）取消交互，且不会连续拾取。
     await page.keyboard.down('e');
     await step(12);
-    await page.keyboard.down('Tab');
+    await page.evaluate(() => document.querySelector('body > canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: 100, cancelable: true })));
     await step(1);
-    await page.keyboard.up('Tab');
     await step(10);
     state = await page.evaluate(() => pickupTest.state());
     assert.equal(state.meatCount, 1, 'switching weapons cancels the hold');

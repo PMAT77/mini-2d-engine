@@ -31,6 +31,7 @@ try {
         const stable = snapshot.every((value, i) => value === repeated[i]);
         const getEdges = f.map.getShadowEdges.bind(f.map); let query;
         f.map.getShadowEdges = (...args) => { query = args; const edges = getEdges(...args); return [...edges, ...edges]; };
+        f.lighting.clearEnvironmentCache();
         f.render(); const duplicate = pixel(505, 280); f.map.getShadowEdges = getEdges;
         f.move(650, 350); f.light.setIntensity(.35); f.light.setActive(true); f.terrainLight(false);
         const playerOnly = pixel(505, 280); f.terrainLight(true); const playerCombined = pixel(505, 280);

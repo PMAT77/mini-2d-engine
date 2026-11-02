@@ -77,6 +77,8 @@ export interface PerceptionView {
 
 /** TileMap 提供给纯逻辑 LOS 的最小只读接口，避免逻辑层 import 整个地图/DOM。 */
 export interface SightMap {
+  /** Optional exact grid traversal; simple map/test implementations retain the polygon fallback. */
+  blocksSightBetween?(ax: number, ay: number, bx: number, by: number): boolean;
   /** Dynamic smoke, separate from solid LOS and physical collision. */
   sightOpacity?: (x0: number, y0: number, x1: number, y1: number) => number;
   getBlockingPolygons(x: number, y: number, width: number, height: number): Polygon[];

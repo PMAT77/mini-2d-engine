@@ -5,7 +5,8 @@ import { Camera } from "../core/Camera";
 import { Input } from "../core/Input";
 import { Scene } from "../core/Scene";
 import { MenuScene } from "./MenuScene";
-import { resolveFirstDamageableHit } from "../combat/HitTargetResolver";
+import { resolveFirstDamageableHit, resolveFirstMeleeHit } from "../combat/HitTargetResolver";
+import { PUNCH_MOVES, PUNCH_RANGE } from '../combat/PlayerPunchController';
 import { CombatScoreSystem } from "../combat/CombatScoreSystem";
 import { ActorCollisionWorld } from "../physics/ActorCollisionWorld";
 import { EnemySystem, selectPlayerNoises } from "../enemies/EnemySystem";
@@ -121,7 +122,7 @@ const CHICKEN_CLUCK_SOUNDS = [
 /** 拾取：肉块只留入口的第一口撕咬（采样已裁到 0.75 秒），金块是一声硬币落袋的清脆响。 */
 const MEAT_PICKUP_SOUND = "/audio/pickups/meat.wav";
 const GOLD_PICKUP_SOUND = "/audio/pickups/gold.wav";
-/** 机械咔嗒声：手电开关（开灯、关灯都播）与 Tab 切枪共用同一段采样。 */
+/** 机械咔嗒声：手电开关（开灯、关灯都播）与滚轮切枪共用同一段采样。 */
 const SWITCH_CLICK_SOUND = "/audio/flashlight/switch.mp3";
 
 
@@ -320,8 +321,6 @@ export class GameScene extends Scene {  private player!: Player;
   private flashlightOn = true;
   private flashlightHeld = false;
   private reloadHeld = false;
-  /** Tab 只在按下沿切枪；Q 不再绑定额外功能。 */
-  private tabHeld = false;
   private cHeld = false;
   private spaceHeld = false;
   /** 按键拾取控制器：只接管 INTERACT 物品，AUTO 仍走各自碰撞流程。 */
@@ -331,6 +330,9 @@ export class GameScene extends Scene {  private player!: Player;
   private pickupMarkers: { marker: PickupMarker; target: InteractablePickup | GoldPickup }[] = [];
   /** 拾取提示纯视觉层；不参与按键判断与结算。 */
   private readonly pickupPrompt = new PickupPromptRenderer();
+  private readonly tradingPrompt = new PickupPromptRenderer(
+    "/assets/images/ui/keyboard-mouse/64/Keyboard_T.png", "T",
+  );
   private promptTime = 0;
   /** 本帧完成拾取的屏幕反馈锚点（世界坐标），只用于很短的完成动画。 */
   private completedPickupFeedback: { x: number; y: number } | null = null;
@@ -408,6 +410,7 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly minimap = new CircularMinimapHud();
   /** 矿石标记来自记忆快照，按记忆 revision 重建，避免每帧扫描全部瓦片。 */
   private minimapMineralRevision = -1;
+  private minimapMineralWindow = "";
   private readonly minimapMarkerSpecs: MinimapMarkerSpec[] = [];
   private minimapMineralMarkers: MinimapMarkerSpec[] = [];
   // 光照系统
@@ -984,15 +987,34 @@ export class GameScene extends Scene {  private player!: Player;
       y: target.y,
       // 伤害与命中点都取真实命中快照；准星在鸡身后不会改变任何一项。
       apply: (impact: BulletImpact) => {
-        const entity = target.entry.target;
-        if (entity instanceof Chicken) this.damageChicken(entity, impact);
-        else {
-          const zombie = entity as Zombie;
-          if (this.enemies.receiveHit(zombie, impact) === 'killed' && impact.source === 'bullet' && this.player.isAlive())
-            this.killIndicator.show(this.combatScore.recordKill(zombie.config.kind, impact.hitRegion));
-        }
+        this.damageCombatTarget(target.entry.target as Chicken | Zombie, impact);
       },
     };
+  }
+
+  private damageCombatTarget(entity: Chicken | Zombie, impact: BulletImpact): void {
+    if (entity instanceof Chicken) this.damageChicken(entity, impact);
+    else if (this.enemies.receiveHit(entity, impact) === 'killed' && this.player.isAlive()
+      && (impact.source === 'bullet' || impact.source === 'melee'))
+      this.killIndicator.show(this.combatScore.recordKill(entity.config.kind, impact.hitRegion));
+  }
+
+  private settlePlayerPunches(): void {
+    for (const event of this.player.consumePunchImpacts()) {
+      const move = PUNCH_MOVES[event.moveId], origin = { x: this.player.x + this.player.getSize() / 2, y: this.player.y + this.player.getSize() / 2 };
+      const entries: DamageableEntry<Chicken | Zombie>[] = this.chickens.map((target, index) => ({ id: `chicken-${index}`, target }));
+      for (const target of this.enemies.zombies) entries.push({ id: target.id, target });
+      const hit = resolveFirstMeleeHit(origin, this.player.getVisualFacing(), PUNCH_RANGE, move.halfAngle, entries,
+        point => !!this.map.castShape(circleCollider(origin.x, origin.y, 1), { x: point.x - origin.x, y: point.y - origin.y }, 'projectile'));
+      if (!hit) continue;
+      const dx = hit.point.x - origin.x, dy = hit.point.y - origin.y, length = Math.hypot(dx, dy);
+      const facing = this.player.getVisualFacing();
+      this.damageCombatTarget(hit.entry.target, {
+        damage: this.player.getModifiedValue(move.damage, 'damage'), point: hit.point,
+        direction: length > 1e-9 ? { x: dx / length, y: dy / length } : { x: Math.cos(facing), y: Math.sin(facing) },
+        impulse: move.impulse, impactSpeed: 0, initialSpeed: 0, traveledDistance: length, source: 'melee', hitRegion: 'body',
+      });
+    }
   }
 
   /**
@@ -1174,7 +1196,7 @@ export class GameScene extends Scene {  private player!: Player;
       delta,
       pressed: input.isKeyDown("e"),
       blocked: input.isBlocked?.() === true,
-      interrupted: this.shotThisFrame || this.player.isRolling() || this.weaponSwitchedThisFrame,
+      interrupted: this.shotThisFrame || !!this.player.getPunchSnapshot() || this.player.isRolling() || this.weaponSwitchedThisFrame,
       candidates: this.pickupCandidates,
     });
     if (result.completed) {
@@ -1523,15 +1545,15 @@ export class GameScene extends Scene {  private player!: Player;
       this.resizeMinimap();
       this.initLightingSystem();
       this.game.input.setPointerEnabled(true);
-      // Tab 交给游戏切枪；只在场景有效时拦截浏览器默认的焦点导航。
+      // Tab 交给背包；只在场景有效时拦截浏览器默认的焦点导航。
       this.game.input.setCapturedKeys?.(["Tab"]);
       this.interactionEnabled = true;
       this.interaction.reset();
       this.pickupPrompt.preload();
+      this.tradingPrompt.preload();
       // 武器 HUD 的装饰素材只触发加载，不参与启动成败判定；失败时 HUD 自己回退矢量图。
       preloadWeaponHudAssets();
       this.killIndicator.preload();
-      this.tabHeld = false;
       // 准星改成独立图层：鼠标一动就更新，不必等这一帧的世界渲染。
       if (typeof document !== 'undefined') {
         window.addEventListener('blur', this.onFocusLost); window.addEventListener('focus', this.onFocusGained);
@@ -1573,7 +1595,7 @@ export class GameScene extends Scene {  private player!: Player;
         },
       });
       this.backpackPanel ??= new BackpackPanel({
-        canOpen: () => this.active && this.loaded && this.player.isAlive() && !this.explicitPaused,
+        canOpen: () => this.active && this.loaded && this.player.isAlive() && !this.explicitPaused && !this.debugPanel?.isOpen(),
         onPause: () => this.setExplicitPaused(true),
         getView: () => this.getBackpackView(),
         onAction: id => this.performBackpackAction(id),
@@ -1592,6 +1614,7 @@ export class GameScene extends Scene {  private player!: Player;
   }
 
   onExit(): void {
+    this.player.cancelPunch();
     window.removeEventListener('blur', this.onFocusLost); window.removeEventListener('focus', this.onFocusGained);
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.throwable.dispose(); this.player.holdingThrowable = false;
@@ -1631,7 +1654,6 @@ export class GameScene extends Scene {  private player!: Player;
     this.interaction.reset();
     this.pickupCandidates = [];
     this.pickupMarkers = [];
-    this.tabHeld = false;
     this.spaceHeld = false;
     if (this.game?.input) this.game.input.onPointerMove = undefined;
     this.crosshairOverlay?.dispose();
@@ -1680,7 +1702,9 @@ export class GameScene extends Scene {  private player!: Player;
     input = input.captureFrame?.() ?? input;
     const wheelDirection = input.consumeWheelDirection?.() ?? 0;
     const reset = input.getResetVersion?.();
-    if (reset !== undefined && reset !== this.inputResetVersion) { this.inputResetVersion = reset; this.interaction.reset(); this.throwable.suspend(); }
+    if (reset !== undefined && reset !== this.inputResetVersion) {
+      this.inputResetVersion = reset; this.interaction.reset(); this.throwable.suspend(); this.player.cancelPunch();
+    }
     this.noiseSystem.update(delta);
     this.player.advanceDamageTimers(delta);
     if (!this.player.isAlive()) {
@@ -1728,7 +1752,7 @@ export class GameScene extends Scene {  private player!: Player;
     const aim = this.getPointerAim(input);
     const vaccineDown = input.isKeyDown("v");
     const actionInput = this.weaponSwitchedThisFrame || wheelDirection !== 0 || aim?.fire === true || (input.isKeyDown(" ") && !this.spaceHeld) ||
-      (input.isKeyDown("r") && !this.reloadHeld) || (input.isKeyDown("Tab") && !this.tabHeld) || (input.isKeyDown("c") && !this.cHeld);
+      (input.isKeyDown("r") && !this.reloadHeld) || (input.isKeyDown("c") && !this.cHeld);
     if (!this.throwable.locked && vaccineDown && !this.vaccineHeld && this.survival.tryUseVaccine({ paused: false, rolling: this.player.isRolling(),
       reloading: this.player.getWeaponView().isReloading, interacting: input.isKeyDown("e"), actionInput })) this.showPickupText("感染已治愈");
     this.vaccineHeld = vaccineDown;
@@ -1744,9 +1768,8 @@ export class GameScene extends Scene {  private player!: Player;
     if (!this.throwable.held && reloadDown && !this.reloadHeld) this.player.requestReload();
     this.reloadHeld = reloadDown;
 
-    // Tab 或滚轮在主副枪械之间切换，同一帧最多切换一次；C 收枪/空手。
-    const tabDown = input.isKeyDown("Tab");
-    if (!this.throwable.locked && this.player.isAlive() && !input.isBlocked?.() && ((tabDown && !this.tabHeld) || wheelDirection !== 0)) {
+    // 滚轮在主副枪械之间切换，同一帧最多切换一次；C 收枪/空手。
+    if (!this.throwable.locked && this.player.isAlive() && !input.isBlocked?.() && wheelDirection !== 0) {
       this.cancelThrowable();
       const previousSlot = this.player.getActiveWeaponSlot();
       this.player.cycleFirearm(wheelDirection || 1);
@@ -1756,7 +1779,6 @@ export class GameScene extends Scene {  private player!: Player;
         this.sfx.play(SWITCH_CLICK_SOUND, this.volume(this.audio.weapon.switchVolume), 1, { count: 1 });
       }
     }
-    this.tabHeld = tabDown;
     const cDown = input.isKeyDown("c");
     if (!this.throwable.locked && this.player.isAlive() && cDown && !this.cHeld) {
       this.cancelThrowable();
@@ -1774,13 +1796,14 @@ export class GameScene extends Scene {  private player!: Player;
     }
     this.spaceHeld = spaceDown;
     this.updateThrowables(delta, throwRelease);
+    this.settlePlayerPunches();
 
     // 换弹完成、被翻滚打断或切走时收掉没放完的换弹声，别压到下面那声枪响。
     if (this.reloadVoice && !this.player.getWeaponView().isReloading) {
       this.reloadVoice.stop(0.12);
       this.reloadVoice = null;
     }
-    // 右侧武器列表的更新放在本帧 Tab/C 处理之后，保证动画起点与最终武器顺序同帧一致。
+    // 右侧武器列表在本帧滚轮/C 处理之后更新，保持最终武器顺序一致。
     // 用实际位移判断“在走”，顶墙原地推和被墙卡住时不会继续播放涉水声。
     const movedSpeed = delta > 0 ? Math.hypot(this.player.x - prevX, this.player.y - prevY) / delta : 0;
     this.updateWadingSound(movedSpeed);
@@ -1997,7 +2020,9 @@ export class GameScene extends Scene {  private player!: Player;
       ...this.enemies.zombies.map(z => ({ center: z.getCenter(), radius: z.getCollider().radius })),
       ...this.getGroundInventoryPickups().map(p => ({ center: p.getPickupAnchor(), radius: 10 }))];
     for (let i = 0; i < count; i++) {
-      const p = spawner.find(this.player.getCollider().radius, 150, Math.min(2200, Math.hypot(this.map.width, this.map.height) * this.map.tileSize), occupied, 200, true, 55);
+      // 第一个交易站放在出生点附近，其余交易站继续分布在地图中。
+      const maxDistance = i === 0 ? 300 : Math.min(2200, Math.hypot(this.map.width, this.map.height) * this.map.tileSize);
+      const p = spawner.find(this.player.getCollider().radius, 150, maxDistance, occupied, 200, true, 55);
       if (!p) break;
       this.tradingStations.push(new TradingStation(`station-${i + 1}`, p.x, p.y)); occupied.push({ center: p, radius: 130 });
     }
@@ -2129,7 +2154,7 @@ export class GameScene extends Scene {  private player!: Player;
     const pointer = input?.getPointerState?.();
     return { ...this.backpackVaccineContext(), source, interacting: input?.isKeyDown('e') === true,
       actionInput: this.throwable.locked || !!pointer?.leftDown || !!pointer?.leftPressed
-        || ['r', 'Tab', 'c', ' ', 'v'].some(key => input?.isKeyDown(key) === true) };
+        || ['r', 'c', ' ', 'v'].some(key => input?.isKeyDown(key) === true) };
   }
   private advanceQuickItemUse(delta: number, input: Input): void {
     const use = this.quickItemUse; if (!use) return;
@@ -2192,6 +2217,7 @@ export class GameScene extends Scene {  private player!: Player;
     event.preventDefault(); event.stopImmediatePropagation(); this.minimap.zoomBy(Math.sign(event.deltaY)); this.updateMinimap(0);
   };
   private syncModalState(): void {
+    this.player.cancelPunch();
     const open = this.backpackPanel?.isOpen() === true || this.debugPanel?.isOpen() === true;
     this.modalActive = open;
     this.quickItemUse = undefined;
@@ -2205,9 +2231,9 @@ export class GameScene extends Scene {  private player!: Player;
   private setWorldPaused(paused: boolean): void {
     if (this.paused === paused) return;
     this.paused = paused; this.deltaSinceLastFrame = 0;
-    if (paused) this.quickSlotHud.cancelDrag();
+    if (paused) { this.quickSlotHud.cancelDrag(); this.player.cancelPunch(); }
     this.interaction.reset(); this.pickupCandidates = []; this.pickupMarkers = []; this.completedPickupFeedback = null;
-    this.tabHeld = this.cHeld = this.spaceHeld = this.reloadHeld = this.vaccineHeld = this.flashlightHeld = false;
+    this.cHeld = this.spaceHeld = this.reloadHeld = this.vaccineHeld = this.flashlightHeld = false;
     this.game?.input.clear();
     if (paused) this.sfx.pauseAll(); else this.sfx.resumeAll();
   }
@@ -2345,14 +2371,20 @@ export class GameScene extends Scene {  private player!: Player;
     const grid = perception.getExplorationGrid("player");
     if (!memory || !grid) return;
 
-    // 矿石标记只来自记忆快照，按记忆 revision 重建，避免每帧全量扫描瓦片。
-    if (memory.revision !== this.minimapMineralRevision) {
+    const vision = this.player.getVisionState();
+    const radius = this.minimap.getLayout().worldRadius + 120;
+    const size = memory.tileSize;
+    const x = Math.floor((vision.x - radius) / size) * size, y = Math.floor((vision.y - radius) / size) * size;
+    const width = Math.ceil((vision.x + radius - x) / size) * size, height = Math.ceil((vision.y + radius - y) / size) * size;
+    const window = `${x},${y},${width},${height}`;
+    // 收集范围始终局限于小地图，探索全图后也不累积远处矿石的逐帧开销。
+    if (memory.revision !== this.minimapMineralRevision || window !== this.minimapMineralWindow) {
       this.minimapMineralRevision = memory.revision;
-      this.minimapMineralMarkers = collectMineralMarkers(memory, this.minimapMineralMarkers);
+      this.minimapMineralWindow = window;
+      this.minimapMineralMarkers = collectMineralMarkers(memory, this.minimapMineralMarkers, { x, y, width, height });
     }
     this.minimap.setMarkers(this.buildMinimapMarkers());
 
-    const vision = this.player.getVisionState();
     this.minimap.update({
       dt: delta,
       memory,
@@ -3027,15 +3059,8 @@ export class GameScene extends Scene {  private player!: Player;
       );
       ctx.restore();
     }
-    // 拾取标记与 E 提示放在 HUD 之后：交互提示优先于静态信息，且布局已避让 HUD 区域。
+    // 拾取标记与交互键帽放在 HUD 之后，统一使用屏幕空间布局。
     this.drawPickupPrompts(screenContext, cameraOffset);
-    if (this.focusedStation && !this.paused && !this.modalActive) {
-      screenContext.save(); const dpr = window.devicePixelRatio || 1; screenContext.scale(dpr, dpr);
-      screenContext.font = '16px "Microsoft YaHei", sans-serif'; screenContext.textAlign = 'center';
-      const x = screenContext.canvas.width / dpr / 2, y = screenContext.canvas.height / dpr * .62;
-      screenContext.fillStyle = 'rgba(5,10,12,.85)'; screenContext.fillRect(x - 76, y - 24, 152, 36);
-      screenContext.fillStyle = '#d3d6c0'; screenContext.fillText('T 交易站', x, y); screenContext.restore();
-    }
     if (this.zombieDebugPaths) {
       const scale = screenContext.canvas.width / this.camera.width;
       ctx.save(); ctx.scale(scale, scale); ctx.translate(-cameraOffset.x, -cameraOffset.y);
@@ -3126,6 +3151,22 @@ export class GameScene extends Scene {  private player!: Player;
       },
       this.promptTime,
     );
+    const station = !this.paused && !this.modalActive ? this.focusedStation : undefined;
+    this.tradingPrompt.draw(ctx, {
+      markers: [],
+      prompt: station ? {
+        x: (station.x - cameraOffset.x) * scale,
+        // 交易站画面为 76×84，底部比世界锚点低 8 像素。
+        y: (station.y - 34 - cameraOffset.y) * scale,
+        halfWidth: 38 * scale,
+        halfHeight: 42 * scale,
+        progress: 0,
+        holding: false,
+        preferAbove: playerView.x > station.x + 4 / scale,
+        key: station.id,
+      } : null,
+      viewport,
+    }, this.promptTime);
     ctx.restore();
   }
 
@@ -3175,10 +3216,12 @@ export class GameScene extends Scene {  private player!: Player;
 
   getPointerAim(input: Input): PlayerAimInput | undefined {
     const pointer = input.consumePointerState?.();
+    if (pointer?.aimInterrupted) this.player.cancelPunch();
     if (!pointer?.active || !pointer.rightDown || this.cursorVisible || this.quickSlotHud?.isInteracting() || this.paused
       || input.isBlocked?.() || !this.player.isAlive()) return undefined;
     const target = this.screenToWorld(pointer.clientX, pointer.clientY);
-    return target ? { target, fire: !this.throwable.held && (pointer.aimFireDown || pointer.aimFirePressed), face: true } : undefined;
+    return target ? { target, fire: !this.throwable.held && (pointer.aimFireDown || pointer.aimFirePressed), face: true,
+      punchPressTimes: !this.throwable.held ? pointer.aimFirePressTimes : undefined } : undefined;
   }
 
   private updateAimCamera(delta: number, input: Input): void {

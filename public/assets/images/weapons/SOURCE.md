@@ -1,5 +1,7 @@
 # 武器贴图库
 
+新增的空手拳头 `fist-left-v1.png` 为独立 AI 生成素材；生成提示与来源见 [fist-left-v1.source.md](fist-left-v1.source.md)。下述原有画集的来源说明不适用于这张新素材。
+
 `public/assets/images/weapons/` 收录 9 张武器与弹药 PNG：7 把枪的侧视图、2 枚弹药剪影。文件不是原始素材的逐字节副本——原始图是 1254×1254 的方形画布，四周留着大片透明边距，这里统一裁掉了边距并等比缩放，处理过程见下文「处理流程」。
 
 设计参考图在 [`docs/images/weapon-select-reference.png`](../../../../docs/images/weapon-select-reference.png)，只描述武器选择界面的目标视觉，不是运行期素材。

@@ -321,7 +321,11 @@ export abstract class Entities extends GameObject {
       this.updateVelocityNonlinear(moveDir.clone().scale(speed), moveDir, step);
       if (this.velocity.length() > speed) this.velocity.scale(speed / this.velocity.length());
       this.moveAndRotate({ x: this.velocity.x * step, y: this.velocity.y * step }, this.getRotationDelta(step, lookDir), map);
-      terrainFactor = map?.getShapeSpeedFactor(this.getCollider(), this.terrainWaterCoverage) ?? 1;
+      const movedBody = this.getCollider();
+      if (movedBody.pose.x !== body.pose.x || movedBody.pose.y !== body.pose.y ||
+        (!invariant && movedBody.pose.rotation !== body.pose.rotation)) {
+        terrainFactor = map?.getShapeSpeedFactor(movedBody, this.terrainWaterCoverage) ?? 1;
+      }
       this.terrainSpeedFactor = terrainFactor;
       const finalSpeed = maxSpeed * terrainFactor;
       if (this.velocity.length() > finalSpeed) this.velocity.scale(finalSpeed / this.velocity.length());

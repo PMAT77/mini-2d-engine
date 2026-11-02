@@ -20,7 +20,7 @@ try {
       tScene.survival.inventory.add('grenade',3);tScene.survival.inventory.add('smokeGrenade',3);
       window.dispatchEvent(new Event('focus'));advance(.5);
     });
-    await page.keyboard.press('KeyB');
+    await page.keyboard.press('Tab');
     const tabs=page.locator('.backpack-tab'); assert.equal(await tabs.count(),4);
     const assets = await page.evaluate(async () => {
       const paths = ['ui/inventory/grenade', 'ui/inventory/smoke-grenade', 'ui/inventory/category-throwables', 'throwables/grenade-world', 'throwables/smoke-grenade-world'];
@@ -45,7 +45,7 @@ try {
     }
     await page.evaluate(()=>tick());await page.screenshot({path:`.review/throwables-backpack-dpr${dpr}.png`});
     const keyTap = async key => { await page.keyboard.down(key); await page.evaluate(()=>tick()); await page.keyboard.up(key); await page.evaluate(()=>tick()); };
-    await page.keyboard.press('KeyB'); await keyTap('Digit1');
+    await page.keyboard.press('Tab'); await keyTap('Digit1');
     assert.equal(await page.evaluate(()=>tScene.throwable.held),'grenade');
     const point=await page.evaluate(()=>{
       const p=tScene.player.getVisionState(),c=tScene.camera.getOffset(),v=tScene.getCanvasViewport();
@@ -56,10 +56,10 @@ try {
     const armed=await page.evaluate(()=>({fuse:tScene.throwable.fuse,count:tScene.survival.inventory.getCount('grenade'),locked:tScene.throwable.locked}));
     assert.ok(armed.locked && Math.abs(armed.fuse-3)<.01);assert.equal(armed.count,3);
     await page.screenshot({path:`.review/throwables-aim-dpr${dpr}.png`});
-    for(const key of ['Tab','Digit2','KeyC','Space','KeyV','KeyR']) await keyTap(key);
+    for(const key of ['Digit2','KeyC','Space','KeyV','KeyR']) await keyTap(key);
     await page.mouse.wheel(0,120);await page.waitForTimeout(30);await page.evaluate(()=>tick());
     assert.equal(await page.evaluate(()=>tScene.throwable.held),'grenade');assert.equal(await page.evaluate(()=>tScene.player.isRolling()),false);
-    await page.keyboard.press('KeyB');await page.evaluate(()=>advance(.5));
+    await page.keyboard.press('Tab');await page.evaluate(()=>advance(.5));
     assert.ok(Math.abs(await page.evaluate(()=>tScene.throwable.fuse)-2.5)<.01,'bag does not freeze fuse');
     await tabs.filter({hasText:'投掷物'}).click();await row('grenade').click({button:'right'});
     assert.equal(await page.locator('[data-action="drop"]').isDisabled(),true);
@@ -104,19 +104,19 @@ try {
     await page.keyboard.press('F2');
     // Stop enemies for visual and expiry checks; gameplay sensing was checked above and by unit tests.
     await page.evaluate(()=>{tScene.enemies.dispose();advance(14);});assert.equal(await page.evaluate(()=>tScene.throwableBodies.length),0);
-    await page.keyboard.press('KeyB');await tabs.filter({hasText:'投掷物'}).click();
+    await page.keyboard.press('Tab');await tabs.filter({hasText:'投掷物'}).click();
     const beforeDrop=await page.evaluate(()=>tScene.survival.inventory.getCount('grenade'));
     await row('grenade').click({button:'right'});await page.locator('[data-action="drop"]').click();
     assert.equal(await page.evaluate(()=>tScene.survival.inventory.getCount('grenade')),beforeDrop-1);
     assert.equal(await page.evaluate(()=>tScene.throwableBodies.length),0,'ordinary discard never arms');
-    await page.keyboard.press('KeyB');await page.evaluate(()=>advance(.3));
+    await page.keyboard.press('Tab');await page.evaluate(()=>advance(.3));
     await page.keyboard.down('KeyE');await page.evaluate(()=>advance(.6));await page.keyboard.up('KeyE');
     assert.equal(await page.evaluate(()=>tScene.survival.inventory.getCount('grenade')),beforeDrop,'E recovers discarded item');
-    await page.setViewportSize({width:390,height:844});await page.keyboard.press('KeyB');await page.evaluate(()=>tick());
+    await page.setViewportSize({width:390,height:844});await page.keyboard.press('Tab');await page.evaluate(()=>tick());
     await tabs.filter({hasText:'投掷物'}).click();
     const overflow=await page.evaluate(()=>document.querySelector('.backpack-panel').getBoundingClientRect().right>innerWidth || document.querySelector('.backpack-tabs').scrollWidth>document.querySelector('.backpack-tabs').clientWidth);
     assert.equal(overflow,false);await page.screenshot({path:`.review/throwables-mobile-dpr${dpr}.png`});
-    await page.keyboard.press('KeyB');await page.evaluate(()=>{tScene.onExit();});
+    await page.keyboard.press('Tab');await page.evaluate(()=>{tScene.onExit();});
     assert.deepEqual(errors,[]);await context.close();
   }
   console.log('Throwable browser: mouse chords, locks, pause, smoke, UI and DPR 1/2 passed');

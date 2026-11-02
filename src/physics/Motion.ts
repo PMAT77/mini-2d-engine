@@ -115,6 +115,27 @@ export function castCollider(world: CollisionWorld, body: Collider, move: Point,
       continue;
     }
     const polygon = obstacle.collider.parts[0];
+    if (body.parts.length === 1 && body.parts[0].type === 'circle' && rotation === 0 &&
+      obstacle.collider.parts.length === 1 && polygon?.type === 'circle') {
+      // Exact circle sweep avoids iterative SAT advancement for every crowded actor pair.
+      const circle = body.parts[0], dx = circle.center.x - polygon.center.x, dy = circle.center.y - polygon.center.y;
+      const radius = circle.radius + polygon.radius, distance = Math.hypot(dx, dy);
+      const projection = dx * move.x + dy * move.y, speed2 = move.x * move.x + move.y * move.y;
+      if (distance >= radius - CONTACT_TOLERANCE && projection >= -TINY) continue;
+      let fraction = 0;
+      if (distance > radius) {
+        const c = dx * dx + dy * dy - radius * radius;
+        const discriminant = projection * projection - speed2 * c;
+        if (speed2 <= TINY || discriminant <= 0 || projection >= 0) continue;
+        fraction = c / (-projection + Math.sqrt(discriminant));
+        if (fraction > 1) continue;
+      }
+      if (!first || fraction < first.fraction) {
+        const x = dx + move.x * fraction, y = dy + move.y * fraction, length = Math.hypot(x, y);
+        first = { fraction, obstacle, normal: length > TINY ? { x: x / length, y: y / length } : { x: 1, y: 0 } };
+      }
+      continue;
+    }
     if (body.parts.length === 1 && body.parts[0].type === 'circle' && rotation === 0 && polygon?.type === 'polygon' && polygon.terrain) {
       const hit = castTerrainCircle(body, move, obstacle.collider, polygon);
       if (hit && (!first || hit.fraction < first.fraction - 1e-9)) first = { ...hit, obstacle };
@@ -189,6 +210,18 @@ function attempt(start: Collider, move: Point, angle: number, world: CollisionWo
 }
 
 export function resolveMotion(world: CollisionWorld, initial: Collider, move: Point, rotation = 0): MotionResult {
+  // A solve is synchronous: reuse its broad phase for nearby correction/sweep queries.
+  // Any correction leaving the cached bounds immediately queries the authoritative world again.
+  const source = world;
+  let cachedBounds: Bounds | undefined, cachedObstacles: CollisionObstacle[] = [];
+  world = { getCollisionObstacles(bounds) {
+    if (!cachedBounds || bounds.x < cachedBounds.x || bounds.y < cachedBounds.y ||
+      bounds.x + bounds.width > cachedBounds.x + cachedBounds.width || bounds.y + bounds.height > cachedBounds.y + cachedBounds.height) {
+      cachedBounds = { x: bounds.x - 2, y: bounds.y - 2, width: bounds.width + 4, height: bounds.height + 4 };
+      cachedObstacles = source.getCollisionObstacles(cachedBounds);
+    }
+    return cachedObstacles;
+  } };
   const invariant = isRotationInvariant(initial);
   const steps = Math.max(1, Math.ceil(Math.hypot(move.x, move.y) + (invariant ? 0 : initial.radius * Math.abs(rotation))), invariant ? 1 : Math.ceil(Math.abs(rotation) / 0.025));
   let body = initial, rotationBlocked = false;

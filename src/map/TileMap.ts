@@ -183,6 +183,11 @@ export class TileMap {
     return this.solids.contains(x, y, this.tileSize);
   }
 
+  blocksSightBetween(ax: number, ay: number, bx: number, by: number): boolean {
+    if (![ax, ay, bx, by].every(Number.isFinite) || this.blocksLightAt(ax, ay) || this.blocksLightAt(bx, by)) return true;
+    return (ax !== bx || ay !== by) && this.solids.intersectsSegment({ x: ax, y: ay }, { x: bx, y: by }, this.tileSize, this.width, this.height);
+  }
+
   /** Clockwise exposed edges in world coordinates; internal edges do not cast shadows. */
   getShadowEdges(lightX: number, lightY: number, radius: number): ShadowEdge[] {
     if (!Number.isFinite(radius) || radius <= 0) return [];
@@ -213,7 +218,7 @@ export class TileMap {
     return !this.terrainMap.get(type)?.walkable;
   }
 
-  private groundContour: { x: number; y: number; width: number; height: number; hash: number; path: Path2D } | null = null;
+  private groundContour: { x: number; y: number; width: number; height: number; hash: number; path: Path2D; tops: Path2D } | null = null;
 
   /**
    * 世界坐标系里的实心地形轮廓。查询范围向四周扩两格瓦片并对齐到瓦片网格，因此相机移动后
@@ -237,9 +242,16 @@ export class TileMap {
       && cached.hash === hash) return cached.path;
     const path = new Path2D();
     path.rect(x, y, right - x, bottom - y);
-    solidPath(path, this.getBlockingPolygons(x, y, right - x, bottom - y), 0, 0);
-    this.groundContour = { x, y, width: right - x, height: bottom - y, hash, path };
+    const tops = new Path2D();
+    solidPath(tops, this.getBlockingPolygons(x, y, right - x, bottom - y), 0, 0);
+    path.addPath(tops);
+    this.groundContour = { x, y, width: right - x, height: bottom - y, hash, path, tops };
     return path;
+  }
+
+  getTerrainTopContour(cameraX: number, cameraY: number, width: number, height: number): Path2D {
+    this.getGroundContour(cameraX, cameraY, width, height);
+    return this.groundContour!.tops;
   }
 
   /** Coarse grid rectangles for compatibility; use getBlockingPolygons for exact tops. */

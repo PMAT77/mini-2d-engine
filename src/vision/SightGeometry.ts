@@ -30,6 +30,7 @@ export function targetSamplePoints(target: PerceptionTarget): Point[] {
  */
 export function hasLineOfSight(map: SightMap, ax: number, ay: number, bx: number, by: number): boolean {
   if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) return false;
+  if (map.blocksSightBetween) return !map.blocksSightBetween(ax, ay, bx, by);
   if (map.blocksLightAt(ax, ay) || map.blocksLightAt(bx, by)) return false;
   if (ax === bx && ay === by) return true;
 

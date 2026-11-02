@@ -25,7 +25,7 @@ try {
     const row = id => page.locator(`[data-item-id="${id}"]`);
     const openMenu = async id => { await row(id).click({ button: 'right' }); };
     const bind = async (id, slot) => { await openMenu(id); await page.locator(`[data-bind-slot="${slot}"]`).click(); };
-    await page.keyboard.press('KeyB');
+    await page.keyboard.press('Tab');
     const style = await page.evaluate(() => {
       const panel = getComputedStyle(document.querySelector('.backpack-panel'));
       const root = getComputedStyle(document.querySelector('[data-backpack]'));
@@ -43,13 +43,13 @@ try {
     assert.match(await page.locator('.backpack-properties').innerText(), /攻击力[\s\S]*16\.0[\s\S]*射速[\s\S]*800/);
     await bind('primary', 0);
     assert.equal(await page.evaluate(() => invScene.quickSlotBindings[0]), 'primary');
-    await page.keyboard.press('KeyB'); await page.keyboard.press('Digit1'); await page.evaluate(() => invTick());
+    await page.keyboard.press('Tab'); await page.keyboard.press('Digit1'); await page.evaluate(() => invTick());
     // A complete press/release between world ticks is not a held gameplay input: use a real down edge.
     await page.keyboard.down('Digit1'); await page.evaluate(() => invTick()); await page.keyboard.up('Digit1');
     assert.equal(await page.evaluate(() => invScene.player.getActiveWeaponSlot()), 'primary');
     await page.evaluate(() => { invScene.player.shootAt({ x: 1400, y: 600 }, 10, invScene.map); });
     const ammo = await page.evaluate(() => invScene.player.getWeaponView().magazineAmmo);
-    await page.keyboard.press('KeyB'); await openMenu('primary');
+    await page.keyboard.press('Tab'); await openMenu('primary');
     await page.evaluate(() => invTick());
     await page.screenshot({ path: `.review/inventory-context-dpr${dpr}.png` });
     await page.locator('[data-action="drop"]').click();
@@ -58,7 +58,7 @@ try {
     assert.equal(await page.evaluate(() => invScene.weaponPickups.length), 1, 'weapon exists on ground');
     assert.equal(await page.evaluate(() => invScene.player.getActiveWeaponSlot()), 'secondary');
     assert.match(await page.locator('.backpack-load').innerText(), /1\.2 \/ 30/);
-    await page.keyboard.press('KeyB');
+    await page.keyboard.press('Tab');
     await page.keyboard.down('KeyE');
     await page.evaluate(() => { for (let i = 0; i < 40; i++) invTick(1 / 60); });
     await page.keyboard.up('KeyE');
@@ -66,7 +66,7 @@ try {
     assert.equal(await page.evaluate(() => invScene.weaponPickups.length), 0);
     assert.equal(await page.evaluate(() => invScene.player.getWeaponViewForSlot('primary').magazineAmmo), ammo, 'recovery does not refill ammo');
 
-    await page.keyboard.press('KeyB');
+    await page.keyboard.press('Tab');
     const drag = async (id, dx, dy, cancel = false) => {
       const rect = await row(id).boundingBox();
       await page.mouse.move(rect.x + 60, rect.y + rect.height / 2); await page.mouse.down();
@@ -78,7 +78,7 @@ try {
     assert.equal(await row('primary').count(), 1, 'releasing inside inventory cancels drop');
     await drag('primary', 750, 35, true);
     assert.equal(await page.evaluate(() => invScene.isWorldPaused() && !invScene.backpackPanel.isOpen()), true, 'Escape cancels drag, closes backpack and pauses');
-    await page.keyboard.press('Escape'); await page.keyboard.press('KeyB');
+    await page.keyboard.press('Escape'); await page.keyboard.press('Tab');
     assert.equal(await page.locator('.backpack-drag-ghost').count(), 0);
     await drag('primary', 750, 35);
     assert.equal(await row('primary').count(), 0, 'releasing outside drops exactly once');
@@ -91,7 +91,7 @@ try {
     assert.equal(await page.evaluate(() => invScene.vaccinePickups.length), 1);
     await bind('vaccine', 1);
     assert.equal(await page.evaluate(() => invScene.quickSlotBindings[1]), 'vaccine');
-    await page.keyboard.press('KeyB');
+    await page.keyboard.press('Tab');
 
     // Consuming uses a one-second simulation action, never an immediate keydown decrement.
     await page.keyboard.down('Digit2'); await page.evaluate(() => invTick());
@@ -110,7 +110,7 @@ try {
       await page.keyboard.down('Digit2'); await page.evaluate(() => invTick());
       await page.keyboard.up('Digit2'); await page.evaluate(() => { for (let i = 0; i < 20; i++) invTick(1 / 60); });
       if (reason === 'blur') await page.evaluate(() => window.dispatchEvent(new Event('blur')));
-      if (reason === 'backpack') { await page.keyboard.press('KeyB'); await page.keyboard.press('KeyB'); }
+      if (reason === 'backpack') { await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); }
       if (reason === 'reload') await page.keyboard.down('KeyR');
       if (reason === 'roll') await page.keyboard.down('Space');
       if (reason === 'shoot') { await page.mouse.move(1200, 500); await page.mouse.down({ button: 'right' }); await page.mouse.down(); }
@@ -131,7 +131,7 @@ try {
       await page.evaluate(fps => invTick(1 / fps), fps);
       assert.equal(await page.evaluate(() => invScene.survival.inventory.getVaccines()), count - 1);
     }
-    await page.keyboard.press('KeyB');
+    await page.keyboard.press('Tab');
     const count = await page.evaluate(() => invScene.survival.inventory.getVaccines());
     for (let i = 0; i < count; i++) { await openMenu('vaccine'); await page.locator('[data-action="drop"]').click(); }
     assert.equal(await page.evaluate(() => invScene.quickSlotBindings[1]), 'vaccine', 'last consumable removal retains binding');

@@ -71,7 +71,7 @@ test('C holsters the gun; empty hands cannot shoot or reload', () => {
   assert.equal(player.getActiveWeaponSlot(), 'secondary');
   assert.equal(player.isArmed(), true);
 
-  // 空手时按 Tab 也能直接拔枪：cycleFirearm 恢复最近使用过的枪。
+  // 空手滚动可直接拔枪：cycleFirearm 恢复最近使用过的枪。
   player.toggleMelee();
   player.cycleFirearm(1);
   assert.equal(player.getActiveWeaponSlot(), 'secondary');

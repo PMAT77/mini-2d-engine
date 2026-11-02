@@ -614,23 +614,10 @@ function drawSmgIcon(ctx: CanvasRenderingContext2D): void {
 }
 
 function drawFistIcon(ctx: CanvasRenderingContext2D): void {
-  // 空手：握拳的手背与四指关节。
-  ctx.beginPath();
-  ctx.roundRect(9, 15, 17, 12, 3);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.roundRect(16, 10, 12, 7, 3);
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(14, 18); ctx.lineTo(14, 24);
-  ctx.moveTo(18, 18); ctx.lineTo(18, 24);
-  ctx.moveTo(22, 18); ctx.lineTo(22, 24);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.roundRect(6, 19, 5, 8, 2);
-  ctx.fill();
+  // 拳峰在左、手腕在右，与透明 PNG 的方向一致。
+  ctx.beginPath(); ctx.roundRect(6, 8, 17, 22, 5); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(19, 13, 13, 14, 2); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(16, 21, 9, 9, 3); ctx.fill();
 }
 
 function drawKnifeIcon(ctx: CanvasRenderingContext2D): void {

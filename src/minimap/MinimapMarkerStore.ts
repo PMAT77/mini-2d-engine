@@ -107,6 +107,7 @@ export function selectVisibleMarkers(
 
 export class MinimapMarkerStore {
   private markers = new Map<string, MinimapMarker>();
+  private nextMarkers = new Map<string, MinimapMarker>();
 
   get size(): number {
     return this.markers.size;
@@ -118,6 +119,7 @@ export class MinimapMarkerStore {
 
   clear(): void {
     this.markers.clear();
+    this.nextMarkers.clear();
   }
 
   /**
@@ -127,7 +129,8 @@ export class MinimapMarkerStore {
    * 本次没有出现的 id 视为实体已消失，立刻移除，不会留下幽灵标记。
    */
   replace(specs: Iterable<MinimapMarkerSpec>): void {
-    const next = new Map<string, MinimapMarker>();
+    const next = this.nextMarkers;
+    next.clear();
     for (const spec of specs) {
       const existing = this.markers.get(spec.id);
       if (existing) {
@@ -148,7 +151,9 @@ export class MinimapMarkerStore {
         });
       }
     }
+    this.nextMarkers = this.markers;
     this.markers = next;
+    this.nextMarkers.clear();
   }
 
   /** 显示范围内、按优先级筛选后的标记；每帧调用，不修改集合本身。 */

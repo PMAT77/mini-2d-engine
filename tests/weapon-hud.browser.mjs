@@ -284,6 +284,10 @@ try {
       await page.keyboard.up(key);
       await page.evaluate(value => hudTest.step(value), delta);
     };
+    const scroll = async (delta = 1 / 60) => page.evaluate(value => {
+      document.querySelector('body > canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: 100, cancelable: true }));
+      hudTest.step(value); hudTest.step(value);
+    }, delta);
     const status = () => page.evaluate(() => hudTest.listStatus());
     const sample = (x, y) => page.evaluate(([x, y]) => hudTest.pixel(x, y), [x, y]);
     const lampIcon = await page.evaluate(() => hudTest.lampIconRect());
@@ -469,17 +473,18 @@ try {
     await press('e');
     assert.equal(await page.evaluate(() => hudTest.activeSlot()), 'melee', 'Q/E 不得切枪');
 
-    // Tab 回到手枪，再 Tab 切到冲锋枪；切枪第一帧就要用新顺序且从对面出发。
+    // 滚轮回到手枪，再滚轮切到冲锋枪；切枪第一帧就要用新顺序且从对面出发。
     await page.evaluate(() => hudTest.clearPlays());
-    await press('Tab', 0.3);
+    await scroll(0.3);
     assert.equal((await status()).rows[0].slot, 'secondary');
     assert.ok(
       (await page.evaluate(() => hudTest.plays())).some(url => url.endsWith('/audio/flashlight/switch.mp3')),
-      'Tab 切枪应播放机械咔嗒声',
+      '滚轮切枪应播放机械咔嗒声',
     );
-    await page.keyboard.down('Tab');
-    await page.evaluate(() => hudTest.step(1 / 60));
-    await page.keyboard.up('Tab');
+    await page.evaluate(() => {
+      document.querySelector('body > canvas').dispatchEvent(new WheelEvent('wheel', { deltaY: 100, cancelable: true }));
+      hudTest.step(1 / 60);
+    });
     const firstFrame = await page.evaluate(() => hudTest.listStatus());
     assert.equal(firstFrame.rows[0].slot, 'secondary', '第一帧物理上方仍是被换下的枪');
     assert.ok(firstFrame.swapProgress > 0 && firstFrame.swapProgress < 1,
@@ -499,7 +504,7 @@ try {
 
     // 快速反向切枪：位置必须连续，不能瞬移。
     const beforeReverse = mid.rows.find(row => row.slot === 'primary').rect.y;
-    await press('Tab', 0);
+    await scroll(0);
     const reversed = await page.evaluate(() => hudTest.listStatus());
     const afterReverse = reversed.rows.find(row => row.slot === 'primary').rect.y;
     assert.ok(Math.abs(afterReverse - beforeReverse) < 1e-6,
@@ -507,7 +512,7 @@ try {
 
     // 跑完动画，回到手枪在上方的稳定态。
     await page.evaluate(() => hudTest.step(0.3));
-    await press('Tab');
+    await scroll();
     await page.evaluate(() => hudTest.step(0.3));
     let settled = await status();
     assert.equal(settled.swapProgress, 1);

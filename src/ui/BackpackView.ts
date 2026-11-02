@@ -50,7 +50,7 @@ export function createBackpackView(loadout: WeaponLoadoutView, vaccines: number,
     quantity: 1, unitWeightKg: BACKPACK_WEIGHTS[id], equipped: loadout.activeSlot === id, action: '装备',
     disabledReason: loadout.activeSlot === id ? '已装备' : null,
     canDrop: id !== 'melee',
-    description: id === 'melee' ? '收起枪械，切换为空手。' : id === 'primary' ? '适合连续射击的紧凑型冲锋枪。' : '便于携带的半自动手枪。',
+    description: id === 'melee' ? '右键抱架，点击左键出拳；按点击节奏衔接连招。' : id === 'primary' ? '适合连续射击的紧凑型冲锋枪。' : '便于携带的半自动手枪。',
     properties: id === 'melee' ? [{ label: '重量', value: '0.0 kg' }] : [
       { label: '重量', value: `${BACKPACK_WEIGHTS[id].toFixed(1)} kg` },
       { label: '攻击力', value: loadout[id].stats?.damage.toFixed(1) ?? '—' },

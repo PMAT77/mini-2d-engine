@@ -39,7 +39,7 @@ export interface BulletImpact {
   readonly initialSpeed: number;
   /** 从枪口到命中点的真实飞行距离。 */
   readonly traveledDistance: number;
-  /** 命中来源；当前只有子弹。 */
+  /** 命中来源；近战速度字段为 0，冲量独立于弹速计算。 */
   readonly source: HitSource;
   readonly hitRegion?: HitRegion;
 }

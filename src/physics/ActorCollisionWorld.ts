@@ -51,9 +51,20 @@ export class ActorCollisionWorld {
     for (const key of keys) { let bucket = this.cells.get(key); if (!bucket) this.cells.set(key, bucket = new Set()); bucket.add(e.id); }
   }
   nearby(bounds: Bounds, exclude?: string): Entry[] {
-    const ids = new Set<string>();
-    for (const key of this.keys(bounds)) for (const id of this.cells.get(key) ?? []) if (id !== exclude) ids.add(id);
-    return [...ids].sort().map(id => this.entries.get(id)!).filter(e => overlapsBounds(bounds, e.body.bounds));
+    const matches = new Set<Entry>();
+    for (let row = Math.floor(bounds.y / this.cellSize); row <= Math.floor((bounds.y + bounds.height) / this.cellSize); row++) {
+      for (let col = Math.floor(bounds.x / this.cellSize); col <= Math.floor((bounds.x + bounds.width) / this.cellSize); col++) {
+        const bucket = this.cells.get(`${col},${row}`);
+        if (!bucket) continue;
+        for (const id of bucket) {
+          if (id === exclude) continue;
+          const entry = this.entries.get(id)!;
+          if (overlapsBounds(bounds, entry.body.bounds)) matches.add(entry);
+        }
+      }
+    }
+    // Preserve collision order, but sort only actual intersections rather than the whole bucket.
+    return [...matches].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   }
   resolve(id: string, body: Collider, movement: Point, rotation = 0): MotionResult {
     const result = resolveMotion({ getCollisionObstacles: bounds => {

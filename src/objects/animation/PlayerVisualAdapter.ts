@@ -31,7 +31,7 @@ import { rollAltitudePx, rollComOffsetX, rollDepthTucked } from "./RollGrounding
 import { RollFacingTracker } from "./RollFacingTracker";
 import { poseWithOffsets } from "../../animation2d/pose/PoseLayers";
 import type { PoseOffsets } from "../../animation2d/pose/PoseLayers";
-import { buildPunchOffsets, punchAmount } from "./PlayerPunchClip";
+import { boxingTorsoOffsets, buildPunchOffsets, punchAmount } from "./PlayerPunchClip";
 import { buildReloadOffsets, reloadGestureAmount } from "./PlayerReloadGesture";
 
 /**
@@ -139,13 +139,14 @@ export function createPlayerRenderSnapshot(player: Player): CharacterRenderSnaps
   // 分层顺序：base → action（拳击，只覆盖上半身）→ additive（受击）→ constraint（接触 IK）。
   // 翻滚是全身覆盖，不再叠加这两层，避免与接触锚/伪高度互相冲突。
   const controller = getPlayerAnimationController(player);
-  const punchProgress = state.rolling ? 0 : controller.punchProgress;
+  const boxing = state.rolling ? null : player.getPunchSnapshot();
+  const punchProgress = state.rolling ? 0 : boxing?.progress ?? controller.punchProgress;
   const hitReactProgress = state.rolling ? 0 : player.getHitReactProgress();
   const reloadProgress = state.rolling ? 0 : (view.isReloading ? view.reloadProgress : 0);
   if (punchProgress > 0) {
-    const amount = punchAmount(punchProgress);
+    const amount = boxing ? 1 : punchAmount(punchProgress);
     if (amount > 0) {
-      const offsets = buildPunchOffsets(amount);
+      const offsets = boxing ? boxingTorsoOffsets(boxing) : buildPunchOffsets(amount);
       locals = poseWithOffsets(locals, offsets, 1);
       const shift = offsets.torso?.x ?? 0;
       params.backX += shift;

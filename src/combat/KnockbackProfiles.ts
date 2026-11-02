@@ -75,7 +75,7 @@ export function computeKnockbackSpeed(impact: BulletImpact, profile: KnockbackPr
   if (!finite(impact.impulse) || impact.impulse <= 0) return 0;
   const initialSpeed = finite(impact.initialSpeed) && impact.initialSpeed > 0 ? impact.initialSpeed : 0;
   const impactSpeed = finite(impact.impactSpeed) ? Math.max(0, impact.impactSpeed) : 0;
-  const speedFactor = initialSpeed > 0 ? clamp(impactSpeed / initialSpeed, 0, 1) : 0;
+  const speedFactor = impact.source === 'melee' ? 1 : initialSpeed > 0 ? clamp(impactSpeed / initialSpeed, 0, 1) : 0;
   const fatalFactor = lethal ? Math.max(0, profile.deathImpulseMultiplier) : 1;
   const speed = (impact.impulse * speedFactor * KNOCKBACK_DISTANCE_FACTOR * (1 - profile.resistance) * fatalFactor) / profile.mass;
   if (!finite(speed)) return 0;

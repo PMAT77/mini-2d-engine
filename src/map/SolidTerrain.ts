@@ -1,4 +1,4 @@
-import { Bounds, Collider, Point, Polygon, boundsOf, overlapsBounds, rectangleCollider } from '../physics/Collider';
+import { Bounds, Collider, Point, Polygon, boundsOf, overlapsBounds, rectangleCollider, segmentsIntersect } from '../physics/Collider';
 
 export interface SolidPatch { col: number; row: number; polygon: Polygon; collider: Collider; }
 interface LocalPatch { vertices: Point[]; col: number; row: number; }
@@ -57,6 +57,29 @@ export class SolidTerrain {
   contains(x: number, y: number, size: number): boolean {
     const col = Math.floor(x / size), row = Math.floor(y / size);
     return template(this.mask(col, row)).some(p => inside(p.vertices, x / size - col, y / size - row));
+  }
+  /** Strip-wise supercover: visit only cells touched by the segment, including grid edges/corners. */
+  intersectsSegment(a: Point, b: Point, size: number, width: number, height: number): boolean {
+    const dx = b.x - a.x, dy = b.y - a.y, epsilon = 1e-9;
+    const firstRow = Math.max(0, Math.floor((Math.min(a.y, b.y) - epsilon) / size));
+    const lastRow = Math.min(height - 1, Math.floor((Math.max(a.y, b.y) + epsilon) / size));
+    for (let row = firstRow; row <= lastRow; row++) {
+      const t0 = dy ? (row * size - a.y) / dy : 0;
+      const t1 = dy ? ((row + 1) * size - a.y) / dy : 1;
+      const enter = Math.max(0, Math.min(t0, t1)), exit = Math.min(1, Math.max(t0, t1));
+      const x0 = a.x + enter * dx, x1 = a.x + exit * dx;
+      const firstCol = Math.max(0, Math.floor((Math.min(x0, x1) - epsilon) / size));
+      const lastCol = Math.min(width - 1, Math.floor((Math.max(x0, x1) + epsilon) / size));
+      for (let col = firstCol; col <= lastCol; col++) {
+        for (const { polygon } of this.getCell(col, row, size)) {
+          const vertices = polygon.vertices;
+          for (let i = 0; i < vertices.length; i++) {
+            if (segmentsIntersect(a, b, vertices[i], vertices[(i + 1) % vertices.length])) return true;
+          }
+        }
+      }
+    }
+    return false;
   }
   getCell(col: number, row: number, size: number): SolidPatch[] {
     const mask = this.mask(col, row), key = col * 0x10000 + row, cached = this.cells.get(key);

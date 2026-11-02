@@ -27,6 +27,12 @@ export interface WeaponHudSprite {
 const WEAPON_DIR = "/assets/images/weapons";
 
 const SPRITE_DEFINITIONS = {
+  fistLeft: {
+    url: `${WEAPON_DIR}/fist-left-v1.png`,
+    sourceWidth: 1254,
+    sourceHeight: 1254,
+    contentBox: { x: 66, y: 243, width: 1125, height: 768 },
+  },
   smgTactical: {
     url: `${WEAPON_DIR}/smg-tactical.png`,
     sourceWidth: 512,
@@ -93,9 +99,10 @@ export function spriteContentAspect(sprite: WeaponHudSprite): number {
 
 /**
  * 现阶段 `WeaponView` 没有 weaponId，只能按槽位映射；换素材只改这张表。
- * 空手/近战没有枪械图片。
+ * 空手使用朝左的拳头，近战武器仍使用矢量轮廓。
  */
 export function getWeaponSpriteForView(view: Pick<WeaponView, "slot" | "kind">): WeaponHudSpriteId | null {
+  if (view.kind === "empty") return "fistLeft";
   if (view.kind !== "firearm") return null;
   return view.slot === "primary" ? "smgTactical" : "pistolGlock";
 }

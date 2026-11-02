@@ -12,6 +12,10 @@ export interface PointerState {
   /** A left press acquired while right was already held; raw left input remains available to UI. */
   aimFireDown: boolean;
   aimFirePressed: boolean;
+  /** Every aimed mouse down in this frame, including multiple clicks between world steps. */
+  aimFirePressTimes?: readonly number[];
+  /** Retains an aim release/ownership loss even if right is pressed again before the next frame. */
+  aimInterrupted?: boolean;
 }
 
 /** Keyboard ownership and canvas-only mouse input. World conversion belongs to the scene. */
@@ -26,7 +30,8 @@ export class Input {
   /** 需要拦截浏览器默认行为、交给游戏处理的键（例如场景里的 Tab）。 */
   private capturedKeys = new Set<string>();
   private pointer: PointerState = { clientX: 0, clientY: 0, active: false, leftDown: false, rightDown: false,
-    leftPressed: false, leftReleased: false, aimedLeftPressed: false, aimFireDown: false, aimFirePressed: false };
+    leftPressed: false, leftReleased: false, aimedLeftPressed: false, aimFireDown: false, aimFirePressed: false,
+    aimFirePressTimes: [], aimInterrupted: false };
   /** 指针位置变化时的同步回调：准星等 UI 直接跟随，不必等下一帧渲染。 */
   onPointerMove?: (clientX: number, clientY: number) => void;
 
@@ -50,6 +55,9 @@ export class Input {
       this.pointer.active = true;
       // Never acquire a held button on re-entry after leaving the canvas.
       this.pointer.leftDown &&= !!(event.buttons & 1);
+      if (this.pointer.rightDown && !(event.buttons & 2)) {
+        this.pointer.aimInterrupted = true; this.pointer.aimFirePressTimes = [];
+      }
       this.pointer.rightDown &&= !!(event.buttons & 2);
       this.pointer.aimFireDown &&= this.pointer.leftDown && this.pointer.rightDown;
       if (!this.pointer.rightDown) this.pointer.aimFirePressed = false;
@@ -75,6 +83,7 @@ export class Input {
         this.pointer.leftDown = true; this.pointer.leftPressed = true;
         this.pointer.aimFireDown = this.pointer.rightDown;
         this.pointer.aimFirePressed ||= this.pointer.rightDown;
+        if (this.pointer.rightDown) this.pointer.aimFirePressTimes = [...(this.pointer.aimFirePressTimes ?? []), event.timeStamp];
       }
       if (event.button === 2) this.pointer.rightDown = true;
       this.updateCursor();
@@ -85,6 +94,8 @@ export class Input {
       if (event.button === 2) {
         this.pointer.rightDown = false;
         this.pointer.aimFireDown = false; this.pointer.aimFirePressed = false;
+        this.pointer.aimFirePressTimes = [];
+        this.pointer.aimInterrupted = true;
       }
       this.updateCursor();
     });
@@ -141,6 +152,8 @@ export class Input {
     this.pointer.leftReleased = false;
     this.wheelDirection = 0;
     this.pointer.aimFireDown = false; this.pointer.aimFirePressed = false;
+    this.pointer.aimFirePressTimes = [];
+    this.pointer.aimInterrupted = true;
     this.updateCursor();
   }
 
@@ -148,14 +161,16 @@ export class Input {
     if (this.canvas) this.canvas.style.cursor = this.pointerEnabled && !this.blocked && this.pointer.active && this.pointer.rightDown ? 'none' : this.previousCursor;
   }
 
-  getPointerState(): Readonly<PointerState> { return { ...this.pointer }; }
+  getPointerState(): Readonly<PointerState> { return { ...this.pointer, aimFirePressTimes: [...(this.pointer.aimFirePressTimes ?? [])] }; }
 
   consumePointerState(): PointerState {
-    const sample = { ...this.pointer };
+    const sample = { ...this.pointer, aimFirePressTimes: [...(this.pointer.aimFirePressTimes ?? [])] };
     this.pointer.leftPressed = false;
     this.pointer.leftReleased = false;
     this.pointer.aimFirePressed = false;
     this.pointer.aimedLeftPressed = false;
+    this.pointer.aimFirePressTimes = [];
+    this.pointer.aimInterrupted = false;
     return sample;
   }
 

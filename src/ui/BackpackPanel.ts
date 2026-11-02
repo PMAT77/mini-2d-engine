@@ -56,7 +56,7 @@ export class BackpackPanel {
     const footer = element('footer', 'backpack-footer');
     this.message.setAttribute('role', 'status');
     footer.append(this.details, this.message, this.load,
-      element('p', 'backpack-hint', '右键 操作 / 放入快捷栏　拖出背包 丢弃　B 关闭 / ESC 暂停'));
+      element('p', 'backpack-hint', '右键 操作 / 放入快捷栏　拖出背包 丢弃　Tab 关闭 / ESC 暂停'));
     this.menu.setAttribute('role', 'menu'); this.menu.setAttribute('aria-label', '物品操作'); this.menu.hidden = true;
     this.panel.append(this.header, this.tabs, columns, this.list, footer);
     this.root.append(this.panel, this.menu);
@@ -261,7 +261,7 @@ export class BackpackPanel {
   private onKeyDown = (event: KeyboardEvent): void => {
     const key = event.code || event.key;
     if (!this.open && (event.target as HTMLElement)?.closest?.('input,textarea,select,[contenteditable="true"]')) return;
-    if (key === 'KeyB' || event.key.toLowerCase() === 'b') {
+    if (key === 'Tab') {
       if (!this.open && !this.options.canOpen()) return;
       event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) this.setOpen(!this.open); return;
     }
@@ -273,13 +273,6 @@ export class BackpackPanel {
       const item = this.selectedItem(), rect = this.list.getBoundingClientRect();
       if (item && !event.repeat) this.openMenu(item.id, rect.left + 180, rect.top + 30);
       return;
-    }
-    if (key === 'Tab') {
-      event.preventDefault();
-      const scope = this.menu.hidden ? this.panel : this.menu;
-      const controls = Array.from(scope.querySelectorAll<HTMLElement>('button:not(:disabled),[tabindex="0"]'));
-      const index = controls.indexOf(document.activeElement as HTMLElement);
-      controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length]?.focus(); return;
     }
     if (!this.menu.hidden && (key === 'ArrowUp' || key === 'ArrowDown' || key === 'Enter' || key === 'NumpadEnter')) {
       event.preventDefault();

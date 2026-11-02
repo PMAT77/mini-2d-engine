@@ -40,7 +40,7 @@ const wheelInput = (direction, ...keys) => ({ ...keysDown(...keys), consumeWheel
   const sample = direction; direction = 0; return sample;
 } });
 
-test('wheel switches firearms once per frame, combines with Tab, restores empty hands and respects dropped weapons', () => {
+test('wheel switches firearms once per frame, restores empty hands and respects dropped weapons', () => {
   const scene = makeScene(), scroll = wheelInput(1);
   step(scene, 1, scroll);
   assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
@@ -49,7 +49,7 @@ test('wheel switches firearms once per frame, combines with Tab, restores empty 
   step(scene, 1, wheelInput(-1));
   assert.equal(scene.player.getActiveWeaponSlot(), 'secondary', 'either direction switches');
   step(scene, 1, wheelInput(1, 'Tab'));
-  assert.equal(scene.player.getActiveWeaponSlot(), 'primary', 'wheel and Tab cannot double-switch in one frame');
+  assert.equal(scene.player.getActiveWeaponSlot(), 'primary', 'only wheel switches the weapon; Tab belongs to the backpack');
   step(scene, 1, keysDown('c'));
   assert.equal(scene.player.getActiveWeaponSlot(), 'melee');
   step(scene, 1, wheelInput(-1));
@@ -115,21 +115,11 @@ test('canvas wheel input owns only vertical game scrolling and clears buffered s
   } finally { globalThis.window = previousWindow; globalThis.document = previousDocument; }
 });
 
-test('Tab switches firearms once per press and not repeatedly while held', () => {
+test('Tab and B never switch firearms, including a held Tab', () => {
   const scene = makeScene();
-  assert.equal(scene.player.getActiveWeaponSlot(), 'secondary');
-
-  // 按下沿切换一次。
   step(scene, 1, keysDown('Tab'));
-  assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
-
-  // 长按不连续切换：Tab 是下沿触发，不是“按住就切”。
   step(scene, 60, keysDown('Tab'));
-  assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
-
-  // 松开再按，才允许下一次切换。
-  step(scene, 1);
-  step(scene, 1, keysDown('Tab'));
+  step(scene, 1, keysDown('b'));
   assert.equal(scene.player.getActiveWeaponSlot(), 'secondary');
 });
 
@@ -145,21 +135,16 @@ test('E and Q no longer switch firearms', () => {
   assert.equal(scene.player.getActiveWeaponSlot(), 'secondary', 'Q is intentionally unbound');
 });
 
-test('Tab restores the last firearm while empty-handed', () => {
+test('Tab does not draw a gun while empty-handed; C and wheel still restore the last gun', () => {
   const scene = makeScene();
-  step(scene, 1, keysDown('Tab'));
-  assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
-
   step(scene, 1, keysDown('c'));
+  step(scene, 1, keysDown('Tab'));
   assert.equal(scene.player.getActiveWeaponSlot(), 'melee');
-
+  step(scene, 1, wheelInput(1));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'secondary');
+  step(scene, 1, keysDown('c'));
   step(scene, 1);
-  step(scene, 1, keysDown('Tab'));
-  assert.equal(scene.player.getActiveWeaponSlot(), 'primary', 'Tab re-equips the last firearm');
-
-  // 再按一次仍然只在主副枪之间切换，不会回到空手。
-  step(scene, 1);
-  step(scene, 1, keysDown('Tab'));
+  step(scene, 1, keysDown('c'));
   assert.equal(scene.player.getActiveWeaponSlot(), 'secondary');
 });
 

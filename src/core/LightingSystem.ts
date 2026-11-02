@@ -1,6 +1,7 @@
 import { LightSource } from "./LightSource";
 import type { ConeLight } from "./ConeLight";
 import type { ShadowEdge, TileMap } from "../map/TileMap";
+import { getTileType } from "../map/TileType";
 
 const TAU = Math.PI * 2;
 const RGB_RE = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i;
@@ -12,6 +13,7 @@ const MAX_LIGHT_SPRITE_SIZE = 2048;
 const MAX_LIGHT_SPRITES = 8;
 /** Rebuilding every shadow emitter each frame was the dominant multi-light cost. */
 const SOFT_SHADOW_BUILD_BUDGET = 8;
+const ENVIRONMENT_CHUNK_SIZE = 512;
 
 interface PixelRect { x: number; y: number; width: number; height: number }
 
@@ -109,6 +111,9 @@ export class LightingSystem {
   private lightSources: LightSource[] = [];
   private terrainLight: TerrainLight | null = null;
   private terrainShadowCanvas: HTMLCanvasElement | null = null;
+  private environmentChunks = new Map<string, { canvas: HTMLCanvasElement; signature: string; padding: number }>();
+  private environmentMap: TileMap | undefined;
+  private environmentTopColor = { key: '', color: '' };
   private ambientLight = "rgba(0, 0, 0, 0.8)";
   private shadowCanvas: HTMLCanvasElement | null = null;
   private shadowCtx: CanvasRenderingContext2D | null = null;
@@ -188,7 +193,7 @@ export class LightingSystem {
     this.lightSources = this.lightSources.filter(source => source !== light);
     this.shadowCaches.delete(light);
   }
-  clearAllLights(): void { this.lightSources = []; this.terrainLight = null; this.shadowCaches = new WeakMap(); }
+  clearAllLights(): void { this.lightSources = []; this.terrainLight = null; this.shadowCaches = new WeakMap(); this.clearEnvironmentCache(); }
   setAmbientLight(color: string): void { this.ambientLight = color; this.ambientFill = undefined; }
   setTerrainLight(light: TerrainLight | null): void {
     if (light && (![light.position.x, light.position.y, light.intensity, light.shadowLength, light.softness].every(Number.isFinite)
@@ -200,8 +205,73 @@ export class LightingSystem {
   update(delta: number): void { this.lightSources.forEach(light => light.update(delta)); }
 
   /** Diagnostics for the F3 panel and performance tests. */
-  getStats(): { lightsDrawn: number; spriteRebuilds: number; softShadowBuilds: number; terrainShadowRasterizations: number } {
-    return { ...this.stats };
+  getStats(): { lightsDrawn: number; spriteRebuilds: number; softShadowBuilds: number; terrainShadowRasterizations: number; environmentChunks: number; environmentCacheBytes: number } {
+    let bytes = 0;
+    for (const { canvas } of this.environmentChunks.values()) bytes += canvas.width * canvas.height * 4;
+    return { ...this.stats, environmentChunks: this.environmentChunks.size, environmentCacheBytes: bytes };
+  }
+
+  private clearEnvironmentCache(): void {
+    for (const { canvas } of this.environmentChunks.values()) canvas.width = canvas.height = 0;
+    this.environmentChunks.clear();
+    this.environmentMap = undefined;
+  }
+
+  /** Exact local occupancy signature also observes direct public tile-array edits. */
+  private environmentSignature(map: TileMap, x: number, y: number, pixels: number): string {
+    const light = this.terrainLight!, size = map.tileSize;
+    let signature = `${this.ambientLight}|${light.color}|${light.intensity}|${light.position.x},${light.position.y}|${light.shadowLength}|${light.softness}|${size}|`;
+    const left = Math.floor(x / size) - 2, top = Math.floor(y / size) - 2;
+    const right = Math.ceil((x + pixels) / size) + 2, bottom = Math.ceil((y + pixels) / size) + 2;
+    for (let row = top; row <= bottom; row++) for (let col = left; col <= right; col++) {
+      signature += row >= 0 && col >= 0 && row < map.height && col < map.width && getTileType(map.tiles[row][col]).blocksLight ? '1' : '0';
+    }
+    return signature;
+  }
+
+  /** Cache the static ambient/terrain-light result; dynamic emitters remain separate. */
+  private drawEnvironment(cameraX: number, cameraY: number, map: TileMap): boolean {
+    const light = this.terrainLight, ambient = this.ambientComposite();
+    if (!light || light.intensity <= 0 || !ambient) return false;
+    if (this.environmentMap !== map) { this.clearEnvironmentCache(); this.environmentMap = map; }
+    const ctx = this.shadowCtx!, width = this.shadowCanvas!.width, height = this.shadowCanvas!.height;
+    const span = ENVIRONMENT_CHUNK_SIZE;
+    // Keep the half-resolution shadow raster world-aligned, with enough halo for projecting neighbours.
+    const padding = Math.ceil((light.shadowLength + light.softness * 3 + map.tileSize * 2 + 4) / 2) * 2;
+    const pixels = span + padding * 2;
+    const left = Math.floor(cameraX / span), top = Math.floor(cameraY / span);
+    const right = Math.floor((cameraX + width) / span), bottom = Math.floor((cameraY + height) / span);
+    for (let row = top; row <= bottom; row++) for (let col = left; col <= right; col++) {
+      const key = `${col},${row}`, x = col * span, y = row * span;
+      const signature = this.environmentSignature(map, x - padding, y - padding, pixels);
+      let chunk = this.environmentChunks.get(key);
+      if (!chunk || chunk.signature !== signature || chunk.padding !== padding) {
+        const canvas = chunk?.canvas ?? document.createElement('canvas');
+        if (canvas.width !== pixels) canvas.width = pixels;
+        if (canvas.height !== pixels) canvas.height = pixels;
+        const target = canvas.getContext('2d')!;
+        target.setTransform(1, 0, 0, 1, 0, 0);
+        target.globalCompositeOperation = 'source-over'; target.globalAlpha = 1;
+        target.fillStyle = ambient; target.fillRect(0, 0, pixels, pixels);
+        const ground = map.getGroundContour(x - padding, y - padding, pixels, pixels);
+        this.prepareTerrainLight(x - padding, y - padding, map, ground, target, pixels, pixels);
+        chunk = { canvas, signature, padding };
+      }
+      this.environmentChunks.delete(key);
+      this.environmentChunks.set(key, chunk);
+      // Integer destinations share exact pixel boundaries; fractional source sampling keeps camera motion smooth.
+      const dx = Math.floor(x - cameraX), dy = Math.floor(y - cameraY);
+      ctx.drawImage(chunk.canvas, padding + cameraX + dx - x, padding + cameraY + dy - y,
+        span, span, dx, dy, span, span);
+    }
+    const limit = (right - left + 1) * (bottom - top + 1) + 2 * (right - left + bottom - top + 2);
+    while (this.environmentChunks.size > limit) {
+      const key = this.environmentChunks.keys().next().value!;
+      const old = this.environmentChunks.get(key)!;
+      old.canvas.width = old.canvas.height = 0;
+      this.environmentChunks.delete(key);
+    }
+    return true;
   }
 
   static drawShadows(ctx: CanvasRenderingContext2D, edges: ShadowEdge[], x: number, y: number, radius: number, length?: number): void {
@@ -293,13 +363,12 @@ export class LightingSystem {
    * ambient brightness. It is composited from its own light buffer instead of the
    * ground-only accumulation buffer because that one is clipped when it is blitted.
    */
-  private prepareTerrainLight(cameraX: number, cameraY: number, map: TileMap | undefined, ground: Path2D | undefined): void {
+  private prepareTerrainLight(cameraX: number, cameraY: number, map: TileMap | undefined, ground: Path2D | undefined,
+    shadowCtx = this.shadowCtx!, width = this.shadowCanvas!.width, height = this.shadowCanvas!.height): void {
     const light = this.terrainLight;
     if (!light || light.intensity <= 0) return;
-    const { width, height } = this.shadowCanvas!;
     // Add the terrain lift straight into the frame: a solid additive fill is far cheaper
     // than building a full-screen light layer and blitting it back over itself.
-    const shadowCtx = this.shadowCtx!;
     shadowCtx.save();
     shadowCtx.setTransform(1, 0, 0, 1, 0, 0);
     shadowCtx.globalCompositeOperation = "lighter";
@@ -589,8 +658,12 @@ export class LightingSystem {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1;
+    const terrainRasterizationsBefore = this.terrainBuildsTotal;
+    const environmentDrawn = map ? this.drawEnvironment(cameraX, cameraY, map) : false;
     const ambientFill = this.ambientComposite();
-    if (ambientFill) {
+    if (environmentDrawn) {
+      // The cached tiles already contain ambient plus static terrain lighting.
+    } else if (ambientFill) {
       ctx.fillStyle = ambientFill;
       ctx.fillRect(0, 0, width, height);
     } else {
@@ -602,6 +675,24 @@ export class LightingSystem {
     mark = this.markProfile("ambient", mark);
 
     const ground = map?.getGroundContour(cameraX, cameraY, width, height);
+    if (environmentDrawn && map && this.terrainLight) {
+      // Reapply the exact current-camera top coverage after cached image interpolation.
+      // Otherwise bilinear sampling can pull a shadow pixel across a fully covered solid edge.
+      const light = this.terrainLight, key = `${ambientFill}|${light.color}|${light.intensity}`;
+      if (this.environmentTopColor.key !== key) {
+        const probe = document.createElement('canvas'); probe.width = probe.height = 1;
+        const paint = probe.getContext('2d', { willReadFrequently: true })!;
+        paint.fillStyle = ambientFill!; paint.fillRect(0, 0, 1, 1);
+        paint.globalCompositeOperation = 'lighter'; paint.globalAlpha = light.intensity;
+        paint.fillStyle = light.color; paint.fillRect(0, 0, 1, 1);
+        const pixel = paint.getImageData(0, 0, 1, 1).data;
+        this.environmentTopColor = { key, color: `rgb(${pixel[0]},${pixel[1]},${pixel[2]})` };
+      }
+      ctx.save(); ctx.translate(-cameraX, -cameraY);
+      ctx.fillStyle = this.environmentTopColor.color;
+      ctx.fill(map.getTerrainTopContour(cameraX, cameraY, width, height));
+      ctx.restore();
+    }
 
     const staleAccum = this.accumRect;
     if (staleAccum.width > 0) {
@@ -615,8 +706,7 @@ export class LightingSystem {
     mark = this.markProfile("accumClear", mark);
 
     const spriteBuildsBefore = this.spriteBuildsTotal;
-    const terrainRasterizationsBefore = this.terrainBuildsTotal;
-    this.prepareTerrainLight(cameraX, cameraY, map, ground);
+    if (!environmentDrawn) this.prepareTerrainLight(cameraX, cameraY, map, ground);
     mark = this.markProfile("terrainLight", mark);
 
     // Every light paints into the same scratch buffer, so start from a clean one and

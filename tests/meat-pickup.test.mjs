@@ -119,7 +119,10 @@ test('rolling, firing or switching weapons cancels the hold', () => {
 
     let input = holdingE;
     if (interrupt === 'roll') scene.player.requestRoll(holdingE);
-    if (interrupt === 'switch') input = { isKeyDown: key => key === 'e' || key === 'Tab', isBlocked: () => false };
+    if (interrupt === 'switch') {
+      let wheel = 1;
+      input = { ...holdingE, isBlocked: () => false, consumeWheelDirection: () => { const direction = wheel; wheel = 0; return direction; } };
+    }
     if (interrupt === 'shoot') {
       // 用指针开火路径触发 shotThisFrame，与真实鼠标左键走同一条回调。
       const canvas = {

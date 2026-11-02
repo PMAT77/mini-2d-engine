@@ -27,6 +27,7 @@
     "test:perception-continuity-browser": "node tests/perception-continuity.browser.mjs",
     "test:rounded-terrain-browser": "node tests/rounded-terrain.browser.mjs",
     "test:shooting-browser": "node tests/shooting.browser.mjs",
+    "test:boxing-browser": "node tests/player-boxing.browser.mjs",
     "test:debug-browser": "node tests/debug.browser.mjs",
     "test:water-browser": "node tests/water.browser.mjs",
     "test:water-performance": "node tests/water.browser.mjs --performance",
