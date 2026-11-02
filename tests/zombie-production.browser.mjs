@@ -15,6 +15,6 @@ try {
   });
   assert.equal(result.vision,'three-layer'); assert.equal(result.visionDebug,null); assert.equal(result.zombiePaths,false); assert.equal(result.debug,null);
   assert.equal(result.feedback,null); assert.equal(result.feedbackMetrics,null);
-  assert.equal(result.enemies,4); assert.equal(result.vaccines,2); assert.equal(result.status.vaccines,0); assert.equal(result.status.infected,false);
-  assert.deepEqual(errors,[]); console.log('Production zombie check passed: default 4 enemies / 2 vaccines, debug URLs ignored.');
+  assert.equal(result.enemies,20); assert.equal(result.vaccines,2); assert.equal(result.status.vaccines,0); assert.equal(result.status.infected,false);
+  assert.deepEqual(errors,[]); console.log('Production zombie check passed: default 20 enemies / 2 vaccines, debug URLs ignored.');
 } finally { await browser.close(); }

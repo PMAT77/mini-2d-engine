@@ -45,6 +45,7 @@ export interface CharacterRenderSnapshot {
   rolling: boolean;
   stowedAlpha: number;
   activeSlot: WeaponSlot;
+  ownedFirearms?: { primary: boolean; secondary: boolean };
   weaponKind: WeaponKind;
   /** 伪高度（世界像素）：只有 rig 后端的翻滚段会大于 0，用于绘制缓冲外的地面阴影。 */
   altitudePx: number;

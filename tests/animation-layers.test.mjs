@@ -28,7 +28,7 @@ const idle = { isKeyDown: () => false };
 const SIZE = 49;
 const noSpread = { spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 };
 const near = (a, b, epsilon = 1e-9) => assert.ok(Math.abs(a - b) <= epsilon, `${a} != ${b}`);
-const aim = (x = 825, y = 225) => ({ target: { x, y }, fire: true, face: false });
+const aim = (x = 825, y = 225) => ({ target: { x, y }, fire: true, face: true });
 
 function handOf(snapshot) {
   return snapshot.world.world.handR;

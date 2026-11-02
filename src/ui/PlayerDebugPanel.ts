@@ -1,3 +1,4 @@
+import { showPanel, revealContent } from './PanelMotion';
 import { Input } from '../core/Input';
 import { Player } from '../objects/Player';
 import { PlayerConfig } from '../objects/PlayerConfig';
@@ -45,6 +46,8 @@ export interface PlayerDebugPanelOptions {
   initialAudio?: AudioConfig;
   /** 当前视野模式不读取的分组（例如三层模式下的 fog），构建时直接跳过。 */
   hiddenSections?: SectionId[];
+  onPause?: () => void;
+  canOpen?: () => boolean;
 }
 
 /** A scene-owned DOM overlay. No timers or keyboard listeners survive disposal. */
@@ -195,6 +198,7 @@ export class PlayerDebugPanel {
 
   private selectTab(tab: DebugTabId, focus: boolean): void {
     this.activeTab = tab;
+    if (focus && this.panels[tab]) revealContent(this.panels[tab]!);
     for (const { id } of DEBUG_TABS) {
       const active = id === tab;
       this.tabs[id]?.setAttribute('aria-selected', String(active));
@@ -681,19 +685,19 @@ export class PlayerDebugPanel {
   }
 
   isOpen(): boolean { return this.open; }
-  private setOpen(open: boolean): void {
-    if (this.open === open) return;
+  setOpen(open: boolean): void {
+    if (this.open === open || (open && this.options.canOpen?.() === false)) return;
     this.open = open;
-    this.overlay.hidden = !open;
+    showPanel(this.overlay, open);
     this.toggle.setAttribute('aria-expanded', String(open));
     if (open) {
       this.lastFocus = document.activeElement ?? undefined;
       this.refresh(true);
       this.tabs[this.activeTab]?.focus();
-      this.input.setBlocked(true);
+      if (!this.options.onOpenChange) this.input.setBlocked(true);
     } else {
       if (this.root.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
-      this.input.setBlocked(false);
+      if (!this.options.onOpenChange) this.input.setBlocked(false);
       if (this.lastFocus instanceof HTMLElement && document.contains(this.lastFocus)) this.lastFocus.focus();
       this.lastFocus = undefined;
     }
@@ -701,12 +705,12 @@ export class PlayerDebugPanel {
   }
 
   private blockInput = (event: Event): void => {
-    if (this.modal.contains(event.target as Node)) this.input.setBlocked(true);
+    if (!this.options.onOpenChange && this.modal.contains(event.target as Node)) this.input.setBlocked(true);
   };
   private onPointerDown = (event: PointerEvent): void => {
     if (event.target === this.canvas) {
       if (this.root.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
-      this.input.setBlocked(false);
+      if (!this.options.onOpenChange) this.input.setBlocked(false);
     }
   };
   private onKeyDown = (event: KeyboardEvent): void => {
@@ -715,7 +719,7 @@ export class PlayerDebugPanel {
     if (toggleKey || closeKey) {
       event.preventDefault();
       event.stopPropagation();
-      if (!event.repeat) this.setOpen(toggleKey ? !this.open : false);
+      if (!event.repeat) { if (closeKey && this.options.onPause) this.options.onPause(); else this.setOpen(toggleKey ? !this.open : false); }
       return;
     }
     if (!this.open || event.key !== 'Tab') return;

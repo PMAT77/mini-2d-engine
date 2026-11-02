@@ -190,8 +190,10 @@ export function createPlayerRenderSnapshot(player: Player): CharacterRenderSnaps
     progress: state.progress,
     rolling: state.rolling,
     stowedAlpha: state.stowedAlpha,
-    activeSlot: player.getActiveWeaponSlot(),
-    weaponKind: view.kind as WeaponKind,
+    activeSlot: player.holdingThrowable ? 'melee' : player.getActiveWeaponSlot(),
+    ...(!player.hasWeapon('primary') || !player.hasWeapon('secondary')
+      ? { ownedFirearms: { primary: player.hasWeapon('primary'), secondary: player.hasWeapon('secondary') } } : {}),
+    weaponKind: player.holdingThrowable ? 'empty' : view.kind as WeaponKind,
     altitudePx,
     depthTuck,
     punchProgress,

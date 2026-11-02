@@ -77,8 +77,15 @@ export interface RollConfig {
   cooldown: number;
   /** 每次翻滚消耗的体力；0 表示不消耗。 */
   staminaCost: number;
+  /** 起滚后的完美闪避窗口（秒）；0 关闭，起滚时截取到动作时长。 */
+  perfectDodgeWindow: number;
+  /** 每次翻滚首次完美闪避返还的体力；0 仍保留免伤与提示。 */
+  perfectDodgeStaminaReward: number;
 }
-export const DEFAULT_ROLL: RollConfig = { duration: 0.5, speedMultiplier: 2.15, cooldown: 0.4, staminaCost: 10 };
+export const DEFAULT_ROLL: RollConfig = {
+  duration: 0.5, speedMultiplier: 2.15, cooldown: 0.4, staminaCost: 10,
+  perfectDodgeWindow: 0.15, perfectDodgeStaminaReward: 5,
+};
 
 /** 每个配置分组允许的字段；调试面板的覆盖检查也读这份清单。 */
 export const PLAYER_CONFIG_GROUPS: Record<string, readonly string[]> = {
@@ -107,7 +114,7 @@ export function parsePlayerConfig(value: unknown): PlayerConfig {
       if (key === "rotationStrategy") {
         if (!["cw", "ccw", "auto"].includes(field as string)) throw new Error("rotationStrategy 必须是 cw、ccw 或 auto");
       } else {
-        const allowZero = group === "bulletWaterDrag" || ["maxSpeed", "knockbackImpulse", "breathingAmplitude", "breathingSpeed", "runSwayAmplitude", "runSwaySpeed", "nonlinearFactor", "startSpeedRatio", "startupDuration", "turnDamping", "stopDuration", "rampDuration", "regenDelay", "aimTurnDuration", "cooldown", "staminaCost", "spreadHorizontal", "spreadVertical", "maxSpreadHorizontal", "maxSpreadVertical", "recoilPerShot", "recoilRecoveryDelay"].includes(key);
+        const allowZero = group === "bulletWaterDrag" || ["maxSpeed", "knockbackImpulse", "breathingAmplitude", "breathingSpeed", "runSwayAmplitude", "runSwaySpeed", "nonlinearFactor", "startSpeedRatio", "startupDuration", "turnDamping", "stopDuration", "rampDuration", "regenDelay", "aimTurnDuration", "cooldown", "staminaCost", "perfectDodgeWindow", "perfectDodgeStaminaReward", "spreadHorizontal", "spreadVertical", "maxSpreadHorizontal", "maxSpreadVertical", "recoilPerShot", "recoilRecoveryDelay"].includes(key);
         if (typeof field !== "number" || !Number.isFinite(field) || (allowZero ? field < 0 : field <= 0)) {
           throw new Error(`无效配置值: ${group}.${key} 必须是${allowZero ? "非负" : "正"}有限数值`);
         }

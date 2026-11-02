@@ -176,6 +176,7 @@ export function buildPlayerPartCommands(snapshot: CharacterRenderSnapshot): Draw
           size: s,
           activeSlot: snapshot.activeSlot,
           alpha: snapshot.stowedAlpha,
+          ...(snapshot.ownedFirearms ? { ownedFirearms: snapshot.ownedFirearms } : {}),
         });
         break;
       case "heldWeapon": {

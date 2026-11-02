@@ -9,6 +9,15 @@
 /** 命中来源；只有真实命中事件能进入战斗层，准星位置不参与强度计算。 */
 export type HitSource = 'bullet' | 'melee' | 'explosion' | 'script';
 
+export type HitRegion = 'body' | 'head';
+
+/** 真实弹道最先接触的部位；倍率由子弹构造最终伤害快照时应用一次。 */
+export interface TargetBulletHit {
+  readonly fraction: number;
+  readonly hitRegion?: HitRegion;
+  readonly damageMultiplier?: number;
+}
+
 /**
  * 一次真实命中产生的最小数据快照。
  *
@@ -32,6 +41,7 @@ export interface BulletImpact {
   readonly traveledDistance: number;
   /** 命中来源；当前只有子弹。 */
   readonly source: HitSource;
+  readonly hitRegion?: HitRegion;
 }
 
 /** Copy nested vectors so presentation never follows a subsequently mutated bullet. */

@@ -32,7 +32,9 @@
     "duration": 0.5,
     "speedMultiplier": 2.15,
     "cooldown": 0.4,
-    "staminaCost": 10
+    "staminaCost": 10,
+    "perfectDodgeWindow": 0.15,
+    "perfectDodgeStaminaReward": 5
   },
   "animation": {
     "breathingAmplitude": 3,

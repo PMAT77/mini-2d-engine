@@ -284,8 +284,8 @@ export function getWeaponListLayout(viewWidth: number, viewHeight: number): Weap
 export function getWeaponListRows(loadout: WeaponLoadoutView): WeaponView[] {
   if (loadout.activeSlot === "melee") return [loadout.melee];
   return loadout.activeSlot === "primary"
-    ? [loadout.primary, loadout.secondary]
-    : [loadout.secondary, loadout.primary];
+    ? [loadout.primary, loadout.secondary].filter(view => view.owned !== false)
+    : [loadout.secondary, loadout.primary].filter(view => view.owned !== false);
 }
 
 /** 弹匣余弹：不包含膛内那一发。 */

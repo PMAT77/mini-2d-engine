@@ -30,6 +30,7 @@ try {
     await page.evaluate(async () => {
       const game = window.movementTestGame;
       const { createFixedScene } = await import('/tests/fixed-scene.ts');
+      const { getPlayerVitalsHudRect } = await import('/src/ui/PlayerVitalsHud.ts');
       const scene = await createFixedScene(game, 100, 100, 200, 250), sprite = scene.player.sprite;
       const Player = scene.player.constructor, Vector2 = scene.player.getVelocity().constructor;
       scene.update = () => {};
@@ -57,7 +58,7 @@ try {
           for (let left = seconds; left > 1e-9;) {
             const delta = Math.min(left, 1 / 60);
             scene.player.update(delta, { isKeyDown: k => keys.includes(k) }, scene.map,
-              keys.includes('MouseLeft') ? { target: { x: scene.player.x + 24.5, y: scene.player.y - 975.5 }, fire: true, face: false } : undefined); left -= delta;
+              keys.includes('MouseLeft') ? { target: { x: scene.player.x + 24.5, y: scene.player.y - 975.5 }, fire: true, face: true } : undefined); left -= delta;
           }
           this.render(); return this.stats();
         },
@@ -67,6 +68,12 @@ try {
             ammo: p.getMagazineAmmo(), reloading: p.getIsReloading(), reloadProgress: p.getReloadProgress() };
         },
         pixel(x, y) { return [...game.renderer.ctx.getImageData(Math.floor((x + .5) * game.renderer.width / scene.worldCanvas.width), Math.floor((y + .5) * game.renderer.height / scene.worldCanvas.height), 1, 1).data]; },
+        vitalsPixel(x, y) {
+          const dpr = devicePixelRatio, canvas = game.renderer.ctx.canvas;
+          const rect = getPlayerVitalsHudRect(canvas.width / dpr, canvas.height / dpr);
+          return [...game.renderer.ctx.getImageData(Math.floor((rect.x + x * rect.width / 340) * dpr),
+            Math.floor((rect.y + y * rect.height / 72) * dpr), 1, 1).data];
+        },
         ring(angle) {
           const p = scene.player;
           const { reloadX, reloadY } = p.getOverlayLayout(scene.camera.x, scene.camera.y);
@@ -138,13 +145,13 @@ try {
         t.tick(0.28); // 1.4s 换弹的 20%：进度弧只走过右上方向
         t.scene.camera.x = ox; t.scene.camera.y = oy; t.render();
         return { stats: t.stats(), bright: t.ring(-Math.PI / 4), dark: t.ring(Math.PI / 2),
-          stamina: t.pixel(p.x - ox + 20, p.getOverlayLayout(ox, oy).healthY + 12) };
+          stamina: t.vitalsPixel(90, 50) };
       }, [ox, oy]);
       assert.equal(ring.stats.reloading, true, 'the ring only appears while reloading');
       assert.ok(ring.stats.reloadProgress > 0.15 && ring.stats.reloadProgress < 0.25, `reload progress: ${ring.stats.reloadProgress}`);
       assert.ok(Math.max(...ring.bright.slice(0, 3)) > 140, 'the reload arc fills clockwise from the top');
       assert.ok(Math.max(...ring.dark.slice(0, 3)) < 110, 'the reload arc has not reached the bottom');
-      assert.deepEqual(ring.stamina, [117, 223, 233, 255], 'stamina stays bright after lighting');
+      assert.deepEqual(ring.stamina, [123, 171, 183, 255], 'screen-space stamina stays muted blue after lighting and camera movement');
       cases++;
     }
     if (dpr === 1) await page.screenshot({ path: join(output, 'movement-reload.png'), clip: { x: 100, y: 150, width: 340, height: 260 } });
@@ -162,11 +169,11 @@ try {
       const t = movementTest; t.reset(); t.advance(10.5, ['d', 'Shift']); // drainPerSecond is 10, so 10s empties the bar
       t.scene.player.x = 200; t.scene.player.y = 250; t.render();
       const stats = t.stats(), p = t.scene.player;
-      return { stats, border: [-1, 0, 1].map(dy => t.pixel(p.x + 20, p.getOverlayLayout().healthY + 9 + dy)) };
+      return { stats, border: [-1, 0, 1].map(dy => t.vitalsPixel(100, 44.5 + dy)) };
     });
     assert.equal(exhausted.stats.stamina, 0); assert.equal(exhausted.stats.sprinting, false);
-    assert.ok(exhausted.border.some(([r, g, b]) => r > 100 && r > g && g > b), 'exhausted stamina retains a visible orange warning border after zoom filtering');
-    if (dpr === 1) await page.screenshot({ path: join(output, 'movement-exhausted.png'), clip: { x: 100, y: 150, width: 340, height: 260 } });
+    assert.ok(exhausted.border.some(([r, g, b]) => r > 100 && r > g && g > b), 'exhausted stamina retains a visible orange warning border in the screen HUD');
+    if (dpr === 1) await page.screenshot({ path: join(output, 'movement-exhausted.png'), clip: { x: 0, y: 700, width: 340, height: 100 } });
     assert.equal(errors.length, 0, errors.join('\n'));
     await context.close();
   }

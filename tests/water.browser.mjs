@@ -193,10 +193,10 @@ async function checkWaterBullets(page,dpr){
     });
     // 单发，确保只有一个子弹：自动连发会让 bursts 与跟踪到的子弹对不上。
     const framesAtFire=await page.evaluate(()=>waterBulletRun.frames);
-    await page.mouse.move(waterTarget.x, waterTarget.y); await page.mouse.down();
+    await page.mouse.move(waterTarget.x, waterTarget.y); await page.mouse.down({ button: 'right' }); await page.mouse.down();
     // 水面子弹两帧内就会被打空销毁，等采样点数量会抖动；按帧数保证确实开了一枪再松手。
     await page.waitForFunction(n=>waterBulletRun.frames>=n,framesAtFire+3,{timeout:10000});
-    await page.mouse.up();
+    await page.mouse.up(); await page.mouse.up({ button: 'right' });
     // 子弹是池化的一次性对象，会在飞行中销毁；等它彻底销毁后再核对整段轨迹与湮灭特效。
     await page.waitForFunction(()=>{const r=waterBulletRun;return !!r.bullet&&r.bullet.getIsDestroyed();},null,{timeout:15000});
     if(wet)await page.screenshot({path:`${output}/water-bullets-dpr${dpr}.png`});

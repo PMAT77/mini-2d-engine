@@ -2,7 +2,7 @@ import type { Player } from '../objects/Player';
 import type { PlayerDamageResult } from '../combat/PlayerDamage';
 import { InfectionController } from './InfectionController';
 import { ConsumableInventory } from './ConsumableInventory';
-export interface VaccineUseContext { paused: boolean; rolling: boolean; reloading: boolean; interacting: boolean; actionInput: boolean; }
+export interface VaccineUseContext { paused: boolean; rolling: boolean; reloading: boolean; interacting: boolean; actionInput: boolean; source?: 'gameplay' | 'backpack'; }
 export interface SurvivalSnapshot { alive: boolean; infected: boolean; vaccines: number; infectionRemainder: number; }
 
 export class PlayerSurvivalSystem {
@@ -28,9 +28,18 @@ export class PlayerSurvivalSystem {
     this.inventory.addVaccines(); return true;
   }
   /** All eligibility checks precede the synchronous inventory/status mutation. */
+  getVaccineUseFailure(context: VaccineUseContext): string | null {
+    if (!this.player.isAlive()) return '角色已死亡';
+    if (context.paused && context.source !== 'backpack') return '游戏已暂停';
+    if (context.rolling) return '翻滚时无法使用';
+    if (context.reloading) return '换弹时无法使用';
+    if (context.interacting || context.actionInput) return '当前动作中无法使用';
+    if (this.inventory.getVaccines() < 1) return '疫苗不足';
+    if (!this.infection.isInfected()) return '当前未感染';
+    return null;
+  }
   tryUseVaccine(context: VaccineUseContext): boolean {
-    if (!this.player.isAlive() || context.paused || context.rolling || context.reloading || context.interacting || context.actionInput ||
-      !this.infection.isInfected() || this.inventory.getVaccines() < 1) return false;
+    if (this.getVaccineUseFailure(context)) return false;
     this.inventory.consumeVaccine(); this.infection.clear(); return true;
   }
   resetLife(): void { this.player.resetLifeState(); this.infection.clear(); }

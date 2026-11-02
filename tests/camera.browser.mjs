@@ -32,8 +32,14 @@ try {
       await page.setViewportSize(viewport);
       await page.waitForFunction(({ width, height }) => cameraGame.renderer.width === width * devicePixelRatio
         && cameraGame.renderer.height === height * devicePixelRatio, viewport);
-      const result = await page.evaluate(() => {
+      const result = await page.evaluate(async () => {
+        const [{ getWeaponListLayout }, { getPlayerStatusHudRect }, { getBackpackHudRect },
+          { getPlayerVitalsHudRect, drawPlayerVitalsHud }] = await Promise.all([
+          import('/src/ui/WeaponListHud.ts'), import('/src/ui/PlayerStatusHud.ts'),
+          import('/src/ui/BackpackHud.ts'), import('/src/ui/PlayerVitalsHud.ts'),
+        ]);
         const scene = cameraGame.sceneManager.getCurrentScene(), screen = cameraGame.renderer.ctx;
+        await scene.statusHud.ready;
         scene.handleResize();
         const { camera, player, worldCanvas, lightingSystem } = scene;
         const centered = Math.abs(player.x + player.getSize() / 2 - camera.x - camera.width / 2) < 1e-8
@@ -52,6 +58,16 @@ try {
         scene.floatingTexts.draw(expectedContext, view.x, view.y,
           (expected.width/devicePixelRatio)/scene.camera.width);
         scene.killIndicator?.draw(expectedContext,expected.width/devicePixelRatio,expected.height/devicePixelRatio);
+        // The status, vitals and quick slots also occupy the world-comparison region.
+        const width = expected.width / devicePixelRatio, height = expected.height / devicePixelRatio;
+        const area = getWeaponListLayout(width, height).area;
+        scene.statusHud.draw(expectedContext, scene.survival.snapshot(), width, height, area);
+        const reserved = [getPlayerStatusHudRect(width, height, area), getBackpackHudRect(width, height, area), area];
+        const vitals = getPlayerVitalsHudRect(width, height, reserved);
+        drawPlayerVitalsHud(expectedContext, player, vitals, devicePixelRatio);
+        const inventory = scene.getBackpackView();
+        scene.quickSlotHud.draw(expectedContext, width, height, [...reserved, vitals],
+          scene.quickSlotBindings.map(id => inventory.items.find(item => item.id === id) ?? null));
         expectedContext.restore();
         scene.drawPickupPrompts(expectedContext, scene.camera.getOffset());
         // Below the minimap HUD (circle + gold counter) the screen must be the world composite.
@@ -104,9 +120,61 @@ try {
       assert.equal(result.colliderSize, 49);
       assert.ok(result.centered && result.samePixels && result.follows, JSON.stringify(result));
     }
+    await page.mouse.move(750, 300); await page.mouse.down({ button: 'right' });
+    const feedback = await page.evaluate(() => {
+      const scene = cameraGame.sceneManager.getCurrentScene(), c = scene.camera, p = scene.player;
+      p.applyConfig({ shooting: { spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 } });
+      const shake = c.shake.bind(c), shots = [], results = [];
+      c.shake = (...args) => { shots.push(args); shake(...args); };
+      try {
+        for (const zoom of [.5, 1, 2]) {
+          scene.applyGraphics({ ...scene.graphics, camera: { zoom } });
+          c.clearDamageKick(); shake(0, 0);
+          const rect = scene.getCanvasViewport(), scale = c.width / rect.width, base = { x: c.x, y: c.y };
+          scene.updateAimCamera(1, cameraGame.input);
+          const first = (c.getOffset().x - c.x) / scale;
+          for (let i = 0; i < 30; i++) scene.updateAimCamera(.1, cameraGame.input);
+          const stable = (c.getOffset().x - c.x) / scale;
+          const profiles = [];
+          for (const slot of ['primary', 'secondary']) {
+            p.switchWeapon(slot); p.fireCooldown = 0; p.setDebugState({ magazineAmmo: 6, chambered: true });
+            p.shootAt({ x: p.x + p.getSize() / 2 + 500, y: p.y + p.getSize() / 2 });
+            const [magnitude, duration, angle, frequency, decay] = shots.pop();
+            profiles.push({ slot, magnitude: magnitude / scale, duration, angle, frequency, decay });
+          }
+          scene.draw(cameraGame.renderer.ctx);
+          const pointer = cameraGame.input.getPointerState(), target = scene.screenToWorld(pointer.clientX, pointer.clientY);
+          const expected = { x: c.getOffset().x + (pointer.clientX - rect.left) * c.width / rect.width,
+            y: c.getOffset().y + (pointer.clientY - rect.top) * c.height / rect.height };
+          results.push({ zoom, first, stable, profiles, target, expected, baseStable: c.x === base.x && c.y === base.y });
+        }
+        scene.setWorldPaused(true);
+        const frozen = c.getOffset(); scene.update(.25, cameraGame.input);
+        results.push({ paused: JSON.stringify(c.getOffset()) === JSON.stringify(frozen) });
+        scene.setWorldPaused(false);
+        shake(0, 0); scene.updateAimCamera(1, cameraGame.input);
+        results.push({ returned: Math.hypot(c.getOffset().x - c.x, c.getOffset().y - c.y) / (c.width / scene.getCanvasViewport().width) });
+        scene.handleResize();
+        results.push({ cleared: c.getOffset().x === c.x && c.getOffset().y === c.y });
+      } finally { c.shake = shake; }
+      return results;
+    });
+    for (const sample of feedback.slice(0, 3)) {
+      assert.ok(sample.first > 89 && sample.first < 91 && Math.abs(sample.stable - 90) < .02, JSON.stringify(sample));
+      assert.equal(sample.baseStable, true, 'aim offset never feeds back into base follow');
+      assert.ok(Math.abs(sample.target.x - sample.expected.x) < 1e-7 && Math.abs(sample.target.y - sample.expected.y) < 1e-7);
+      for (const profile of sample.profiles) {
+        assert.ok(Math.abs(profile.magnitude - (profile.slot === 'primary' ? 6.5 : 8)) < 1e-7, JSON.stringify(profile));
+        assert.ok(profile.duration >= .06 && profile.duration <= .14);
+        assert.ok(Math.abs(profile.angle - Math.PI) <= Math.PI / 12 + 1e-7, JSON.stringify(profile));
+        assert.equal(profile.frequency, 50); assert.equal(profile.decay, 'linear');
+      }
+    }
+    assert.equal(feedback[3].paused, true); assert.ok(feedback[4].returned < .01); assert.equal(feedback[5].cleared, true);
+    await page.mouse.up({ button: 'right' });
     await page.screenshot({ path: `.review/camera-zoom-${dpr}.png` });
     assert.deepEqual(errors, []);
     await context.close();
   }
-  console.log('Camera zoom: DPR 1 / 1.25 / 2, resize, composition, HUD and follow passed.');
+  console.log('Camera passed: DPR 1 / 1.25 / 2, zoom .5 / 1 / 2, aim offset stability, recoil scale/direction, pause/reset, composition, HUD and follow.');
 } finally { await browser.close(); }

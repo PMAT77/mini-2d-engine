@@ -47,7 +47,7 @@ export type DrawCommand =
   | { op: "ellipse"; x: number; y: number; rx: number; ry: number }
   | { op: "fill" }
   | { op: "stroke" }
-  | { op: "drawStowedWeapons"; size: number; activeSlot: WeaponSlot; alpha: number }
+  | { op: "drawStowedWeapons"; size: number; activeSlot: WeaponSlot; alpha: number; ownedFirearms?: { primary: boolean; secondary: boolean } }
   | {
     op: "drawHeldWeapon";
     size: number;
@@ -90,7 +90,7 @@ export function executeDrawCommands(
       case "fill": ctx.fill(); break;
       case "stroke": ctx.stroke(); break;
       case "drawStowedWeapons":
-        drawStowedWeapons(ctx, command.size, command.activeSlot, command.alpha);
+        drawStowedWeapons(ctx, command.size, command.activeSlot, command.alpha, command.ownedFirearms);
         break;
       case "drawHeldWeapon":
         drawHeldWeapon(ctx, command.size, command.kind, command.slot, command.hand, command.angle);

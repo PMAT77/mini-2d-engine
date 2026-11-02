@@ -24,7 +24,6 @@ try {
     await page.keyboard.up('Enter');
     await page.mouse.move(500, 300);
     await page.waitForFunction(() => document.querySelector('[data-crosshair="root"]')?.dataset.crosshairImage === 'loaded', null, { timeout: 5000 });
-    await page.screenshot({ path: join(output, 'mouse-gameplay-dpr' + dpr + '.png') });
     await page.evaluate(async () => {
       const { createFixedScene } = await import('/tests/fixed-scene.ts');
       const s = await createFixedScene(shootingGame,100,100,200.5,200.5,1);
@@ -33,7 +32,13 @@ try {
       window.liveShots = 0; s.player.setOnShootCallback(() => liveShots++);
     });
     await page.mouse.move(500, 300); await page.mouse.down();
-    await page.waitForFunction(() => liveShots >= 3); await page.mouse.up();
+    await page.waitForTimeout(80);
+    assert.equal(await page.evaluate(() => liveShots), 0, 'left alone never fires');
+    assert.equal(await page.locator('[data-crosshair="root"]').evaluate(el => getComputedStyle(el).display), 'none');
+    assert.equal(await page.locator('body > canvas').evaluate(c => c.style.cursor), '', 'idle system cursor stays visible');
+    await page.screenshot({ path: join(output, 'mouse-gameplay-dpr' + dpr + '.png') });
+    await page.mouse.up(); await page.mouse.down({ button: 'right' }); await page.mouse.down();
+    await page.waitForFunction(() => liveShots >= 3); await page.mouse.up(); await page.mouse.up({ button: 'right' });
     const live = await page.evaluate(() => ({ shots: liveShots, ammo: shootingGame.sceneManager.getCurrentScene().player.getMagazineAmmo() }));
     assert.ok(live.ammo < 6, 'real running frames fire using mouse input');
     await page.evaluate(() => { window.requestAnimationFrame = () => 0; });
@@ -71,6 +76,10 @@ try {
       p.setOnShootCallback(() => mouseTest.shots++); mouseTest.render();
     });
     await page.mouse.move(500, 300);
+    await page.evaluate(() => mouseTest.render());
+    assert.equal(await page.locator('[data-crosshair="root"]').evaluate(el => getComputedStyle(el).display), 'none', 'moving the idle pointer cannot reveal the reticle');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), false);
+    await page.mouse.down({ button: 'right' });
     for (const shake of [false, true]) {
       const check = await page.evaluate(shake => {
         const t = mouseTest, c = t.scene.camera;
@@ -94,8 +103,8 @@ try {
       near(check.reticle.offset, 0, .2); assert.equal(check.reticle.target, false);
       assert.equal(check.reticle.canvas.width, Math.round(64 * dpr), 'the reticle canvas matches the device pixel ratio');
       assert.equal(check.cursor, 'none');
-      // 对局内系统指针隐藏（页面级），只留准星；调试面板自己保留可点击指针。
-      assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), true, 'system cursor is hidden while playing');
+      // 瞄准时系统指针隐藏（页面级），只留准星。
+      assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), true, 'system cursor is hidden while aiming');
       assert.equal(await page.evaluate(() => getComputedStyle(document.body).cursor), 'none', 'body cursor is suppressed in game');
     }
     await page.screenshot({ path: join(output, 'mouse-aim-dpr' + dpr + '.png') });
@@ -111,7 +120,6 @@ try {
     const spread = await page.evaluate(() => reticleStats());
     assert.ok(spread.offset > 0 && spread.offset <= 7, 'a shot spreads both brackets outward');
     await page.screenshot({ path: join(output, 'mouse-crosshair-spread-dpr' + dpr + '.png') });
-    await page.mouse.down({ button: 'right' });
     const right = await page.evaluate(() => { const t = mouseTest, before = t.scene.player.currentRotation; t.tick(.05); return { before, after: t.scene.player.currentRotation, shots: t.shots }; });
     assert.ok(Math.abs(right.after - right.before) > .01); assert.equal(right.shots, 1);
     await page.mouse.up({ button: 'right' });
@@ -129,30 +137,46 @@ try {
     await page.mouse.down(); await page.mouse.down({ button: 'right' });
     await page.evaluate(() => mouseTest.tick());
     assert.equal(await page.evaluate(() => { const p = mouseTest.game.input.getPointerState(); return p.leftDown && p.rightDown; }), true);
+    assert.equal(await page.evaluate(() => mouseTest.shots), 0, 'left then right cannot fire');
     await page.mouse.up({ button: 'right' });
     assert.equal(await page.evaluate(() => mouseTest.game.input.getPointerState().leftDown), true);
+    await page.mouse.down({ button: 'right' }); await page.evaluate(() => mouseTest.tick(.3));
+    assert.equal(await page.evaluate(() => mouseTest.shots), 0, 're-aiming cannot acquire an already held left button');
+    await page.mouse.up(); await page.mouse.down(); await page.evaluate(() => mouseTest.tick());
+    assert.equal(await page.evaluate(() => mouseTest.shots), 1, 'a fresh left press after aiming fires');
+    await page.mouse.up({ button: 'right' }); await page.evaluate(() => mouseTest.tick(.3));
+    assert.equal(await page.evaluate(() => mouseTest.shots), 1, 'right release stops automatic fire');
     await page.mouse.up();
     await page.keyboard.press('ArrowRight'); await page.evaluate(() => mouseTest.tick(.3));
     assert.equal(await page.evaluate(() => mouseTest.shots), 1);
+    await page.mouse.down({ button: 'right' }); await page.mouse.down();
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+    await page.evaluate(() => mouseTest.tick(.3));
+    assert.equal(await page.evaluate(() => mouseTest.shots), 1, 'Escape discards a pending click and held aim/fire');
+    await page.mouse.move(510, 300); await page.evaluate(() => mouseTest.tick(.3));
+    assert.equal(await page.evaluate(() => mouseTest.shots), 1, 'held buttons cannot reacquire after Escape');
+    await page.mouse.up(); await page.mouse.up({ button: 'right' });
     assert.equal(await page.locator('body > canvas').evaluate(c => c.dispatchEvent(new MouseEvent('contextmenu', { cancelable: true }))), false);
     await page.evaluate(() => { const t = mouseTest; t.reset(); t.scene.player.x = t.scene.player.y = 200.5; t.scene.camera.reset(); t.scene.map.tiles[4][6] = 'wall'; t.scene.map.tiles[4][9] = 'mineral'; t.scene.map.tileHp[4][9] = 100; t.render(); });
     const behindWall = await page.evaluate(() => mouseTest.client(725, 225));
-    await page.mouse.move(behindWall.x, behindWall.y); await page.mouse.click(behindWall.x, behindWall.y);
+    await page.mouse.move(behindWall.x, behindWall.y); await page.mouse.down({ button: 'right' }); await page.mouse.click(behindWall.x, behindWall.y);
     const wall = await page.evaluate(() => { mouseTest.tick(); const b = mouseTest.scene.player.bullets[0]; b.update(.5, mouseTest.scene.map); return { x: b.getPosition().x + 5, hp: mouseTest.scene.map.tileHp[4][9], destroyed: b.getIsDestroyed() }; });
     near(wall.x, 295); assert.equal(wall.hp, 100); assert.equal(wall.destroyed, true);
+    await page.mouse.up({ button: 'right' });
     await page.mouse.down(); await page.mouse.move(1110, 300); await page.mouse.up();
     assert.equal(await page.evaluate(() => mouseTest.game.input.getPointerState().leftDown), false);
     assert.equal(await page.locator('body > canvas').evaluate(c => c.style.cursor), '');
     await page.mouse.move(500, 300); await page.mouse.down({ button: 'right' }); await page.mouse.down();
     await page.evaluate(() => window.dispatchEvent(new Event('blur')));
     assert.equal(await page.evaluate(() => { const p = mouseTest.game.input.getPointerState(); return p.leftDown || p.rightDown || p.leftPressed || p.active; }), false);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await page.mouse.up(); await page.mouse.up({ button: 'right' });
     await page.keyboard.press('F2');
     await page.getByRole('spinbutton').first().focus();
     assert.equal(await page.evaluate(() => mouseTest.game.input.getPointerState().active), false);
     // Resize and stationary-pointer camera changes both use the newest displayed view.
-    await page.keyboard.press('Escape'); await page.setViewportSize({ width: 900, height: 650 }); await page.mouse.move(400, 250);
-    const resize = await page.evaluate(() => { const t = mouseTest; t.render(); const a = t.scene.screenToWorld(400, 250); t.scene.camera.x += 70; t.scene.camera.y += 30; t.render(); const b = t.scene.getPointerAim(t.game.input).target; return { dx: b.x - a.x, dy: b.y - a.y }; });
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await page.setViewportSize({ width: 900, height: 650 }); await page.mouse.move(400, 250);
+    const resize = await page.evaluate(() => { const t = mouseTest; t.render(); const a = t.scene.screenToWorld(400, 250); t.scene.camera.x += 70; t.scene.camera.y += 30; t.render(); const b = t.scene.screenToWorld(400, 250); return { dx: b.x - a.x, dy: b.y - a.y }; });
     near(resize.dx, 70); near(resize.dy, 30);
     await page.evaluate(() => {
       const t = mouseTest, s = t.scene, w = s.screenToWorld(400, 250);
@@ -187,6 +211,11 @@ try {
     assert.ok(await page.evaluate(() => mouseTest.pump()) < 0.1, 'releasing right relaxes the crosshair');
     const afterRelease = await page.evaluate(() => reticleStats());
     assert.ok(afterRelease.offset > -1, 'releasing right restores the asset spacing');
+    assert.equal(await page.locator('[data-crosshair="root"]').evaluate(el => getComputedStyle(el).display), 'none', 'releasing right hides the reticle');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), false);
+    assert.equal(await page.locator('body > canvas').evaluate(c => c.style.cursor), '', 'releasing right restores the system cursor');
+    await page.mouse.move(500, 250);
+    assert.equal(await page.locator('[data-crosshair="root"]').evaluate(el => getComputedStyle(el).display), 'none', 'pointer events cannot reshow the reticle');
     await page.evaluate(() => mouseTest.scene.onExit());
     assert.equal(await page.locator('body > canvas').evaluate(c => c.style.cursor), '');
     assert.equal(await page.evaluate(() => document.body.classList.contains('crosshair-active')), false, 'leaving the scene restores the system cursor');
@@ -195,5 +224,5 @@ try {
     results.push({ dpr, live, click, right, wall, resize }); await context.close();
   }
   writeFileSync(join(output, 'shooting-results.json'), JSON.stringify(results, null, 2));
-  console.log('Browser mouse shooting passed: real live fire, quick clicks, right-button turning, first-wall sweeps, DPR/zoom/shake reticle layer, focus/leave/exit and resize.');
+  console.log('Browser mouse shooting passed: right-before-left acquisition, no automatic re-aim fire, idle cursor/aim-only reticle, quick clicks, continuous fire, Escape/focus/leave/exit, first-wall sweeps and DPR/zoom/shake alignment.');
 } finally { await browser.close(); }

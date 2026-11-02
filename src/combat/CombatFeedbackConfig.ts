@@ -4,6 +4,9 @@ export const COMBAT_FEEDBACK = Object.freeze({
   meleeGlowSeconds: .45, meleeGlowAlpha: .55,
   infectionGlowSeconds: .25, infectionGlowAlpha: .12,
   damageKick: 3, damageKickSeconds: .10,
+  primaryShotShake: 6.5, secondaryShotShake: 8, // CSS px, converted by the scene's displayed scale.
+  shotShakeDurationRatio: .7, shotShakeMinSeconds: .06, shotShakeMaxSeconds: .14,
+  shotShakeAngleJitter: Math.PI / 12, shotShakeFrequency: 50,
   fragmentsPerDeath: 6, maxFlyingFragments: 256, groundCellSize: 256,
   maxBloodDrops: 256, fragmentDrag: 3, fragmentBounceSeconds: .10,
   fragmentMinSpeed: 140, fragmentMaxSpeed: 320, fragmentSpeedLimit: 360, fragmentImpulseScale: .45,

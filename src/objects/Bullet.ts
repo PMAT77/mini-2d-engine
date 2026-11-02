@@ -5,7 +5,7 @@ import { circleCollider } from "../physics/Collider";
 import type { ShapeCastHit } from "../physics/Motion";
 import { TileTypeId } from "../map/TileType";
 import { BulletWaterDrag, DEFAULT_BULLET_WATER_DRAG, DEFAULT_BALLISTICS } from "./PlayerConfig";
-import type { BulletImpact } from "../combat/CombatTypes";
+import type { BulletImpact, TargetBulletHit } from "../combat/CombatTypes";
 
 const WATER_DRAG_KEYS: Partial<Record<TileTypeId, keyof BulletWaterDrag>> = {
   [TileTypeId.SHALLOW_WATER]: 'shallow',
@@ -18,7 +18,7 @@ const WATER_DRAG_KEYS: Partial<Record<TileTypeId, keyof BulletWaterDrag>> = {
 const IMPACT_SMOKE = ['#ffffff', '#e8e8e8', '#cfcfcf', '#b5b5b5'];
 
 /** 场景提供的可命中单位：返回最早接触比例和命中后的结算回调。 */
-export interface BulletEntityHit {
+export interface BulletEntityHit extends TargetBulletHit {
   /** 沿本帧中心移动线段的比例，0–1。 */
   fraction: number;
   /** 世界坐标下的接触点，供命中特效定位。 */
@@ -212,7 +212,7 @@ export class Bullet {
       // 只按真正飞过的那一段累计距离；命中点之后的线段从未发生。
       const hitFraction = Math.max(0, Math.min(1, entityHit.fraction));
       this.traveledDistance += distance * hitFraction;
-      entityHit.apply(this.createImpact(this.traveledDistance));
+      entityHit.apply(this.createImpact(this.traveledDistance, entityHit));
       return;
     }
 
@@ -254,13 +254,13 @@ export class Bullet {
    * 方向取真实速度方向而不是开火方向；水中减速后 `impactSpeed` 会低于
    * `initialSpeed`，由击退层换算速度比例，这里不做任何人为调整。
    */
-  private createImpact(traveledDistance: number): BulletImpact {
+  private createImpact(traveledDistance: number, hit: TargetBulletHit): BulletImpact {
     const speed = this.velocity.length();
     const direction = speed > 1e-9
       ? Object.freeze({ x: this.velocity.x / speed, y: this.velocity.y / speed })
       : Object.freeze({ x: 0, y: 0 });
     return Object.freeze({
-      damage: this.damage,
+      damage: this.damage * (hit.damageMultiplier ?? 1),
       point: Object.freeze({ x: this.pos.x + this.size / 2, y: this.pos.y + this.size / 2 }),
       direction,
       impulse: this.impactImpulse,
@@ -268,6 +268,7 @@ export class Bullet {
       initialSpeed: this.initialSpeed,
       traveledDistance,
       source: 'bullet' as const,
+      ...(hit.hitRegion ? { hitRegion: hit.hitRegion } : {}),
     });
   }
 

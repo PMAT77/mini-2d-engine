@@ -22,6 +22,7 @@ export interface SoundRippleCue {
   readonly occluded: boolean;
   /** 世界噪声事件 id：同一事件只生成一条提示。 */
   readonly eventId: number;
+  readonly style?: 'sound' | 'explosion';
 }
 
 export interface SoundRippleView {
@@ -30,6 +31,7 @@ export interface SoundRippleView {
   strength: number;
   distance: number;
   eventId: number;
+  style?: 'sound' | 'explosion';
   age: number;
   life: number;
   maxRadius: number;
@@ -42,6 +44,7 @@ interface SoundRipple {
   strength: number;
   distance: number;
   eventId: number;
+  style?: 'sound' | 'explosion';
   age: number;
   life: number;
   maxRadius: number;
@@ -96,7 +99,7 @@ export class SoundRippleSystem {
       y: cue.y,
       strength,
       distance: cue.distance,
-      eventId: cue.eventId,
+      eventId: cue.eventId, style: cue.style ?? 'sound',
       age: 0,
       life: SOUND_RIPPLE_MIN_LIFE
         + ((hash >>> 12) % 1000) / 1000 * (SOUND_RIPPLE_MAX_LIFE - SOUND_RIPPLE_MIN_LIFE),
@@ -128,6 +131,24 @@ export class SoundRippleSystem {
       const progress = Math.min(1, ripple.age / ripple.life);
       const x = ripple.x - cameraX;
       const y = ripple.y - cameraY;
+      if (ripple.style === 'explosion') {
+        const outside = x < 0 || y < 0 || x > viewWidth || y > viewHeight;
+        let cx = x, cy = y;
+        if (outside) {
+          const dx = x - viewWidth / 2, dy = y - viewHeight / 2;
+          const t = Math.min((viewWidth / 2 - 36) / Math.max(.001, Math.abs(dx)), (viewHeight / 2 - 36) / Math.max(.001, Math.abs(dy)));
+          cx = viewWidth / 2 + dx * t; cy = viewHeight / 2 + dy * t;
+        }
+        ctx.strokeStyle = '#e8bd83'; ctx.lineWidth = 2.8;
+        const angle = Math.atan2(y - viewHeight / 2, x - viewWidth / 2);
+        for (let ring = 0; ring < 2; ring++) {
+          ctx.globalAlpha = (.25 + .5 * ripple.strength) * (1 - progress) ** 2 * (1 - ring * .3);
+          const radius = (outside ? 10 + 28 * progress : 12 + ripple.maxRadius * progress) + ring * 10;
+          ctx.beginPath(); ctx.arc(cx, cy, radius, outside ? angle - .8 : 0, outside ? angle + .8 : Math.PI * 2); ctx.stroke();
+        }
+        ctx.strokeStyle = SOUND_RIPPLE_COLOR; ctx.lineWidth = SOUND_RIPPLE_LINE_WIDTH;
+        continue;
+      }
       const padding = ripple.maxRadius + 8;
       if (x + padding < 0 || y + padding < 0 || x - padding > viewWidth || y - padding > viewHeight) continue;
 
@@ -159,7 +180,7 @@ export class SoundRippleSystem {
       y: ripple.y,
       strength: ripple.strength,
       distance: ripple.distance,
-      eventId: ripple.eventId,
+      eventId: ripple.eventId, style: ripple.style,
       age: ripple.age,
       life: ripple.life,
       maxRadius: ripple.maxRadius,

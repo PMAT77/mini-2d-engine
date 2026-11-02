@@ -77,7 +77,7 @@ test('C holsters the gun; empty hands cannot shoot or reload', () => {
   assert.equal(player.getActiveWeaponSlot(), 'secondary');
 });
 
-test('a reload is frozen on its own gun while another slot is active', () => {
+test('a reload is cancelled when leaving its gun', () => {
   const player = new Player(200.5, 200.5);
   player.shoot(new Vector2(1, 0));
   player.requestReload();
@@ -89,10 +89,11 @@ test('a reload is frozen on its own gun while another slot is active', () => {
   step(player, 1);
   player.cycleFirearm(-1);
   const resumed = player.getWeaponView().reloadProgress;
-  // 切走的这一秒不推进，所以进度基本没变。
-  assert.ok(Math.abs(resumed - progress) < 1e-9, `${resumed} != ${progress}`);
-
-  step(player, 1.2);
+  assert.equal(resumed, 0);
+  assert.equal(player.getWeaponView().isReloading, false);
+  player.requestReload();
+  assert.equal(player.getReloadProgress(), 0);
+  step(player, 1.4);
   assert.equal(player.getWeaponView().isReloading, false);
   assert.equal(player.getWeaponView().magazineAmmo, 6);
 });

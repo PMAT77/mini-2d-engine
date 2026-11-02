@@ -36,6 +36,85 @@ const step = (scene, frames, input = keysDown()) => {
   for (let frame = 0; frame < frames; frame++) scene.update(1 / 60, input);
 };
 
+const wheelInput = (direction, ...keys) => ({ ...keysDown(...keys), consumeWheelDirection() {
+  const sample = direction; direction = 0; return sample;
+} });
+
+test('wheel switches firearms once per frame, combines with Tab, restores empty hands and respects dropped weapons', () => {
+  const scene = makeScene(), scroll = wheelInput(1);
+  step(scene, 1, scroll);
+  assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
+  step(scene, 30, scroll);
+  assert.equal(scene.player.getActiveWeaponSlot(), 'primary', 'wheel is consumed once');
+  step(scene, 1, wheelInput(-1));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'secondary', 'either direction switches');
+  step(scene, 1, wheelInput(1, 'Tab'));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'primary', 'wheel and Tab cannot double-switch in one frame');
+  step(scene, 1, keysDown('c'));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'melee');
+  step(scene, 1, wheelInput(-1));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'primary', 'restores last firearm');
+  scene.player.dropWeapon('secondary');
+  step(scene, 1, wheelInput(1));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
+  assert.equal(scene.weaponSwitchedThisFrame, false, 'only one firearm makes no false switch signal');
+  scene.player.dropWeapon('primary');
+  step(scene, 1, wheelInput(-1));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'melee', 'does not reacquire a dropped weapon');
+});
+
+test('wheel cancels consumable use before completion, blocks simultaneous V and respects UI, pause and death', () => {
+  const scene = makeScene(); scene.survival.inventory.addVaccines(); scene.survival.infection.infect();
+  scene.quickSlotBindings[1] = 'vaccine';
+  scene.quickItemUse = { slot: 1, elapsed: .999, inputReset: undefined };
+  step(scene, 1, wheelInput(1, 'v'));
+  assert.equal(scene.quickItemUse, undefined);
+  assert.equal(scene.survival.inventory.getVaccines(), 1, 'switching does not finish or start a vaccine use');
+  assert.equal(scene.survival.infection.isInfected(), true);
+  assert.equal(scene.weaponSwitchedThisFrame, true, 'wheel is available to pickup interruption');
+  const blocked = wheelInput(-1); blocked.isBlocked = () => true;
+  step(scene, 1, blocked); assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
+  scene.paused = true; step(scene, 1, wheelInput(-1));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
+  scene.paused = false; scene.player.takeDamage(1000); step(scene, 1, wheelInput(-1));
+  assert.equal(scene.player.getActiveWeaponSlot(), 'primary');
+});
+
+test('canvas wheel input owns only vertical game scrolling and clears buffered scroll on every input handoff', () => {
+  const previousWindow = globalThis.window, previousDocument = globalThis.document;
+  const events = {}, canvasEvents = {}, documentEvents = {}, options = {};
+  globalThis.window = { addEventListener: (name, fn) => { events[name] = fn; } };
+  globalThis.document = { hidden: false, addEventListener: (name, fn) => { documentEvents[name] = fn; } };
+  const canvas = { style: {}, addEventListener(name, fn, option) { canvasEvents[name] = fn; options[name] = option; } };
+  try {
+    const input = new Input(canvas);
+    const wheel = (deltaY, extra = {}) => {
+      let prevented = false;
+      canvasEvents.wheel({ deltaY, defaultPrevented: false, preventDefault() { prevented = true; }, ...extra });
+      return prevented;
+    };
+    assert.deepEqual(options.wheel, { passive: false });
+    assert.equal(wheel(100), false, 'menus do not own wheel input');
+    input.setPointerEnabled(true);
+    for (const [delta, extra] of [[0, { deltaX: 100 }], [NaN, {}], [100, { ctrlKey: true }],
+      [100, { metaKey: true }], [100, { defaultPrevented: true }]]) assert.equal(wheel(delta, extra), false);
+    assert.equal(input.consumeWheelDirection(), 0);
+    assert.equal(wheel(100), true); wheel(100); wheel(-50);
+    const frame = input.captureFrame();
+    assert.equal(input.consumeWheelDirection(), 0, 'original input hands wheel ownership to the captured frame');
+    assert.equal(frame.consumeWheelDirection(), -1, 'one frame coalesces the latest direction');
+    assert.equal(frame.consumeWheelDirection(), 0);
+    for (const clear of [() => input.clear(), () => events.blur(), () => events.pointercancel(),
+      () => canvasEvents.pointerleave(), () => { document.hidden = true; documentEvents.visibilitychange(); },
+      () => input.setBlocked(true), () => input.setPointerEnabled(false)]) {
+      document.hidden = false; input.setBlocked(false); input.setPointerEnabled(true);
+      wheel(100); clear(); assert.equal(input.consumeWheelDirection(), 0, 'handoff cannot replay old scroll');
+    }
+    input.setPointerEnabled(true); input.setBlocked(true);
+    assert.equal(wheel(100), false); input.setBlocked(false); assert.equal(input.consumeWheelDirection(), 0);
+  } finally { globalThis.window = previousWindow; globalThis.document = previousDocument; }
+});
+
 test('Tab switches firearms once per press and not repeatedly while held', () => {
   const scene = makeScene();
   assert.equal(scene.player.getActiveWeaponSlot(), 'secondary');

@@ -12,7 +12,7 @@ const { ParticleSystem } = load('objects/ParticleSystem');
 const near = (a, b, tolerance = 1e-7) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b}`);
 const idle = { isKeyDown: () => false };
 const playerAt = (...args) => { const p = new Player(...args); p.applyConfig({ shooting: { spreadHorizontal: 0, spreadVertical: 0, maxSpreadHorizontal: 0, maxSpreadVertical: 0 } }); return p; };
-const aimRight = p => ({ target: { x: p.x + 1024.5, y: p.y + 24.5 }, fire: true, face: false });
+const aimRight = p => ({ target: { x: p.x + 1024.5, y: p.y + 24.5 }, fire: true, face: true });
 const empty = () => {
   const map = new TileMap(64, 32, { generateWater: false });
   map.tiles.forEach(row => row.fill('default'));

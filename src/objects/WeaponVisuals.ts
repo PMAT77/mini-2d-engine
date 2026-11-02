@@ -67,11 +67,11 @@ function knife(ctx: CanvasRenderingContext2D, s: number): void {
  * `alpha` 是整体可见度（翻滚时淡出/淡回），默认 1 保持站立不变。
  */
 export function drawStowedWeapons(ctx: CanvasRenderingContext2D, size: number,
-  activeSlot: WeaponSlot, alpha = 1): void {
+  activeSlot: WeaponSlot, alpha = 1, owned = { primary: true, secondary: true }): void {
   const s = size;
   ctx.save();
   ctx.globalAlpha = 0.92 * Math.min(1, Math.max(0, alpha));
-  if (activeSlot !== "primary") {
+  if (owned.primary && activeSlot !== "primary") {
     // 主武器：斜挎在背上，枪身横过身体，两端从头两侧露出。
     ctx.save();
     ctx.translate(-s * 0.08, 0);
@@ -79,7 +79,7 @@ export function drawStowedWeapons(ctx: CanvasRenderingContext2D, size: number,
     smg(ctx, s * 1.25);
     ctx.restore();
   }
-  if (activeSlot !== "secondary") {
+  if (owned.secondary && activeSlot !== "secondary") {
     // 副武器：挂在右腰，枪口朝后下方。
     ctx.save();
     ctx.translate(-s * 0.18, s * 0.38);

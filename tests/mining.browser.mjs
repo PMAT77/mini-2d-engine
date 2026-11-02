@@ -54,14 +54,20 @@ try {
       stagedMining.render(); const s = stagedMining.scene, v = s.displayedView, r = s.getCanvasViewport();
       return { x: r.left + (325 - v.x) * r.width / v.width, y: r.top + (225 - v.y) * r.height / v.height };
     });
-    await page.mouse.move(mouseTarget.x, mouseTarget.y); await page.mouse.down();
+    await page.mouse.move(mouseTarget.x, mouseTarget.y); await page.mouse.down({ button: 'right' }); await page.mouse.down();
     assert.deepEqual(await page.evaluate(() => stagedMining.untilHits(3)), [1, 1, 2]);
     await page.mouse.up();
     await page.evaluate(() => stagedMining.advance(0.12));
     await page.screenshot({ path: `${output}/mining-partial-dpr${dpr}.png` });
-    await page.mouse.move(mouseTarget.x, mouseTarget.y); await page.mouse.down();
+    // 瞄准取景已经平移，第二次点击按最新画面重新对准矿石。
+    const nextMouseTarget = await page.evaluate(() => {
+      const s = stagedMining.scene, v = s.displayedView, r = s.getCanvasViewport();
+      return { x: r.left + (325 - v.x) * r.width / v.width, y: r.top + (225 - v.y) * r.height / v.height };
+    });
+    await page.mouse.move(nextMouseTarget.x, nextMouseTarget.y); await page.mouse.down();
     assert.deepEqual(await page.evaluate(() => stagedMining.untilHits(10)), [1, 1, 2, 2, 3, 3, 4, 4, 5, 10]);
     await page.mouse.up();
+    await page.mouse.up({ button: 'right' });
     await page.evaluate(() => stagedMining.advance(0.7));
     assert.equal(await page.evaluate(() => stagedMining.safe), true);
     await page.screenshot({ path: `${output}/mining-destroyed-dpr${dpr}.png` });

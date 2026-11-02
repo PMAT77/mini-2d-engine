@@ -116,6 +116,8 @@ export const CONFIG_CONTROLS: ConfigControl[] = [
   playerNumber("roll", "speedMultiplier", "roll", "翻滚速度倍率", "倍", 1.1, 0.1, { max: 10 }),
   playerNumber("roll", "cooldown", "roll", "翻滚冷却", "秒", 0, 0.05, { max: 5 }),
   playerNumber("roll", "staminaCost", "roll", "体力消耗", "", 0, 1, { max: 100 }),
+  playerNumber("roll", "perfectDodgeWindow", "roll", "完美闪避窗口", "秒", 0, 0.01, { max: 5 }),
+  playerNumber("roll", "perfectDodgeStaminaReward", "roll", "完美闪避回体", "", 0, 1, { max: 100 }),
   playerNumber("activeFirearm", "magazineSize", "ammo", "弹匣容量", "发", 1, 1, { max: 100 }),
   playerNumber("activeFirearm", "reloadDuration", "ammo", "换弹时长", "秒", 0.01, 0.1, { max: 10 }),
   ...Object.entries(waterDragLabels).map(([key, label]) =>

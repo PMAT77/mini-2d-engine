@@ -37,7 +37,7 @@ export interface EnemyContext {
 const idleInput = { isKeyDown: () => false } as unknown as Input;
 const clock = (): number => typeof performance === 'undefined' ? 0 : performance.now();
 export function selectPlayerNoises(events: readonly NoiseEvent[]): readonly NoiseEvent[] {
-  return events.filter(e => e.sourceId === 'player' && ['footstep', 'waterStep', 'roll', 'gunshot', 'impact', 'mining'].includes(e.kind));
+  return events.filter(e => e.sourceId === 'player' && ['footstep', 'waterStep', 'roll', 'gunshot', 'impact', 'mining', 'explosion'].includes(e.kind));
 }
 
 export class EnemySystem {
@@ -67,7 +67,7 @@ export class EnemySystem {
     const spawner = new EncounterSpawning(this.map, origin, seededRandom(this.seed ^ 0x73706177));
     const occupied = [{ center: origin, radius: 25 }];
     for (const kind of ['shambler', 'runner'] as const) {
-      const requested = counts[kind] ?? 2;
+      const requested = counts[kind] ?? 10;
       if (!Number.isSafeInteger(requested) || requested < 0 || requested > 1000) throw new Error('遭遇数量必须为 0–1000 的整数');
       let spawned = 0;
       for (let i = 0; i < requested; i++) {

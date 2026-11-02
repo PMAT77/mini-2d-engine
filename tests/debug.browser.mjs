@@ -54,17 +54,18 @@ try {
     const edit = async (name, value) => { await field(name).fill(String(value)); await field(name).press('Enter'); };
     const tab = name => page.getByRole('tab', { name, exact: true });
     const openTab = async name => { if (await tab(name).getAttribute('aria-selected') !== 'true') await tab(name).click(); };
-    assert.equal(await panel.isVisible(), false);
+    await panel.waitFor({ state: 'hidden' }); assert.equal(await panel.isVisible(), false);
     await page.keyboard.press('F2'); assert.equal(await panel.isVisible(), true);
     await page.keyboard.down('F2'); // a held key's repeat must not close/reopen the panel
     await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', repeat: true, bubbles: true })));
     await page.keyboard.up('F2');
     // The preceding fresh keydown toggles closed once; repeating leaves it closed.
-    assert.equal(await panel.isVisible(), false); await page.getByRole('button', { name: '调试 · F2' }).click();
+    await panel.waitFor({ state: 'hidden' }); assert.equal(await panel.isVisible(), false); await page.getByRole('button', { name: '调试 · F2' }).click();
 
     const dialog = page.getByRole('dialog', { name: '调试面板' });
     assert.equal(await dialog.isVisible(), true, 'the panel is a modal dialog');
     assert.equal(await dialog.getAttribute('aria-modal'), 'true');
+    await page.waitForTimeout(200);
     const box = await panel.boundingBox();
     assert.ok(Math.abs(box.x + box.width / 2 - 550) <= 2, 'modal is horizontally centered');
     assert.ok(Math.abs(box.y + box.height / 2 - 400) <= 2, 'modal is vertically centered');
@@ -125,7 +126,7 @@ try {
     await edit('movement.startSpeedRatio', 0.4); await edit('movement.startupDuration', 0.2);
     await edit('movement.stopDuration', 0.4); await edit('sprint.rampDuration', 0);
     await page.locator('.debug-overlay').click({ position: { x: 5, y: 5 } });
-    assert.equal(await panel.isVisible(), false, 'clicking the backdrop closes the modal');
+    await panel.waitFor({ state: 'hidden' }); assert.equal(await panel.isVisible(), false, 'clicking the backdrop closes the modal');
     await page.keyboard.down('d');
     await page.evaluate(() => debugTest.tick(0.05));
     const startingSpeed = await page.evaluate(() => debugTest.scene.player.getVelocity().length());
@@ -153,11 +154,12 @@ try {
     assert.equal(await page.evaluate(() => debugTest.scene.player.getBullets().length), 0);
     await edit('shooting.damage', 42);
     await page.locator('.debug-overlay').click({ position: { x: 5, y: 5 } });
-    assert.equal(await panel.isVisible(), false, 'backdrop click restores gameplay input');
-    await page.mouse.down(); await page.evaluate(() => debugTest.tick(0.01));
+    await panel.waitFor({ state: 'hidden' }); assert.equal(await panel.isVisible(), false, 'backdrop click restores gameplay input');
+    await page.mouse.down({ button: 'right' }); await page.mouse.down(); await page.evaluate(() => debugTest.tick(0.01));
     assert.equal(await page.evaluate(() => debugTest.scene.player.getBullets()[0].getDamage()), 42);
     assert.ok(Math.abs(await page.evaluate(() => debugTest.scene.player.getBullets()[0].velocity.length()) - 1000) < 1e-8);
     await page.mouse.up();
+    await page.mouse.up({ button: 'right' });
     await page.keyboard.press('F2'); assert.equal(await panel.isVisible(), true);
 
     await edit('sprint.maxStamina', 200); await edit('stamina', 0);
@@ -321,7 +323,7 @@ try {
     await panel.locator('.debug-content').evaluate(element => { element.scrollTop = 0; });
     await page.screenshot({ path: join(output, `debug-panel-dpr-${dpr}.png`) });
 
-    await page.keyboard.press('Escape'); assert.equal(await panel.isVisible(), false);
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await panel.waitFor({ state: 'hidden' }); assert.equal(await panel.isVisible(), false);
     await page.evaluate(() => {
       window.__tabPrevented = null;
       window.addEventListener('keydown', event => { if (event.key === 'Tab') window.__tabPrevented = event.defaultPrevented; });
@@ -335,10 +337,10 @@ try {
     assert.notEqual(slotAfterGameplayTab, slotBeforeGameplayTab, 'Tab cycles the two firearms during gameplay');
     assert.equal(await page.evaluate(() => window.__tabPrevented), true, 'gameplay Tab is captured instead of moving browser focus');
     await page.keyboard.press('Escape');
-    assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), true, 'Escape reveals the system cursor');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), true, 'Escape pauses and reveals the system cursor');
     assert.equal(await page.locator('body > canvas').evaluate(element => getComputedStyle(element).cursor), 'default');
     await page.keyboard.press('Escape');
-    assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), false, 'Escape hides the system cursor again');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('cursor-visible')), false, 'Escape resumes and restores gameplay cursor');
     await page.keyboard.press('d');
     assert.equal(await page.evaluate(() => debugGame.input.isKeyDown('d')), false, 'keyup after close leaves no stuck key');
     await page.evaluate(async () => {

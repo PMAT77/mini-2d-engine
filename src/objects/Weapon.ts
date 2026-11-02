@@ -7,8 +7,18 @@ export type WeaponKind = "firearm" | "melee" | "empty";
 /** 补弹方式：换弹整匣丢弃重装，装填只补齐现有弹匣。 */
 export type ReloadMode = "reload" | "load";
 
+export interface WeaponStats {
+  damage: number;
+  roundsPerMinute: number;
+  bulletSpeed: number;
+  reloadSeconds: number;
+}
+
 /** HUD 渲染所需的当前武器快照。 */
 export interface WeaponView {
+  /** 缺省为持有，兼容既有 HUD 快照。 */
+  owned?: boolean;
+  stats?: Readonly<WeaponStats>;
   slot: WeaponSlot;
   /** 武器名，例如「格洛克手枪」「冲锋枪」「空手」。 */
   name: string;

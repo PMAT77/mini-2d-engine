@@ -59,6 +59,9 @@ interface WeaponState {
   reloadRate: number;
 }
 
+/** 地面武器保存独立快照，丢弃不补弹，也不丢失枪械参数。 */
+export type DroppedWeapon = Readonly<WeaponState & { slot: 'primary' | 'secondary' }>;
+
 const WEAPON_SWAP_DURATION = 0.28;
 /** 装填比整匣更换更慢：每发耗时按缺弹比例换算。 */
 const LOAD_TIME_FACTOR = 1.5;
@@ -118,6 +121,7 @@ function rollEnvelopeArea(u: number): number {
 export interface PlayerAimInput {
   target: { x: number; y: number };
   fire: boolean;
+  /** Active aiming; a fire request without it is ignored. */
   face: boolean;
 }
 
@@ -184,6 +188,10 @@ export class Player extends Entities {
   private roll: RollConfig = { ...DEFAULT_ROLL };
   /** 翻滚动作剩余时间（秒）；> 0 表示翻滚中。 */
   private rollTimeLeft = 0;
+  /** 独立于翻滚配置的本次窗口与奖励快照，调参不会延长当前窗口或重复发奖。 */
+  private perfectDodgeTimeLeft = 0;
+  private perfectDodgeStaminaReward = 0;
+  private perfectDodgeRewarded = false;
   /** 从起滚开始计的锁定时间 = duration + cooldown；归零后才允许下一次翻滚。 */
   private rollCooldownLeft = 0;
   private rollDirection = new Vector2();
@@ -256,6 +264,16 @@ export class Player extends Entities {
     validatePlayerDamage(event);
     if (!this.isAlive() || (event.kind === 'melee' && this.meleeGrace > 1e-9))
       return { appliedAmount: 0, killed: false, blocked: true };
+    if (event.kind === 'melee' && event.amount > 0 && this.isRolling() && this.perfectDodgeTimeLeft > 1e-9) {
+      const perfectDodge = !this.perfectDodgeRewarded;
+      if (perfectDodge) {
+        this.perfectDodgeRewarded = true;
+        this.stamina = Math.min(this.sprint.maxStamina, this.stamina + this.perfectDodgeStaminaReward);
+        this.unlockSprint();
+        this.onStatsChangeCallback?.();
+      }
+      return { appliedAmount: 0, killed: false, blocked: true, perfectDodge };
+    }
     const appliedAmount = Math.min(this.health, event.amount);
     this.health -= appliedAmount;
     if (appliedAmount > 0) {
@@ -271,6 +289,7 @@ export class Player extends Entities {
       this.deathCause = this.deathEvent = Object.freeze({ ...event,
         ...(event.sourcePosition ? { sourcePosition: Object.freeze({ ...event.sourcePosition }) } : {}) });
       this.velocity.set(0, 0); this.sprinting = false; this.rollTimeLeft = 0;
+      this.perfectDodgeTimeLeft = this.perfectDodgeStaminaReward = 0; this.perfectDodgeRewarded = false;
       this.pointerAim = undefined; this.isShooting = false; this.muzzleFlashTime = 0;
       this.cancelReload();
       this.rollActive = false; this.rollSpeed = 0; this.shotPoseTime = 0;
@@ -288,6 +307,7 @@ export class Player extends Entities {
     this.damageEvents = [];
     this.hitReactTime = 0; this.velocity.set(0, 0);
     this.sprinting = false; this.sprintTime = this.movementTime = this.stopTime = this.rollTimeLeft = 0;
+    this.perfectDodgeTimeLeft = this.perfectDodgeStaminaReward = 0; this.perfectDodgeRewarded = false;
     this.stopVelocity.set(0, 0); this.rollActive = false; this.rollSpeed = 0; this.pointerAim = undefined;
     this.onStatsChangeCallback?.();
   }
@@ -359,6 +379,7 @@ export class Player extends Entities {
     },
   };
   private activeSlot: WeaponSlot = "secondary";
+  private readonly ownedFirearms = new Set<WeaponSlot>(['primary', 'secondary']);
   private lastFirearmSlot: "primary" | "secondary" = "secondary";
   /** 换枪动作剩余时间（秒）；只影响绘制，不改变手部与弹道判定。 */
   private weaponSwapTime = 0;
@@ -520,6 +541,7 @@ export class Player extends Entities {
 
   private updateMovement(delta: number, input: Input, map?: TileMap): void {
     this.rollCooldownLeft = Math.max(0, this.rollCooldownLeft - delta);
+    this.perfectDodgeTimeLeft = Math.max(0, this.perfectDodgeTimeLeft - delta);
     if (this.rollTimeLeft <= 0) this.rollGroundingScale = 1;
     let remaining = delta;
     if (this.rollTimeLeft > 0) {
@@ -630,6 +652,9 @@ export class Player extends Entities {
       this.rollDirection.set(Math.cos(facing), Math.sin(facing));
     }
     this.rollTimeLeft = this.roll.duration;
+    this.perfectDodgeTimeLeft = Math.min(this.roll.perfectDodgeWindow, this.roll.duration);
+    this.perfectDodgeStaminaReward = this.roll.perfectDodgeStaminaReward;
+    this.perfectDodgeRewarded = false;
     this.rollCooldownLeft = this.roll.duration + this.roll.cooldown;
     this.rollDustSpawned = false;
     this.rollSpeed = 0;
@@ -830,11 +855,10 @@ export class Player extends Entities {
     this.recoil = Math.max(0, this.recoil - recovery / this.ballistics.recoilRecoveryDuration);
   }
 
-  private getOverlayLayout(offsetX = 0, offsetY = 0): { healthX: number; healthY: number; reloadX: number; reloadY: number; debuffX: number; debuffY: number } {
+  private getOverlayLayout(offsetX = 0, offsetY = 0): { reloadX: number; reloadY: number; debuffX: number; debuffY: number } {
     const centerX = this.x - offsetX + this.size / 2, centerY = this.y - offsetY + this.size / 2;
     const radius = this.size / Math.SQRT2 + 8, reloadOffset = (radius + 28) / Math.SQRT2;
-    return { healthX: centerX - this.size / 2, healthY: centerY + radius + 15,
-      reloadX: centerX + reloadOffset, reloadY: centerY - reloadOffset,
+    return { reloadX: centerX + reloadOffset, reloadY: centerY - reloadOffset,
       debuffX: centerX - radius - 18, debuffY: centerY };
   }
 
@@ -1361,7 +1385,7 @@ export class Player extends Entities {
   }
 
   /** 中止补弹并清零进度；翻滚会打断补弹。 */
-  private cancelReload(): void {
+  cancelReload(): void {
     this.isReloading = false;
     this.reloadRemaining = 0;
     this.reloadTotal = 0;
@@ -1415,7 +1439,8 @@ export class Player extends Entities {
       this.updateBullets(delta, map);
       return;
     }
-    this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y) ? aim : undefined;
+    this.pointerAim = aim && Number.isFinite(aim.target.x) && Number.isFinite(aim.target.y)
+      ? { ...aim, fire: aim.face && aim.fire } : undefined;
     this.isShooting = !!this.pointerAim?.fire && !this.isRolling() && !this.isReloading;
     this.updateRecoil(delta);
     if (this.hitReactTime > 0) this.hitReactTime = Math.max(0, this.hitReactTime - delta);
@@ -1438,7 +1463,7 @@ export class Player extends Entities {
     this.updateFootstepWetness(delta);
     if (movingInput && !this.isRolling()) this.emitFootsteps(startX, startY);
 
-    // 推进换弹：只有当前枪械槽会推进；切走时进度留在原枪上。
+    // 推进换弹：只有当前枪械槽会推进；实际切换时取消旧动作。
     if (this.isArmed() && this.isReloading) {
       this.reloadRemaining -= delta;
       if (this.reloadRemaining <= 1e-9) this.finishReload();
@@ -1487,18 +1512,22 @@ export class Player extends Entities {
     advancePlayerAnimation(this, delta);
   }
 
-  /** 切到指定槽位；换弹进度留在原枪上，切回来会继续。 */
+  /** 切到指定槽位；实际切换会中止旧枪的补弹。 */
   switchWeapon(slot: WeaponSlot): void {
-    if (!this.isAlive()) return;
+    if (!this.isAlive() || !this.hasWeapon(slot)) return;
     if (slot === this.activeSlot) return;
+    this.cancelReload();
     this.activeSlot = slot;
     if (slot !== "melee") this.lastFirearmSlot = slot;
     this.reloadBarAlpha = 0;
     this.weaponSwapTime = WEAPON_SWAP_DURATION;
   }
 
-  /** Q/E：在两把枪之间循环；空手时直接拔出最近用过的枪。 */
+  /** Tab/滚轮：在持有的两把枪之间切换；空手时拔出最近用过的枪。 */
   cycleFirearm(_direction: 1 | -1): void {
+    const available = (['primary', 'secondary'] as const).filter(slot => this.hasWeapon(slot));
+    if (!available.length) { this.switchWeapon('melee'); return; }
+    if (available.length === 1) { this.switchWeapon(available[0]); return; }
     if (this.activeSlot === "melee") {
       this.switchWeapon(this.lastFirearmSlot);
       return;
@@ -1508,12 +1537,32 @@ export class Player extends Entities {
 
   /** C：有近战武器时进近战槽，否则收枪变空手；再按一次回到最近用过的枪。 */
   toggleMelee(): void {
-    if (this.activeSlot === "melee") this.switchWeapon(this.lastFirearmSlot);
+    if (this.activeSlot === "melee") this.switchWeapon(this.hasWeapon(this.lastFirearmSlot) ? this.lastFirearmSlot
+      : this.hasWeapon('primary') ? 'primary' : this.hasWeapon('secondary') ? 'secondary' : 'melee');
     else this.switchWeapon("melee");
   }
 
   getActiveWeaponSlot(): WeaponSlot {
     return this.activeSlot;
+  }
+
+  hasWeapon(slot: WeaponSlot): boolean { return slot === 'melee' || this.ownedFirearms.has(slot); }
+
+  dropWeapon(slot: WeaponSlot): DroppedWeapon | null {
+    if (!this.isAlive() || slot === 'melee' || !this.hasWeapon(slot)) return null;
+    const state = this.weapons[slot];
+    state.isReloading = false; state.reloadRemaining = state.reloadTotal = state.reloadBase = 0; state.reloadMode = null;
+    const item: DroppedWeapon = { ...state, slot };
+    this.ownedFirearms.delete(slot);
+    if (this.activeSlot === slot) this.switchWeapon(this.hasWeapon('secondary') ? 'secondary' : this.hasWeapon('primary') ? 'primary' : 'melee');
+    return item;
+  }
+
+  collectWeapon(item: DroppedWeapon): boolean {
+    if (!this.isAlive() || (item.slot !== 'primary' && item.slot !== 'secondary') || this.hasWeapon(item.slot)) return false;
+    this.weapons[item.slot] = { ...item };
+    this.ownedFirearms.add(item.slot);
+    return true;
   }
   private updateBullets(delta: number, map?: TileMap): void {
     for (const bullet of this.bullets) bullet.update(delta, map);
@@ -1546,8 +1595,10 @@ export class Player extends Entities {
 
   /** 手里是否有能开火的枪。 */
   isArmed(): boolean {
-    return this.weapon.kind === "firearm";
+    return !this.holdingThrowable && this.weapon.kind === "firearm";
   }
+  /** Separate hand mode; does not modify firearm ownership or active slot. */
+  holdingThrowable = false;
 
   getWeaponName(): string {
     return this.weaponName;
@@ -1567,6 +1618,10 @@ export class Player extends Entities {
     const state = this.weapons[slot];
     return {
       slot,
+      owned: this.hasWeapon(slot),
+      stats: { damage: this.getModifiedValue(state.damage, 'damage'),
+        roundsPerMinute: this.getModifiedValue(1 / state.fireRate, 'fireRate') * 60,
+        bulletSpeed: this.getModifiedValue(state.bulletSpeed, 'bulletSpeed'), reloadSeconds: state.reloadDuration },
       name: state.name,
       kind: state.kind,
       magazineAmmo: state.magazineAmmo,
@@ -1761,25 +1816,9 @@ export class Player extends Entities {
     };
   }
 
-  /** 绘制角色脚边的血条、体力条与涉水/换弹指示。 */
+  /** 世界层只保留涉水/换弹指示，生命与体力由屏幕 HUD 绘制。 */
   drawUI(ctx: CanvasRenderingContext2D, offsetX = 0, offsetY = 0): void {
     this.drawWadingIndicator(ctx, offsetX, offsetY);
     this.drawReloadRing(ctx, offsetX, offsetY);
-    ctx.save();
-    const { healthX: x, healthY: y } = this.getOverlayLayout(offsetX, offsetY);
-    ctx.fillStyle = "#181d24";
-    ctx.fillRect(x - 1, y - 1, this.size + 2, 7);
-    ctx.fillStyle = this.health / this.maxHealth <= 0.25 ? "#f16b67" : "#79e2a0";
-    ctx.fillRect(x, y, this.size * this.health / this.maxHealth, 5);
-    ctx.fillStyle = "#181d24";
-    ctx.fillRect(x - 1, y + 9, this.size + 2, 6);
-    ctx.fillStyle = this.exhausted ? "#50616b" : "#75dfe9";
-    ctx.fillRect(x, y + 10, this.size * this.stamina / this.sprint.maxStamina, 4);
-    if (this.exhausted) {
-      ctx.strokeStyle = "#ffbc70";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x - 1, y + 9, this.size + 2, 6);
-    }
-    ctx.restore();
   }
 }

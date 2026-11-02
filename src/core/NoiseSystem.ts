@@ -9,6 +9,7 @@
  */
 
 export type NoiseKind =
+  | "explosion"
   | "footstep"
   | "waterStep"
   | "roll"
@@ -22,6 +23,7 @@ export type NoiseKind =
 
 /** 每类噪声的默认传播半径（世界像素）与响度（0–1，供未来做发现权重）。 */
 export const NOISE_PROFILES: Record<NoiseKind, { radius: number; loudness: number }> = {
+  explosion: { radius: 900, loudness: 1 },
   footstep: { radius: 150, loudness: 0.35 },
   waterStep: { radius: 260, loudness: 0.55 },
   roll: { radius: 210, loudness: 0.5 },

@@ -25,6 +25,21 @@ export class Camera {
   /** 相机移动阻尼系数，控制相机跟随的平滑程度 */
   public damping: number;
 
+  private aimOffsetX = 0;
+  private aimOffsetY = 0;
+  private static readonly AIM_OFFSET_DAMPING = 10;
+
+  /** Smooth a visual offset without feeding it back into the movement dead zone. */
+  public updateAimOffset(x: number, y: number, delta: number): void {
+    if (!Number.isFinite(delta) || delta < 0) return;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) { x = 0; y = 0; }
+    const factor = 1 - Math.exp(-Camera.AIM_OFFSET_DAMPING * delta);
+    this.aimOffsetX += (x - this.aimOffsetX) * factor;
+    this.aimOffsetY += (y - this.aimOffsetY) * factor;
+  }
+
+  public clearAimOffset(): void { this.aimOffsetX = this.aimOffsetY = 0; }
+
   // === 震动属性 ===
   /** 基础震动幅度 */
   private shakeMagnitude: number = 0;
@@ -96,6 +111,7 @@ export class Camera {
     frequency: number = 20,
     decayMode: 'linear' | 'quadratic' | 'exponential' = 'quadratic'
   ): void {
+    if (magnitude > 0 && this.shakeTime < this.shakeDuration && this.shakeMagnitude * this.calculateDecayFactor() > magnitude) return;
     this.shakeMagnitude = magnitude;
     this.shakeTime = 0; // 重置震动时间
     this.shakeDuration = duration;
@@ -111,8 +127,8 @@ export class Camera {
   public getOffset(): { x: number; y: number } {
     const progress = this.damageKickAge / C.damageKickSeconds;
     const kick = progress < 1 ? C.damageKick * Math.cos(progress * Math.PI * 2) * (1 - progress) : 0;
-    const baseX = this.x + Math.cos(this.damageKickAngle) * kick;
-    const baseY = this.y + Math.sin(this.damageKickAngle) * kick;
+    const baseX = this.x + this.aimOffsetX + Math.cos(this.damageKickAngle) * kick;
+    const baseY = this.y + this.aimOffsetY + Math.sin(this.damageKickAngle) * kick;
     if (this.shakeTime < this.shakeDuration && this.shakeMagnitude > 0) {
       // 计算衰减系数
       const decayFactor = this.calculateDecayFactor();
@@ -240,6 +256,7 @@ export class Camera {
    */
   public reset(): void {
     this.clearDamageKick();
+    this.clearAimOffset();
     this.x = 0;
     this.y = 0;
     this.shakeMagnitude = 0;

@@ -175,7 +175,7 @@ test('loading scene reports real progress, displays errors and ignores completio
   assert.equal(failed.error, 'missing image'); assert.equal(switches, 0);
 });
 test('failed images and failed configuration fetches reject instead of completing progress', async () => {
-  globalThis.Image = class { set src(_value) { queueMicrotask(() => this.onerror()); } };
+  globalThis.Image = class { set src(_value) { queueMicrotask(() => this.onerror?.()); } };
   let progress = 0;
   await assert.rejects(new AssetLoader({ player: '/missing.png' }).load(() => progress++), /图片加载失败/);
   assert.equal(progress, 0);
@@ -185,13 +185,18 @@ test('failed images and failed configuration fetches reject instead of completin
   finally { globalThis.fetch = original; ConfigLoader.clearCache(); }
 });
 test('game load is idempotent, completes real resources and preserves one resize listener', async t => {
-  // The DOM overlay is exercised in debug.browser.mjs; this test owns scene lifecycle only.
-  let panels = 0;
+  // DOM overlays are exercised in debug/backpack.browser.mjs; this test owns scene lifecycle only.
+  let panels = 0, backpacks = 0;
   const panelModule = load('ui/PlayerDebugPanel'), originalPanel = panelModule.PlayerDebugPanel;
-  t.after(() => { panelModule.PlayerDebugPanel = originalPanel; });
+  const backpackModule = load('ui/BackpackPanel'), originalBackpack = backpackModule.BackpackPanel;
+  t.after(() => { panelModule.PlayerDebugPanel = originalPanel; backpackModule.BackpackPanel = originalBackpack; });
   panelModule.PlayerDebugPanel = class {
     constructor() { panels++; }
     dispose() { panels--; }
+  };
+  backpackModule.BackpackPanel = class {
+    constructor() { backpacks++; }
+    dispose() { backpacks--; }
   };
   const scene = new GameScene(); let configs = 0;
   scene.configLoader = { async load() { configs++; }, getConfig() { return {}; } };
@@ -200,11 +205,11 @@ test('game load is idempotent, completes real resources and preserves one resize
   const progress = [];
   await Promise.all([scene.load((a, b) => progress.push([a, b])), scene.load()]);
   assert.deepEqual(progress, [[0, 1], [1, 1]]); assert.equal(configs, 1);
-  await scene.onEnter(); assert.equal(listeners.size, 1); assert.equal(panels, 1);
-  await scene.onEnter(); assert.equal(panels, 1);
-  scene.onExit(); assert.equal(listeners.size, 0); assert.equal(panels, 0);
-  await scene.onEnter(); assert.equal(listeners.size, 1); assert.equal(panels, 1);
-  scene.onExit(); assert.equal(listeners.size, 0); assert.equal(panels, 0);
+  await scene.onEnter(); assert.equal(listeners.size, 1); assert.equal(panels, 1); assert.equal(backpacks, 1);
+  await scene.onEnter(); assert.equal(panels, 1); assert.equal(backpacks, 1);
+  scene.onExit(); assert.equal(listeners.size, 0); assert.equal(panels, 0); assert.equal(backpacks, 0);
+  await scene.onEnter(); assert.equal(listeners.size, 1); assert.equal(panels, 1); assert.equal(backpacks, 1);
+  scene.onExit(); assert.equal(listeners.size, 0); assert.equal(panels, 0); assert.equal(backpacks, 0);
 });
 
 test('an unentered scene does not receive input during its transition', () => {

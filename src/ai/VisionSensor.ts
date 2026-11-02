@@ -99,7 +99,8 @@ export class VisionSensor {
       return { ...hidden, illuminated };
     }
 
-    if (!hasLineOfSight(map, viewer.x, viewer.y, target.x, target.y)) {
+    if (!hasLineOfSight(map, viewer.x, viewer.y, target.x, target.y)
+      || (map.sightOpacity?.(viewer.x, viewer.y, target.x, target.y) ?? 0) >= .35) {
       this.seenSeconds = 0;
       return { ...hidden, illuminated };
     }

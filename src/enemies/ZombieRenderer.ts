@@ -7,6 +7,7 @@ import { blendColorWithWhite } from '../utils/colorUtils';
 export interface ZombiePose {
   x: number; y: number; size: number; facing: number; kind: ZombieKind;
   phase: number; speed: number; hit: number; flash: number; attack: Readonly<AttackPose>; life: LifeState;
+  headFlash?: number;
 }
 export interface ZombiePart {
   kind: 'head' | 'torso' | 'arm' | 'leg'; x: number; y: number; angle: number;
@@ -79,7 +80,20 @@ export class ZombieRenderer {
       ctx.strokeStyle = 'rgba(233,214,186,.25)'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(0, 0, p.size * .95, -.90, .90); ctx.stroke(); ctx.restore();
     }
-    for (const part of this.parts(p)) this.drawPart(ctx, part, ox, oy, p.flash, silhouette);
+    const parts = this.parts(p);
+    for (const part of parts) this.drawPart(ctx, part, ox, oy, p.flash, silhouette);
+    if (!silhouette && p.headFlash) {
+      const head = parts[parts.length - 1], radius = head.width * .65;
+      ctx.save(); ctx.translate(head.x - ox, head.y - oy); ctx.globalAlpha *= p.headFlash;
+      ctx.strokeStyle = '#fff0b5'; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const a = head.angle + i * Math.PI / 2;
+        ctx.moveTo(Math.cos(a) * radius, Math.sin(a) * radius);
+        ctx.lineTo(Math.cos(a) * (radius + 4), Math.sin(a) * (radius + 4));
+      }
+      ctx.stroke(); ctx.restore();
+    }
   }
 
   static shadow(ctx: CanvasRenderingContext2D, p: ZombiePose, ox = 0, oy = 0): void {

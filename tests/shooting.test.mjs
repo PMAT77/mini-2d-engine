@@ -18,12 +18,18 @@ const near = (a, b, epsilon = 1e-7) => assert.ok(Math.abs(a - b) <= epsilon, a +
 const center = bullet => { const p = bullet.getPosition(), r = bullet.getSize() / 2; return { x: p.x + r, y: p.y + r }; };
 const makePlayer = () => { const p = new Player(200.5, 200.5); p.applyConfig({ shooting: noSpread }); return p; };
 const map = () => { const m = new TileMap(64, 32, { generateWater: false }); m.tiles.forEach(row => row.fill('default')); return m; };
-const aim = (x = 825, y = 225, fire = true, face = false) => ({ target: { x, y }, fire, face });
+const aim = (x = 825, y = 225, fire = true, face = true) => ({ target: { x, y }, fire, face });
 
-test('mouse fire is independent of body facing and arrow keys no longer shoot', () => {
+test('mouse fire requires aiming and arrow keys no longer shoot', () => {
   const p = makePlayer(), rotation = p.currentRotation;
+  let shots = 0; p.setOnShootCallback(() => shots++);
+  const ammo = p.getWeaponView();
   p.update(.1, keys('ArrowRight', 'ArrowUp'));
+  p.update(.1, idle, undefined, aim(825, 225, true, false));
   assert.equal(p.getBullets().length, 0);
+  assert.equal(shots, 0); near(p.getRecoilState().intensity, 0); near(p.getMuzzleFlashTime(), 0);
+  assert.equal(p.getMagazineAmmo(), ammo.magazineAmmo); assert.equal(p.getChambered(), ammo.chambered);
+  near(p.armLift, 0);
   p.update(0, idle, undefined, aim());
   assert.equal(p.getBullets().length, 1); near(p.currentRotation, rotation);
   near(p.getBullets()[0].velocity.x, 2600); near(p.getBullets()[0].velocity.y, 0);
@@ -224,10 +230,31 @@ test('pointer click edges survive release between frames and clear on ownership,
   canvasListeners.mousedown(event); assert.equal(input.getPointerState().active, false);
   input.setPointerEnabled(true); canvasListeners.mousedown(event); listeners.mouseup(event);
   const click = input.consumePointerState(); assert.equal(click.leftDown, false); assert.equal(click.leftPressed, true);
-  assert.equal(input.consumePointerState().leftPressed, false); assert.equal(canvas.style.cursor, 'none');
+  assert.equal(input.consumePointerState().leftPressed, false); assert.equal(canvas.style.cursor, 'crosshair');
+  // Order must be remembered even when both mouse events arrive between world frames.
+  const left = event, right = { ...event, button: 2, buttons: 3 };
+  input.clear(); canvasListeners.mousedown(left); canvasListeners.mousedown(right);
+  assert.equal(canvas.style.cursor, 'none', 'aiming hides the system cursor');
+  assert.equal(input.consumePointerState().aimFireDown, false, 'left then right never acquires fire');
+  listeners.mouseup(right); canvasListeners.mousedown(right);
+  assert.equal(input.consumePointerState().aimFireDown, false, 're-aiming with left held cannot resume');
+  listeners.mouseup(left); canvasListeners.mousedown(left);
+  assert.equal(input.consumePointerState().aimFireDown, true, 'a fresh left press while aiming acquires fire');
+  listeners.mouseup(right);
+  assert.equal(canvas.style.cursor, 'crosshair', 'right release restores the system cursor');
+  assert.equal(input.getPointerState().aimFireDown, false, 'right release stops held fire immediately');
+  assert.equal(input.getPointerState().leftDown, true, 'raw left remains available to UI');
+  input.clear(); canvasListeners.mousedown(right); canvasListeners.mousedown(left); listeners.mouseup(left);
+  const frame = input.captureFrame(), pulse = frame.consumePointerState();
+  assert.equal(pulse.aimFireDown, false); assert.equal(pulse.aimFirePressed, true, 'aimed short clicks survive left release');
+  assert.equal(frame.consumePointerState().aimFirePressed, false);
+  assert.equal(input.getPointerState().aimFirePressed, false, 'capture consumes the pulse once');
+  canvasListeners.mousedown(left); listeners.mouseup(right); canvasListeners.mousedown(right);
+  assert.equal(input.getPointerState().aimFirePressed || input.getPointerState().aimFireDown, false, 'right release discards pending fire');
   for (const clear of [() => input.setBlocked(true), () => canvasListeners.pointerleave(), () => listeners.pointercancel(), () => listeners.blur(), () => { document.hidden = true; docListeners.visibilitychange(); document.hidden = false; }, () => input.setPointerEnabled(false)]) {
-    input.setBlocked(false); input.setPointerEnabled(true); canvasListeners.mousedown(event); canvasListeners.mousedown({ ...event, button: 2, buttons: 3 });
-    clear(); const state = input.consumePointerState(); assert.equal(state.active, false); assert.equal(state.leftDown || state.rightDown || state.leftPressed, false); assert.equal(canvas.style.cursor, 'crosshair');
+    input.setBlocked(false); input.setPointerEnabled(true); canvasListeners.mousedown({ ...event, button: 2, buttons: 2 }); canvasListeners.mousedown(event);
+    assert.equal(input.getPointerState().aimFireDown, true);
+    clear(); const state = input.consumePointerState(); assert.equal(state.active, false); assert.equal(state.leftDown || state.rightDown || state.leftPressed || state.aimFireDown || state.aimFirePressed, false); assert.equal(canvas.style.cursor, 'crosshair');
   }
   input.setPointerEnabled(true); canvasListeners.pointermove({ ...event, buttons: 3 });
   assert.equal(input.getPointerState().leftDown || input.getPointerState().rightDown, false);

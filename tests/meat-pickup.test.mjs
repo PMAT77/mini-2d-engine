@@ -137,7 +137,8 @@ test('rolling, firing or switching weapons cancels the hold', () => {
         consumePointerState: () => {
           if (consumed) return undefined;
           consumed = true;
-          return { active: true, clientX: 425, clientY: 425, leftDown: true, leftPressed: true };
+          return { active: true, clientX: 425, clientY: 425, leftDown: true, leftPressed: true,
+            rightDown: true, aimFireDown: true, aimFirePressed: true };
         },
       };
     }

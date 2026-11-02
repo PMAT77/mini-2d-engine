@@ -89,10 +89,10 @@ try {
       const probePixel = (x, y) => [...probeContext.getImageData(x, y, 1, 1).data];
       const clip = {
         corner: probePixel(1, 1),
-        aboveDisk: probePixel(Math.round(layout.centerX), layout.top - 3),
+        aboveDisk: probePixel(Math.round(layout.centerX + 30), layout.top - 3),
         center: probePixel(Math.round(layout.centerX), Math.round(layout.centerY)),
-        // 采样点放在外圈描边正中间：半径 100.5、2px 描边时描边覆盖 y 20..22，取整行覆盖的 y=21。
-        border: probePixel(Math.round(layout.centerX), layout.top + 1),
+        // 左侧外圈取样，避开现在跨在上下圆环上的 N/S 标记。
+        border: probePixel(layout.left + 1, Math.round(layout.centerY)),
       };
 
       // 3) The player arrow follows the real facing direction, tip forward.

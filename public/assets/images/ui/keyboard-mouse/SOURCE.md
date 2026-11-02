@@ -83,7 +83,7 @@ public/assets/images/ui/keyboard-mouse/
 | 手电开关 | G | `Keyboard_G` |
 | 调试面板 | F2 | `Keyboard_F2` |
 | 唤出系统鼠标 | Esc | `Keyboard_Esc` |
-| 射击 | 鼠标左键 | `Mouse_Key_1_Left` |
+| 射击（需先按住右键瞄准） | 鼠标左键 | `Mouse_Key_1_Left` |
 | 转向 / 瞄准 | 鼠标右键 | `Mouse_Key_2_Right` |
 | 瞄准位置 | 鼠标移动 | `Mouse_Move` |
 

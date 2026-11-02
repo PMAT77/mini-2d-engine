@@ -1,18 +1,29 @@
+import { PausePanel } from '../ui/PausePanel';
+import { TradingStation } from '../objects/TradingStation';
+import { collectBlastTerrain } from '../throwables/BlastTerrain';
 import { Camera } from "../core/Camera";
 import { Input } from "../core/Input";
 import { Scene } from "../core/Scene";
 import { MenuScene } from "./MenuScene";
 import { resolveFirstDamageableHit } from "../combat/HitTargetResolver";
+import { CombatScoreSystem } from "../combat/CombatScoreSystem";
 import { ActorCollisionWorld } from "../physics/ActorCollisionWorld";
 import { EnemySystem, selectPlayerNoises } from "../enemies/EnemySystem";
 import type { DamageableEntry } from "../combat/HitTargetResolver";
 import { Zombie } from "../enemies/Zombie";
 import { ZombieGoreSystem } from "../enemies/ZombieGoreSystem";
 import { DamageFeedbackOverlay } from "../ui/DamageFeedbackOverlay";
+import { COMBAT_FEEDBACK as C } from "../combat/CombatFeedbackConfig";
 import { EncounterSpawning } from "../enemies/EncounterSpawning";
 import { PlayerSurvivalSystem } from "../survival/PlayerSurvivalSystem";
-import { PlayerStatusHud } from "../ui/PlayerStatusHud";
+import { PlayerStatusHud, getPlayerStatusHudRect } from "../ui/PlayerStatusHud";
+import { drawPlayerVitalsHud, getPlayerVitalsHudRect } from "../ui/PlayerVitalsHud";
+import { BackpackHud, getBackpackHudRect } from "../ui/BackpackHud";
+import { QuickSlotHud, getQuickSlotHudLayout } from "../ui/QuickSlotHud";
+import { BackpackPanel } from "../ui/BackpackPanel";
+import { createBackpackView, createQuickSlotViews, type BackpackItemId } from "../ui/BackpackView";
 import { VaccinePickup } from "../objects/VaccinePickup";
+import { DroppedWeaponPickup } from "../objects/DroppedWeaponPickup";
 import type { InteractablePickup } from "../interaction/InteractablePickup";
 import { TileMap, TileMapOptions } from "../map/TileMap";
 // 世界几何（实心地形轮廓）由 TileMap 统一提供，绘制时不再直接遍历多边形。
@@ -28,6 +39,11 @@ import { BoundaryRippleSystem } from "../objects/BoundaryRippleSystem";
 import { MapBoundaryOverlay } from "../map/MapBoundaryOverlay";
 import { Player, PlayerAimInput } from "../objects/Player";
 import { PlayerConfig } from "../objects/PlayerConfig";
+import { THROWABLE_CONFIG as TC, THROWABLE_IDS, THROWABLE_ITEMS, isThrowable, blastDamage, type ThrowableId } from '../throwables/ThrowableConfig';
+import { ThrowableController } from '../throwables/ThrowableController';
+import { launchThrowable, stepThrowable, previewThrow, type ThrowableBody } from '../throwables/ThrowablePhysics';
+import { SmokeSystem } from '../throwables/SmokeSystem';
+import { ThrowablePickup, drawThrowable } from '../throwables/ThrowablePickup';
 import { Chicken } from "../objects/Chicken";
 import { PlayerDebugPanel } from "../ui/PlayerDebugPanel";
 import { FloatingTextSystem } from "../ui/FloatingTextSystem";
@@ -35,6 +51,7 @@ import { WeaponListHud, getWeaponListLayout } from "../ui/WeaponListHud";
 import { preloadWeaponHudAssets } from "../ui/WeaponHudAssets";
 import { FlashlightHud, getFlashlightHudRect } from "../ui/FlashlightHud";
 import { CrosshairOverlay, getCrosshairOffset } from "../ui/CrosshairOverlay";
+import { KillIndicator } from "../ui/KillIndicator";
 import { NoiseSystem } from "../core/NoiseSystem";
 import { computeAudibleGain } from "../core/SoundAttenuation";
 
@@ -81,7 +98,7 @@ import type { BulletEntityHit } from "../objects/Bullet";
 import type { BulletImpact, DeathFinished } from "../combat/CombatTypes";
 import { Torch } from "../objects/Torch";
 import { seededRandom } from "../map/WaterTerrain";
-import { ColliderShape, DEFAULT_SHAPE, compileShape, rectangleCollider, transformCollider } from "../physics/Collider";
+import { ColliderShape, DEFAULT_SHAPE, compileShape, rectangleCollider, circleCollider, transformCollider } from "../physics/Collider";
 import { SoundPlayer } from "../core/SoundPlayer";
 import type { PlayOptions, SoundHandle } from "../core/SoundPlayer";
 
@@ -174,7 +191,7 @@ export interface GameSceneOptions extends TileMapOptions {
   map?: TileMap;
   /** Top-left player position, applied before radius-safe encounter generation. */
   playerSpawn?: { x: number; y: number };
-  encounters?: { shambler?: number; runner?: number; vaccines?: number };
+  encounters?: { shambler?: number; runner?: number; vaccines?: number; grenades?: number; smokeGrenades?: number; tradingStations?: number };
   chickenCount?: number;
 }
 
@@ -188,8 +205,28 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly survival: PlayerSurvivalSystem;
   private readonly statusHud = new PlayerStatusHud();
   private vaccinePickups: VaccinePickup[] = [];
+  private weaponPickups: DroppedWeaponPickup[] = [];
+  private throwablePickups: ThrowablePickup[] = [];
+  private readonly throwable: ThrowableController;
+  private readonly smoke: SmokeSystem;
+  private throwableBodies: ThrowableBody[] = [];
+  private throwableId = 0;
+  private throwableRemainder = 0;
+  private explosions: { x: number; y: number; age: number }[] = [];
+  private focusPaused = false;
+  private readonly onFocusLost = () => { if (this.active) { this.focusPaused = true; this.syncModalState(); } };
+  private readonly onFocusGained = () => { if (this.active && !document.hidden) { this.focusPaused = false; this.syncModalState(); } };
+  private readonly onVisibilityChange = () => document.hidden ? this.onFocusLost() : this.onFocusGained();
+  private readonly quickSlotBindings: (BackpackItemId | null)[] = [null, null, null, null];
+  private quickItemUse?: { slot: number; elapsed: number; inputReset: number | undefined };
   private vaccineHeld = false;
   private paused = false;
+  private explicitPaused = false;
+  private pausePanel?: PausePanel;
+  private tradingStations: TradingStation[] = [];
+  private focusedStation?: TradingStation;
+  private tradeHeld = false;
+  private lastTradingStationId: string | null = null;
   private readonly zombieDebugPaths: boolean;
   private readonly runSeed: number;
   private readonly spawnRandom: () => number;
@@ -256,6 +293,8 @@ export class GameScene extends Scene {  private player!: Player;
   private loadError = "";
   private active = false;
   private debugPanel?: PlayerDebugPanel;
+  private backpackPanel?: BackpackPanel;
+  private modalActive = false;
   private initialPlayerConfig?: PlayerConfig;
   private initialGraphics?: GraphicsConfig;
   private initialAudio?: AudioConfig;
@@ -266,10 +305,10 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly resizeListener = () => {
     this.handleResize();
   };
-  /** 游戏内 Escape 唤出/收起系统鼠标；调试面板打开时由面板的 Escape 接管。 */
+  /** ESC owns pause before any panel keyboard handlers. */
   private readonly cursorKeyListener = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape' || event.repeat) return;
-    this.setCursorVisible(!this.cursorVisible);
+    if (event.key !== 'Escape' || event.repeat || !this.active || !this.loaded) return;
+    event.preventDefault(); event.stopImmediatePropagation(); this.setExplicitPaused(!this.explicitPaused);
   };
   private cursorVisible = false;
   private deltaSinceLastFrame: number = 0;
@@ -310,7 +349,7 @@ export class GameScene extends Scene {  private player!: Player;
   private static readonly GOLD_DROP_COUNT = 10;
   private static readonly GOLD_DROP_THRESHOLDS = [0.9, 0.7, 0.5, 0.3, 0.1];
   /** 出生点周围随机游荡的小鸡数量。 */
-  private static readonly CHICKEN_COUNT = 60;
+  private static readonly CHICKEN_COUNT = 6;
   /** 同一只鸡两次叫声之间的最短间隔（秒）。 */
   private static readonly CHICKEN_CLUCK_COOLDOWN = 0.9;
   /** 同时播放的鸡叫上限：六只鸡同时受惊时只留最响的几声，世界事件一条不少。 */
@@ -322,6 +361,7 @@ export class GameScene extends Scene {  private player!: Player;
   /** 准星：每秒收紧、回弹速度；外扩/内收幅度见 getCrosshairOffset。 */
   private static readonly CROSSHAIR_TIGHTEN_RATE = 9;
   private static readonly CROSSHAIR_RELEASE_RATE = 9;
+  private static readonly AIM_CAMERA = { deadZone: .04, fullDistance: .45, maxRatio: .15, maxPixels: 140 };
   /** 每块鸡肉直接恢复的生命值；不再单独计数。 */
   private static readonly MEAT_HEAL = 5;
   private goldPickups: GoldPickup[] = [];
@@ -353,8 +393,14 @@ export class GameScene extends Scene {  private player!: Player;
   private readonly floatingTexts = new FloatingTextSystem();
   // 右侧武器列表 HUD：当前手持枪械在上，切换时与副武器交换位置
   private readonly weaponListHud = new WeaponListHud();
+  private readonly backpackHud = new BackpackHud();
+  private readonly quickSlotHud = new QuickSlotHud();
   // 手电状态条：贴在武器列表上方，开关做 150ms 的绿色/灰色渐变
   private readonly flashlightHud = new FlashlightHud();
+  private readonly killIndicator = new KillIndicator();
+  private readonly combatScore = new CombatScoreSystem();
+
+  getCombatScoreState() { return this.combatScore.snapshot(); }
   /**
    * 左上角圆形战术小地图：只是“玩家已知世界”的可视化，不参与碰撞、感知或掉落。
    * 地形来自探索/记忆，标记来自感知授权，GameScene 只负责组织数据。
@@ -389,6 +435,7 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 100×100 个瓦片，每格 50 像素
     this.map = sceneOptions.map ?? new TileMap(100, 100, { ...sceneOptions, seed: this.runSeed });
+    this.smoke = new SmokeSystem(this.map);
     this.actorWorld = new ActorCollisionWorld(this.map);
     this.enemies = new EnemySystem(this.map, this.actorWorld, this.runSeed ^ 0x7a6f6d62, this.noiseSystem);
     this.zombieGore = new ZombieGoreSystem(this.map, seededRandom(this.runSeed ^ 0x676f7265));
@@ -444,6 +491,7 @@ export class GameScene extends Scene {  private player!: Player;
       Math.min(deadZoneHeight, this.map.height * this.map.tileSize), GameScene.PLAYER_SIZE, { type: "circle", radius: 0.5 });
     this.player = new Player(sceneOptions.playerSpawn?.x ?? spawn.x, sceneOptions.playerSpawn?.y ?? spawn.y, undefined, this.particleSystem);
     this.survival = new PlayerSurvivalSystem(this.player);
+    this.throwable = new ThrowableController(this.survival.inventory);
     // Preserve the sampled player/light/camera pose during the later NPC separation pass.
     this.actorWorld.register("player", this.player, false);
     this.player.setMotionResolver((body, move, rotation) => this.actorWorld.resolve("player", body, move, rotation));
@@ -514,23 +562,19 @@ export class GameScene extends Scene {  private player!: Player;
     this.applyEnvironmentLight();
 
     // 设置射击回调，配置震动参数
-    this.player.setOnShootCallback((shootDir?: Vector2) => {
+    this.player.setOnShootCallback((shootDir: Vector2) => {
       // 开火会打断正在进行中的拾取；同帧标记，结算前消费。
       this.shotThisFrame = true;
       this.noiseSystem.emit("gunshot", this.player.x + this.player.getSize() / 2,
         this.player.y + this.player.getSize() / 2, { sourceId: "player" });
-      // 根据射速调整震动幅度，射速越高震动越小
-      const magnitude = 3 * (1 - Math.min(this.player.getFireRate() * 0.5, 0.7));
-      // 将震动持续时间设置为与射速相关，实现震动频率与射速同步
-      const duration = this.player.getFireRate() * 0.7;
-      // 设置随机角度，未来可以考虑根据射击方向计算角度
-      let angle = Math.random() * Math.PI * 2;
-
-      // 设置较高的频率以获得更急促的震动效果
-      const frequency = 50;
-
-      // 触发相机震动，使用线性衰减模式
-      this.camera.shake(magnitude, duration, angle, frequency, 'linear');
+      // 按屏幕像素调手感：缩放和 DPR 改变后，开火冲击的视觉幅度保持一致。
+      const viewport = this.game?.renderer?.ctx?.canvas ? this.getCanvasViewport() : undefined;
+      const scale = viewport && viewport.width > 0 ? this.camera.width / viewport.width : 1;
+      const magnitude = (this.player.getActiveWeaponSlot() === 'primary' ? C.primaryShotShake : C.secondaryShotShake) * scale;
+      const duration = Math.max(C.shotShakeMinSeconds,
+        Math.min(C.shotShakeMaxSeconds, this.player.getFireRate() * C.shotShakeDurationRatio));
+      const angle = Math.atan2(shootDir.y, shootDir.x) + Math.PI + (Math.random() * 2 - 1) * C.shotShakeAngleJitter;
+      this.camera.shake(magnitude, duration, angle, C.shotShakeFrequency, 'linear');
       // 单发只用一个声部：连续射击时后一发直接接管，不会叠出混浊的尾音。
       // 音色跟着当前武器走；冲锋枪略轻一点，避免高频射击盖过环境声。
       // 两把枪都用单发采样：每发跳过录音开头的静音预卷，不按弹匣余量往采样深处跳。
@@ -757,7 +801,11 @@ export class GameScene extends Scene {  private player!: Player;
       this.noiseSystem.getEvents());
     for (const stimulus of heard) {
       // 自己的脚步与枪声不需要提示：位置本来就知道。
-      if (stimulus.sourceId === "player") continue;
+      if (stimulus.sourceId === "player" && stimulus.noiseKind !== 'explosion') continue;
+      if (stimulus.noiseKind === 'explosion' && this.canObserveThrowPoint(stimulus.x, stimulus.y)) {
+        const c = this.camera.getOffset();
+        if (stimulus.x >= c.x && stimulus.y >= c.y && stimulus.x <= c.x + this.camera.width && stimulus.y <= c.y + this.camera.height) continue;
+      }
       const chicken = this.findChickenBySoundId(stimulus.sourceId) ?? this.enemies.findBySoundId(stimulus.sourceId);
       // 已完整看见的目标不再重复画声音提示；只看见剪影时仍保留，避免信息突然断档。
       if (chicken && this.perception && this.getEntityVisibility(chicken) === "identified") continue;
@@ -770,6 +818,7 @@ export class GameScene extends Scene {  private player!: Player;
         distance: stimulus.distance,
         occluded: stimulus.occluded,
         eventId: stimulus.eventId,
+        style: stimulus.noiseKind === 'explosion' ? 'explosion' : 'sound',
       });
     }
   }
@@ -815,6 +864,7 @@ export class GameScene extends Scene {  private player!: Player;
    * 重置相机尺寸以适应窗口大小变化
    */
   private resizeCamera(): void {
+    this.camera.clearAimOffset();
     // 相机尺寸使用缩放前的世界像素。
     const zoom = this.graphics.camera.zoom;
     this.camera.width = Math.ceil(this.game.renderer.width / zoom);
@@ -928,13 +978,19 @@ export class GameScene extends Scene {  private player!: Player;
     const target = best;
     return {
       fraction: target.fraction,
+      hitRegion: target.hitRegion,
+      damageMultiplier: target.damageMultiplier,
       x: target.x,
       y: target.y,
       // 伤害与命中点都取真实命中快照；准星在鸡身后不会改变任何一项。
       apply: (impact: BulletImpact) => {
         const entity = target.entry.target;
         if (entity instanceof Chicken) this.damageChicken(entity, impact);
-        else this.enemies.receiveHit(entity as Zombie, impact);
+        else {
+          const zombie = entity as Zombie;
+          if (this.enemies.receiveHit(zombie, impact) === 'killed' && impact.source === 'bullet' && this.player.isAlive())
+            this.killIndicator.show(this.combatScore.recordKill(zombie.config.kind, impact.hitRegion));
+        }
       },
     };
   }
@@ -1061,7 +1117,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.pickupMarkers = [];
     this.completedPickupFeedback = null;
 
-    if (!this.interactionEnabled || !this.player.isAlive()) {
+    if (!this.interactionEnabled || !this.player.isAlive() || this.throwable.locked) {
       // 场景已退出：清空进度，不处理任何按键，也不产生结算。
       this.interaction.update({ delta: 0, pressed: false, blocked: true, candidates: [] });
       return;
@@ -1071,8 +1127,9 @@ export class GameScene extends Scene {  private player!: Player;
     const playerAnchor = { x: vision.x, y: vision.y };
     const threeLayer = this.visionMode === "three-layer" && !!this.perception;
 
-    for (const meat of [...this.meatPickups, ...this.vaccinePickups]) {
+    for (const meat of [...this.meatPickups, ...this.getGroundInventoryPickups()]) {
       if (!meat.isPickupReady()) continue;
+      if (meat.kind === 'weapon' && this.player.hasWeapon((meat as DroppedWeaponPickup).weapon.slot)) continue;
       const anchor = meat.getPickupAnchor();
       const distance = Math.hypot(anchor.x - playerAnchor.x, anchor.y - playerAnchor.y);
       const config = meat.pickupConfig;
@@ -1126,6 +1183,20 @@ export class GameScene extends Scene {  private player!: Player;
       // 完成反馈只读取锚点，不延迟移除与结算。
       this.completedPickupFeedback = { x: anchor.x, y: anchor.y };
       if (completed.kind === "meat") this.collectMeatPickup(completed as MeatPickup);
+      else if (completed.kind === 'weapon') {
+        const pickup = completed as DroppedWeaponPickup;
+        if (!this.player.hasWeapon(pickup.weapon.slot) && pickup.isPickupReady() && this.player.collectWeapon(pickup.weapon)) {
+          pickup.markCollected(); this.weaponPickups = this.weaponPickups.filter(item => item !== pickup);
+          this.showPickupText(`${pickup.weapon.name} +1`);
+        }
+      }
+      else if (completed.kind === 'throwable') {
+        const pickup = completed as ThrowablePickup;
+        if (pickup.markCollected()) {
+          this.survival.inventory.add(pickup.item); this.throwablePickups = this.throwablePickups.filter(p => p !== pickup);
+          this.showPickupText(`${THROWABLE_ITEMS[pickup.item].name} +1`);
+        }
+      }
       else if (this.survival.collectVaccine(completed)) {
         this.vaccinePickups = this.vaccinePickups.filter(p => p !== completed);
         this.showPickupText("疫苗 +1");
@@ -1148,14 +1219,15 @@ export class GameScene extends Scene {  private player!: Player;
     playerAnchor: { x: number; y: number },
     legacyRange: number,
   ): PickupVisibilityDecision {
-    const needsLineOfSight =
+    const smokeTactile = this.smoke.density(playerAnchor.x, playerAnchor.y) > .1 && distance <= config.interactionRadius;
+    const needsLineOfSight = smokeTactile ||
       this.visionMode === "legacy" ||
       (view === "silhouette" && distance <= config.interactionRadius);
     const lineOfSight = needsLineOfSight
       ? hasLineOfSight(this.map, playerAnchor.x, playerAnchor.y, anchor.x, anchor.y)
       : false;
     return resolvePickupVisibility({
-      config,
+      smokeTactile, config,
       view,
       distance,
       lineOfSight,
@@ -1395,7 +1467,7 @@ export class GameScene extends Scene {  private player!: Player;
     }
     onProgress?.(0, 1);
     this.loadingPromise = (async () => {
-      await this.configLoader.load();
+      await Promise.all([this.configLoader.load(), this.statusHud.ready]);
       this.player.applyConfig(this.configLoader.getConfig("playerConfig"));
       this.graphics = parseGraphicsConfig(this.configLoader.getConfig("graphics"));
       this.audio = parseAudioConfig(this.configLoader.getConfig("audio"));
@@ -1424,6 +1496,16 @@ export class GameScene extends Scene {  private player!: Player;
       this.enemies.spawnReports.push({ kind: "vaccine", requested: vaccines, spawned: this.vaccinePickups.length, skipped: vaccines - this.vaccinePickups.length,
         ...(vaccines > this.vaccinePickups.length ? { reason: "200 次候选中没有玩家体型可达的干地位置" } : {}) });
       for (const report of this.enemies.spawnReports) if (report.skipped) console.warn(`遭遇生成: ${report.kind} ${report.spawned}/${report.requested}; ${report.reason}`);
+      for (const id of THROWABLE_IDS) {
+        const count = this.sceneOptions.encounters?.[id === 'grenade' ? 'grenades' : 'smokeGrenades'] ?? TC.spawnCount;
+        if (!Number.isSafeInteger(count) || count < 0 || count > 1000) throw new Error('投掷物生成数量无效');
+        for (let i = 0; i < count; i++) {
+          const p = spawner.find(this.player.getCollider().radius, 100, 350, occupied);
+          if (!p) continue;
+          this.throwablePickups.push(new ThrowablePickup(p.x - 10, p.y - 10, id)); occupied.push({ center: p, radius: 10 });
+        }
+      }
+      this.spawnTradingStations();
       onProgress?.(1, 1);
       this.loaded = true;
     })();
@@ -1432,6 +1514,7 @@ export class GameScene extends Scene {  private player!: Player;
 
   async onEnter(): Promise<void> {
     this.active = true;
+    this.focusPaused = false; this.explicitPaused = false;
     // Also support direct entry through SceneManager, outside the normal loading flow.
     try {
       await this.load();
@@ -1447,13 +1530,30 @@ export class GameScene extends Scene {  private player!: Player;
       this.pickupPrompt.preload();
       // 武器 HUD 的装饰素材只触发加载，不参与启动成败判定；失败时 HUD 自己回退矢量图。
       preloadWeaponHudAssets();
+      this.killIndicator.preload();
       this.tabHeld = false;
       // 准星改成独立图层：鼠标一动就更新，不必等这一帧的世界渲染。
       if (typeof document !== 'undefined') {
+        window.addEventListener('blur', this.onFocusLost); window.addEventListener('focus', this.onFocusGained);
+        document.addEventListener('visibilitychange', this.onVisibilityChange);
         this.crosshairOverlay ??= new CrosshairOverlay();
         this.game.input.onPointerMove = (x, y) => this.crosshairOverlay?.setPosition(x, y);
       }
+      if (typeof document !== 'undefined') {
+        document.addEventListener('keydown', this.cursorKeyListener, true);
+        document.addEventListener('wheel', this.minimapWheelListener, { capture: true, passive: false });
+        this.pausePanel ??= new PausePanel(() => this.setExplicitPaused(false));
+        this.quickSlotHud.attach(this.game.renderer.ctx.canvas, {
+          canEdit: () => this.active && this.player.isAlive() && !this.paused,
+          beforeEdit: () => { this.backpackPanel?.setOpen(false); this.game.input.clear(); this.quickItemUse = undefined; },
+          bound: slot => this.quickSlotBindings[slot] !== null,
+          swap: (from, to) => { [this.quickSlotBindings[from], this.quickSlotBindings[to]] = [this.quickSlotBindings[to], this.quickSlotBindings[from]]; },
+          unbind: slot => { this.quickSlotBindings[slot] = null; },
+        });
+      }
       this.debugPanel ??= new PlayerDebugPanel({
+        canOpen: () => !this.explicitPaused,
+        onPause: () => this.setExplicitPaused(true),
         player: this.player,
         input: this.game.input,
         canvas: this.game.renderer.ctx.canvas,
@@ -1466,23 +1566,48 @@ export class GameScene extends Scene {  private player!: Player;
         initialAudio: this.initialAudio,
         // 三层视野不读 fog.range/fog.feather，留着这两根滑杆只会误导调参。
         hiddenSections: this.visionMode === "three-layer" ? ["fog"] : [],
-        onReset: () => { this.survival.resetLife(); this.damageFeedback.clear(); this.camera.clearDamageKick(); },
-        onOpenChange: open => this.setWorldPaused(open),
+        onReset: () => { this.throwable.dispose(); this.player.holdingThrowable = false; this.survival.resetLife(); this.damageFeedback.clear(); this.camera.clearDamageKick(); this.camera.clearAimOffset(); },
+        onOpenChange: open => {
+          if (open) this.backpackPanel?.setOpen(false);
+          this.syncModalState();
+        },
+      });
+      this.backpackPanel ??= new BackpackPanel({
+        canOpen: () => this.active && this.loaded && this.player.isAlive() && !this.explicitPaused,
+        onPause: () => this.setExplicitPaused(true),
+        getView: () => this.getBackpackView(),
+        onAction: id => this.performBackpackAction(id),
+        onDrop: id => this.dropBackpackItem(id),
+        onBind: (id, slot) => this.bindQuickSlot(id, slot),
+        onOpenChange: open => {
+          if (open) this.debugPanel?.setOpen(false);
+          this.syncModalState();
+        },
       });
       window.addEventListener('resize', this.resizeListener);
-      if (typeof document !== 'undefined') document.addEventListener('keydown', this.cursorKeyListener);
+
     } catch (error) {
       if (this.active) this.loadError = error instanceof Error ? error.message : String(error);
     }
   }
 
   onExit(): void {
+    window.removeEventListener('blur', this.onFocusLost); window.removeEventListener('focus', this.onFocusGained);
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.throwable.dispose(); this.player.holdingThrowable = false;
+    this.throwableBodies = []; this.throwablePickups = []; this.explosions = []; this.smoke.clear();
+    if (this.map.sightOpacity === this.smoke.opacity) this.map.sightOpacity = undefined;
     this.active = false;
+    this.quickItemUse = undefined;
+    this.backpackPanel?.dispose();
+    this.backpackPanel = undefined;
+    this.killIndicator.clear();
+    this.combatScore.reset();
     this.actorWorld.clear();
     this.enemies.dispose();
-    this.survival.dispose(); this.vaccinePickups = []; this.enemyBlood.clear();
+    this.survival.dispose(); this.vaccinePickups = []; this.weaponPickups = []; this.quickSlotBindings.fill(null); this.enemyBlood.clear();
     this.zombieGore.clear(); this.damageFeedback.clear(); this.player.consumeDamageEvents();
-    this.bloodStainSystem.clear(); this.particleSystem.clear(); this.camera.clearDamageKick();
+    this.bloodStainSystem.clear(); this.particleSystem.clear(); this.camera.clearDamageKick(); this.camera.clearAimOffset();
     // 循环音效不会自己停，离开场景时立即收掉，免得声音跟着残留。
     this.sfx.stopAll();
     // 换弹声也要跟着停，否则重进场景后还会响到采样结束。
@@ -1517,8 +1642,12 @@ export class GameScene extends Scene {  private player!: Player;
     this.viewportCache = null;
     this.debugPanel?.dispose();
     this.debugPanel = undefined;
+    this.game?.input?.setBlocked?.(false);
     window.removeEventListener('resize', this.resizeListener);
-    if (typeof document !== 'undefined') document.removeEventListener('keydown', this.cursorKeyListener);
+    if (typeof document !== 'undefined') document.removeEventListener('keydown', this.cursorKeyListener, true);
+    if (typeof document !== 'undefined') document.removeEventListener('wheel', this.minimapWheelListener, true);
+    this.quickSlotHud.dispose(); this.pausePanel?.dispose(); this.pausePanel = undefined;
+    this.map.setStaticObstacles([]); this.tradingStations = [];
     this.setCursorVisible(false);
   }
 
@@ -1533,16 +1662,25 @@ export class GameScene extends Scene {  private player!: Player;
 
     if (!this.loaded) return;
     this.debugPanel?.update(delta);
+    if (!this.player.isAlive()) {
+      this.backpackPanel?.setOpen(false); this.quickItemUse = undefined;
+      this.combatScore.endChain(); this.killIndicator.clear();
+    }
+    this.backpackPanel?.refresh();
     const lifeReset = this.player.getLifeResetVersion();
     if (lifeReset !== this.feedbackResetVersion) {
-      this.feedbackResetVersion = lifeReset; this.damageFeedback.clear(); this.camera.clearDamageKick();
+      this.feedbackResetVersion = lifeReset; this.damageFeedback.clear(); this.camera.clearDamageKick(); this.camera.clearAimOffset();
+      this.combatScore.reset(); this.killIndicator.clear();
     }
     if (this.paused || !Number.isFinite(delta) || delta < 0) return;
     // Advance existing feedback before this frame's hits so a new flash is always displayed.
+    this.killIndicator.update(delta);
+    this.combatScore.update(delta);
     this.damageFeedback.update(delta); this.zombieGore.update(delta); this.camera.advanceDamageKick(delta);
     input = input.captureFrame?.() ?? input;
+    const wheelDirection = input.consumeWheelDirection?.() ?? 0;
     const reset = input.getResetVersion?.();
-    if (reset !== undefined && reset !== this.inputResetVersion) { this.inputResetVersion = reset; this.interaction.reset(); }
+    if (reset !== undefined && reset !== this.inputResetVersion) { this.inputResetVersion = reset; this.interaction.reset(); this.throwable.suspend(); }
     this.noiseSystem.update(delta);
     this.player.advanceDamageTimers(delta);
     if (!this.player.isAlive()) {
@@ -1557,14 +1695,41 @@ export class GameScene extends Scene {  private player!: Player;
       this.deathEnterHeld = enter;
     } else { this.deathEnterHeld = input.isKeyDown("Enter"); }
 
-    // 开火/切枪都只在本帧有效：交互取消只消费当帧信号。
+    // 开火/切枪信号从本帧开始累计，快捷键切枪也参与拾取中断。
     this.shotThisFrame = false;
     this.weaponSwitchedThisFrame = false;
+    if (wheelDirection !== 0 && !this.throwable.locked) this.quickItemUse = undefined;
+    if (this.player.isAlive() && !input.isBlocked?.()) {
+      this.advanceQuickItemUse(delta, input);
+      const slot = this.quickSlotHud.update(input);
+      if (slot !== null && !this.throwable.locked) {
+        const id = this.quickSlotBindings[slot];
+        if (id) {
+          if (id === 'vaccine') {
+            if (this.quickItemUse?.slot !== slot) {
+              const failure = this.survival.getVaccineUseFailure(this.inventoryUseContext('gameplay', input));
+              if (failure) this.showPickupText(failure);
+              else { this.cancelThrowable(); this.quickItemUse = { slot, elapsed: 0, inputReset: input.getResetVersion?.() }; }
+            }
+          } else {
+            this.quickItemUse = undefined;
+            const message = this.activateInventoryItem(id, 'gameplay', input);
+            if (message) this.showPickupText(message);
+          }
+        }
+      }
+    }
+
+    const throwPointer = input.getPointerState?.();
+    const throwTarget = throwPointer?.active && (throwPointer.rightDown || throwPointer.aimedLeftPressed) && !this.cursorVisible && !this.quickSlotHud?.isInteracting()
+      ? this.screenToWorld(throwPointer.clientX, throwPointer.clientY) ?? undefined : undefined;
+    const throwRelease = !!throwPointer && this.player.isAlive() && !this.player.isRolling()
+      && this.throwable.input(throwPointer, throwTarget);
     const aim = this.getPointerAim(input);
     const vaccineDown = input.isKeyDown("v");
-    const actionInput = aim?.fire === true || (input.isKeyDown(" ") && !this.spaceHeld) ||
+    const actionInput = this.weaponSwitchedThisFrame || wheelDirection !== 0 || aim?.fire === true || (input.isKeyDown(" ") && !this.spaceHeld) ||
       (input.isKeyDown("r") && !this.reloadHeld) || (input.isKeyDown("Tab") && !this.tabHeld) || (input.isKeyDown("c") && !this.cHeld);
-    if (vaccineDown && !this.vaccineHeld && this.survival.tryUseVaccine({ paused: false, rolling: this.player.isRolling(),
+    if (!this.throwable.locked && vaccineDown && !this.vaccineHeld && this.survival.tryUseVaccine({ paused: false, rolling: this.player.isRolling(),
       reloading: this.player.getWeaponView().isReloading, interacting: input.isKeyDown("e"), actionInput })) this.showPickupText("感染已治愈");
     this.vaccineHeld = vaccineDown;
     const dot = this.survival.update(delta);
@@ -1576,20 +1741,25 @@ export class GameScene extends Scene {  private player!: Player;
     this.player.update(delta, input, this.map, aim);
     // R 键换弹同样只认下沿，按住不会反复起手。
     const reloadDown = input.isKeyDown("r");
-    if (reloadDown && !this.reloadHeld) this.player.requestReload();
+    if (!this.throwable.held && reloadDown && !this.reloadHeld) this.player.requestReload();
     this.reloadHeld = reloadDown;
 
-    // Tab 在主副枪械之间切换（Q 不再绑定），C 收枪/空手；都只认下沿。
+    // Tab 或滚轮在主副枪械之间切换，同一帧最多切换一次；C 收枪/空手。
     const tabDown = input.isKeyDown("Tab");
-    if (this.player.isAlive() && tabDown && !this.tabHeld) {
-      this.player.cycleFirearm(1);
-      this.weaponSwitchedThisFrame = true;
-      // 与手电开关同一声轻响；单声部保证快速连按时只留最后一次的尾音。
-      this.sfx.play(SWITCH_CLICK_SOUND, this.volume(this.audio.weapon.switchVolume), 1, { count: 1 });
+    if (!this.throwable.locked && this.player.isAlive() && !input.isBlocked?.() && ((tabDown && !this.tabHeld) || wheelDirection !== 0)) {
+      this.cancelThrowable();
+      const previousSlot = this.player.getActiveWeaponSlot();
+      this.player.cycleFirearm(wheelDirection || 1);
+      if (this.player.getActiveWeaponSlot() !== previousSlot) {
+        this.weaponSwitchedThisFrame = true;
+        // 与手电开关同一声轻响；单声部保证快速连按时只留最后一次的尾音。
+        this.sfx.play(SWITCH_CLICK_SOUND, this.volume(this.audio.weapon.switchVolume), 1, { count: 1 });
+      }
     }
     this.tabHeld = tabDown;
     const cDown = input.isKeyDown("c");
-    if (this.player.isAlive() && cDown && !this.cHeld) {
+    if (!this.throwable.locked && this.player.isAlive() && cDown && !this.cHeld) {
+      this.cancelThrowable();
       this.player.toggleMelee();
       this.weaponSwitchedThisFrame = true;
     }
@@ -1597,11 +1767,13 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 空格翻滚只认下沿：按住不会连续起滚，连滚需要松开再按。
     const spaceDown = input.isKeyDown(" ");
-    if (spaceDown && !this.spaceHeld && this.player.requestRoll(input)) {
+    if (!this.throwable.locked && spaceDown && !this.spaceHeld && this.player.requestRoll(input)) {
+      this.cancelThrowable();
       this.noiseSystem.emit("roll", this.player.x + this.player.getSize() / 2,
         this.player.y + this.player.getSize() / 2, { sourceId: "player" });
     }
     this.spaceHeld = spaceDown;
+    this.updateThrowables(delta, throwRelease);
 
     // 换弹完成、被翻滚打断或切走时收掉没放完的换弹声，别压到下面那声枪响。
     if (this.reloadVoice && !this.player.getWeaponView().isReloading) {
@@ -1626,6 +1798,7 @@ export class GameScene extends Scene {  private player!: Player;
     const playerCenterX = this.player.x + this.player.getSize() / 2;
     const playerCenterY = this.player.y + this.player.getSize() / 2;
     if (this.player.isAlive()) this.camera.follow(playerCenterX, playerCenterY, delta);
+    this.updateAimCamera(delta, input);
     const center = new Vector2(playerCenterX, playerCenterY);
     this.playerLight.setPosition(center);
     this.flashlight.setPosition(center);
@@ -1652,6 +1825,7 @@ export class GameScene extends Scene {  private player!: Player;
     });
     for (const impact of this.enemies.consumeHitEffects()) this.zombieGore.hit(impact);
     this.enemies.settleAttacks(this.player, (result, zombie, _id, random) => {
+      if (result.perfectDodge) this.showPickupText("完美闪避");
       if (this.survival.onMeleeDamage(result, zombie.config.infectionChance, random)) this.showPickupText("已感染");
     });
     for (const event of this.player.consumeDamageEvents()) {
@@ -1660,6 +1834,10 @@ export class GameScene extends Scene {  private player!: Player;
         event.targetPosition.y - event.sourcePosition.y, event.targetPosition.x - event.sourcePosition.x));
     }
     if (this.player.consumeDeathEvent()) {
+      this.backpackPanel?.setOpen(false);
+      this.releaseThrowable(true); this.throwable.dispose(); this.player.holdingThrowable = false;
+      this.combatScore.endChain(); this.killIndicator.clear();
+      this.camera.clearAimOffset();
       this.deathEnterHeld = input.isKeyDown("Enter");
       this.interaction.reset(); this.flashlightOn = false; this.flashlight.setActive(false);
       this.reloadVoice?.stop(0); this.reloadVoice = null;
@@ -1717,6 +1895,7 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 拾取放在所有可能打断它的动作之后：本帧的开火/切枪/翻滚会立即取消进度。
     this.updateInteraction(delta, input);
+    this.updateTradingStation(input);
     // 肉块本帧被移除后，绑定的血迹从下一帧开始走正常的保留与淡出。
     // 切枪输入结算完再推进 HUD：第一帧的武器顺序与动画起点必须同源，
     // 否则会先用旧进度画新顺序、下一帧才重新开始交换。
@@ -1733,9 +1912,300 @@ export class GameScene extends Scene {  private player!: Player;
   getPlayer(): Player { return this.player; }
   getVaccinePickups(): readonly VaccinePickup[] { return this.vaccinePickups; }
   isWorldPaused(): boolean { return this.paused; }
+  private getGroundInventoryPickups(): (VaccinePickup | DroppedWeaponPickup | ThrowablePickup)[] { return [...this.vaccinePickups, ...this.weaponPickups, ...this.throwablePickups]; }
+  private getThrowableCounts() { return { grenade: this.survival.inventory.getCount('grenade'), smokeGrenade: this.survival.inventory.getCount('smokeGrenade') }; }
+  private cancelThrowable(): void {
+    if (!this.throwable.cancel()) return;
+    this.player.holdingThrowable = false;
+  }
+  private throwableOrigin() {
+    const p = this.player.getVisionState(), angle = this.player.getVisualFacing();
+    const hand = { x: p.x + Math.cos(angle + .35) * 25, y: p.y + Math.sin(angle + .35) * 25 };
+    return this.map.isShapeWalkable(circleCollider(hand.x, hand.y, TC.radius)) ? hand : { x: p.x, y: p.y };
+  }
+  private releaseThrowable(death = false): void {
+    if (death && !this.throwable.locked) { this.cancelThrowable(); return; }
+    const item = this.throwable.commit(); if (!item) return;
+    const origin = death ? this.player.getVisionState() : this.throwableOrigin();
+    if (item.kind === 'grenade' && item.fuse <= 1e-8) this.explodeThrowable(origin.x, origin.y);
+    else {
+      const body = launchThrowable(++this.throwableId, item.kind, origin, item.target, item.fuse);
+      if (death) { body.vx = body.vy = body.vz = 0; }
+      this.throwableBodies.push(body);
+    }
+    this.player.holdingThrowable = !!this.throwable.held;
+    if (!this.throwable.held && !death) this.player.switchWeapon(this.player.hasWeapon(this.throwable.returnWeapon) ? this.throwable.returnWeapon : 'melee');
+  }
+  private updateThrowables(delta: number, release: boolean): void {
+    if (!this.player.isAlive()) this.releaseThrowable(true);
+    else if (release) this.releaseThrowable();
+    this.throwableRemainder += delta;
+    while (this.throwableRemainder + 1e-9 >= TC.step) {
+      this.throwableRemainder = Math.max(0, this.throwableRemainder - TC.step);
+      for (const b of this.throwableBodies) stepThrowable(b, TC.step, this.map, event => {
+        if (event.type === 'explode') this.explodeThrowable(b.x, b.y);
+        else if (event.type === 'land') {
+          this.noiseSystem.emit('impact', b.x, b.y, { sourceId: 'player', loudness: .3 });
+          this.sfx.play(SWITCH_CLICK_SOUND, this.volume(.12), .7);
+        }
+      });
+      if (this.player.isAlive() && this.throwable.advance(TC.step)) this.releaseThrowable();
+      else if (!this.player.isAlive()) this.releaseThrowable(true);
+      for (const effect of this.explosions) effect.age += TC.step;
+    }
+    this.throwableBodies = this.throwableBodies.filter(b => !b.dead);
+    this.explosions = this.explosions.filter(e => e.age < .65);
+    this.smoke.sync(this.throwableBodies);
+    this.map.sightOpacity = this.throwableBodies.some(b => b.kind === 'smokeGrenade' && b.smokeAge >= 0) ? this.smoke.opacity : undefined;
+  }
+  private explodeThrowable(x: number, y: number): void {
+    const terrainHits = collectBlastTerrain(this.map, x, y);
+    this.explosions.push({ x, y, age: 0 });
+    this.particleSystem.createExplosion(new Vector2(x, y), 32, 320, 4, .5, ['#bcb39a', '#e7bd72', '#807c71']);
+    this.noiseSystem.emit('explosion', x, y, { sourceId: 'player' });
+    const player = this.player.getVisionState(), distance = Math.hypot(player.x - x, player.y - y);
+    const gain = Math.max(0, 1 - distance / 900);
+    if (gain > 0) this.camera.shake(9 * gain * gain, .32, Math.atan2(player.y - y, player.x - x), 32, 'quadratic');
+    this.sfx.play('/audio/throwables/explosion.wav', this.volume(gain * .8), 1, { count: 4 });
+    const impactAt = (target: { x: number; y: number }): BulletImpact | null => {
+      const dx = target.x - x, dy = target.y - y, d = Math.hypot(dx, dy), damage = blastDamage(d);
+      if (damage <= 0 || !hasLineOfSight(this.map, x, y, target.x, target.y)) return null;
+      return { damage, point: { ...target }, direction: { x: d ? dx / d : 1, y: d ? dy / d : 0 },
+        impulse: TC.impulse * damage / TC.damage, impactSpeed: 1, initialSpeed: 1, traveledDistance: d, source: 'explosion' };
+    };
+    // Take the alive snapshot before self-damage; simultaneous grenade kills still count.
+    const credited = this.player.isAlive();
+    for (const zombie of this.enemies.zombies) {
+      const impact = impactAt(zombie.getCenter());
+      if (impact && this.enemies.receiveHit(zombie, impact) === 'killed' && credited)
+        this.killIndicator.show(this.combatScore.recordKill(zombie.config.kind));
+    }
+    for (const chicken of this.chickens) {
+      const impact = impactAt({ x: chicken.x + chicken.getSize() / 2, y: chicken.y + chicken.getSize() / 2 });
+      if (impact) this.damageChicken(chicken, impact);
+    }
+    const self = impactAt(player);
+    if (self) this.player.applyDamage({ amount: self.damage, kind: 'explosion', sourceId: 'player', sourcePosition: { x, y } });
+    for (const hit of terrainHits) this.map.damageTile(hit.col, hit.row, hit.damage);
+  }
+  private spawnTradingStations(): void {
+    const random = seededRandom(this.runSeed ^ 0x74726164);
+    const count = this.sceneOptions.encounters?.tradingStations ?? (random() < .5 ? 1 : 2);
+    if (!Number.isSafeInteger(count) || count < 0 || count > 2) throw new Error('交易站数量必须为 0–2');
+    const origin = this.player.getVisionState(), spawner = new EncounterSpawning(this.map, origin, random);
+    const occupied = [{ center: origin, radius: this.player.getCollider().radius },
+      ...this.enemies.zombies.map(z => ({ center: z.getCenter(), radius: z.getCollider().radius })),
+      ...this.getGroundInventoryPickups().map(p => ({ center: p.getPickupAnchor(), radius: 10 }))];
+    for (let i = 0; i < count; i++) {
+      const p = spawner.find(this.player.getCollider().radius, 150, Math.min(2200, Math.hypot(this.map.width, this.map.height) * this.map.tileSize), occupied, 200, true, 55);
+      if (!p) break;
+      this.tradingStations.push(new TradingStation(`station-${i + 1}`, p.x, p.y)); occupied.push({ center: p, radius: 130 });
+    }
+    this.map.setStaticObstacles(this.tradingStations.map(s => s.getCollider()));
+  }
+  private updateTradingStation(input: Input): void {
+    const p = this.player.getVisionState();
+    this.focusedStation = this.player.isAlive() && !this.throwable.locked && !input.isBlocked?.()
+      ? this.tradingStations.filter(s => Math.hypot(s.x - p.x, s.y - p.y) <= 90 && hasLineOfSight(this.map, p.x, p.y, s.x, s.y)).sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0] : undefined;
+    const down = input.isKeyDown('t');
+    if (down && !this.tradeHeld && this.focusedStation) this.interactTradingStation(this.focusedStation.id);
+    this.tradeHeld = down;
+  }
+  interactTradingStation(id: string): boolean {
+    const station = this.tradingStations.find(s => s.id === id), p = this.player.getVisionState();
+    if (!station || this.paused || this.modalActive || this.throwable.locked || !this.player.isAlive()
+      || Math.hypot(station.x - p.x, station.y - p.y) > 90 || !hasLineOfSight(this.map, p.x, p.y, station.x, station.y)) return false;
+    this.lastTradingStationId = id; this.showPickupText('交易功能暂未开放'); return true;
+  }
+  getTradingStationState() { return { stations: this.tradingStations.map(s => ({ id: s.id, x: s.x, y: s.y })), focused: this.focusedStation?.id ?? null, lastInteracted: this.lastTradingStationId }; }
+  private canObserveThrowPoint(x: number, y: number): boolean {
+    const p = this.player.getVisionState();
+    if (!hasLineOfSight(this.map, p.x, p.y, x, y) || this.smoke.opacity(p.x, p.y, x, y) >= .35) return false;
+    return this.perception ? this.perception.getTerrainRecall('player', x, y) === 'observed' : Math.hypot(p.x - x, p.y - y) < p.range;
+  }
+  private drawThrowableWorld(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    for (const b of this.throwableBodies) {
+      if (!this.canObserveThrowPoint(b.x, b.y)) continue;
+      ctx.save(); ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath();
+      ctx.ellipse(b.x - ox, b.y - oy, Math.max(3, 9 - b.z * .03), 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      drawThrowable(ctx, b.kind, b.x - ox, b.y - b.z - oy, b.rotation, 24);
+    }
+    for (const e of this.explosions) {
+      if (!this.canObserveThrowPoint(e.x, e.y)) continue;
+      ctx.save(); ctx.beginPath();
+      for (let y = e.y - TC.blastRadius; y <= e.y + TC.blastRadius; y += 20)
+        for (let x = e.x - TC.blastRadius; x <= e.x + TC.blastRadius; x += 20)
+          if (this.canObserveThrowPoint(x, y) && hasLineOfSight(this.map, e.x, e.y, x, y)) ctx.rect(x - ox - 10, y - oy - 10, 20, 20);
+      ctx.clip();
+      const radius = 25 + Math.min(1, e.age / .18) * 155;
+      const gradient = ctx.createRadialGradient(e.x - ox, e.y - oy, 0, e.x - ox, e.y - oy, radius);
+      gradient.addColorStop(0, `rgba(255,232,163,${Math.max(0, 1 - e.age * 5)})`);
+      gradient.addColorStop(.35, `rgba(209,139,62,${Math.max(0, .7 - e.age)})`);
+      gradient.addColorStop(1, 'rgba(95,91,77,0)'); ctx.fillStyle = gradient;
+      ctx.fillRect(e.x - ox - radius, e.y - oy - radius, radius * 2, radius * 2);
+      ctx.strokeStyle = `rgba(244,217,171,${Math.max(0, 1 - e.age / .65) * .65})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(e.x - ox, e.y - oy, radius, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    }
+  }
+  private drawThrowableAim(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const p = this.player.getVisionState();
+    this.smoke.draw(ctx, ox, oy, (x, y) => hasLineOfSight(this.map, p.x, p.y, x, y)
+      && Math.hypot(p.x - x, p.y - y) <= this.visionRules.maxObservationRange);
+    if (this.map.sightOpacity) this.drawPerceptionSilhouettes(ctx, ox, oy, true);
+    if (!this.throwable.held || !this.player.isAlive()) return;
+    const origin = this.throwableOrigin();
+    ctx.save(); ctx.globalAlpha = 1 - this.smoke.density(p.x, p.y) * .75;
+    drawThrowable(ctx, this.throwable.held, origin.x - ox, origin.y - oy, this.player.getVisualFacing() + Math.PI / 2, 20); ctx.restore();
+    if (this.throwable.locked) {
+      ctx.save(); ctx.fillStyle = this.throwable.fuse <= 1 ? '#ff7e57' : '#f0d49c'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(`${this.throwable.fuse.toFixed(1)}s`, p.x - ox, p.y - oy + 48); ctx.restore();
+    }
+    const pointer = this.game?.input.getPointerState?.();
+    if (this.paused || this.cursorVisible || !pointer?.rightDown || !pointer.active) return;
+    const target = this.screenToWorld(pointer.clientX, pointer.clientY); if (!target) return;
+    const preview = previewThrow(this.throwable.held, origin, target, this.map, this.throwable.fuse);
+    ctx.save(); ctx.strokeStyle = 'rgba(211,227,212,.65)'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 5]); ctx.beginPath();
+    let complete = true;
+    for (let i = 0; i < preview.points.length; i++) {
+      const point = preview.points[i];
+      if (!this.canObserveThrowPoint(point.x, point.y)) { complete = false; break; }
+      if (!i) ctx.moveTo(point.x - ox, point.y - point.z - oy); else ctx.lineTo(point.x - ox, point.y - point.z - oy);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+    const ring = (point: { x: number; y: number }, radius: number) => { ctx.beginPath(); ctx.arc(point.x - ox, point.y - oy, radius, 0, Math.PI * 2); ctx.stroke(); };
+    if (preview.landing && this.canObserveThrowPoint(preview.landing.x, preview.landing.y)) ring(preview.landing, 5);
+    if (complete) {
+      ctx.strokeStyle = this.throwable.held === 'grenade' ? '#d9ac70' : '#a0c8bc'; ring(preview.end, 12);
+      ctx.font = '12px sans-serif'; ctx.fillStyle = ctx.strokeStyle; ctx.textAlign = 'center';
+      ctx.fillText(this.throwable.held === 'grenade' ? '预计爆点' : '预计停留点', preview.end.x - ox, preview.end.y - oy + 27);
+    }
+    ctx.restore();
+  }
+  private getBackpackView() {
+    return createBackpackView(this.player.getWeaponLoadoutView(), this.survival.inventory.getVaccines(),
+      this.survival.getVaccineUseFailure(this.backpackVaccineContext()), this.quickSlotBindings.slice(), this.getThrowableCounts(), this.throwable.held, this.throwable.locked);
+  }
+  private bindQuickSlot(id: BackpackItemId, slot: number): string | null {
+    if (this.throwable.locked) return '手雷已拉环，请先投出';
+    if (!this.backpackPanel?.isOpen() || this.debugPanel?.isOpen() || !this.player.isAlive()
+      || !Number.isInteger(slot) || slot < 0 || slot > 3 || !this.getBackpackView().items.some(item => item.id === id)) return null;
+    for (let i = 0; i < 4; i++) if (this.quickSlotBindings[i] === id) this.quickSlotBindings[i] = null;
+    this.quickSlotBindings[slot] = id;
+    return `已放入快捷栏 ${slot + 1}`;
+  }
+  private dropBackpackItem(id: BackpackItemId): string | null {
+    if (this.throwable.locked) return '手雷已拉环，请先投出';
+    if (!this.active || !this.backpackPanel?.isOpen() || this.debugPanel?.isOpen() || !this.player.isAlive()) return null;
+    if (id === 'melee') return '空手不可丢弃';
+    const view = this.player.getVisionState();
+    let position: { x: number; y: number } | undefined;
+    for (const offset of [18, 0]) {
+      const x = view.x + Math.cos(view.direction) * offset, y = view.y + Math.sin(view.direction) * offset;
+      if (this.map.isShapeWalkable(circleCollider(x, y, 10))) { position = { x, y }; break; }
+    }
+    if (!position) return '附近没有可放置物品的位置';
+    let name: string;
+    if (isThrowable(id)) {
+      if (this.throwable.held === id) this.cancelThrowable();
+      if (!this.survival.inventory.consume(id)) return '物品不足';
+      this.throwablePickups.push(new ThrowablePickup(position.x - 10, position.y - 10, id)); name = THROWABLE_ITEMS[id].name;
+    } else if (id === 'vaccine') {
+      if (!this.survival.inventory.consumeVaccine()) return '疫苗不足';
+      this.vaccinePickups.push(new VaccinePickup(position.x - 10, position.y - 10)); name = '疫苗';
+    } else {
+      const item = this.player.dropWeapon(id); if (!item) return '未持有该物品';
+      this.weaponPickups.push(new DroppedWeaponPickup(position.x - 10, position.y - 10, item)); name = item.name;
+      this.weaponListHud.update(0, this.player.getWeaponLoadoutView());
+    }
+    this.updatePerception(0); this.updateMinimap(0);
+    return `已丢弃 ${name} ×1`;
+  }
+  /** Backpack actions use the live world and the same eligibility checks as gameplay. */
+  private backpackVaccineContext() {
+    return { paused: this.paused, rolling: this.player.isRolling(), reloading: this.player.getWeaponView().isReloading,
+      interacting: false, actionInput: false, source: 'backpack' as const };
+  }
+  private inventoryUseContext(source: 'gameplay' | 'backpack', input?: Input) {
+    const pointer = input?.getPointerState?.();
+    return { ...this.backpackVaccineContext(), source, interacting: input?.isKeyDown('e') === true,
+      actionInput: this.throwable.locked || !!pointer?.leftDown || !!pointer?.leftPressed
+        || ['r', 'Tab', 'c', ' ', 'v'].some(key => input?.isKeyDown(key) === true) };
+  }
+  private advanceQuickItemUse(delta: number, input: Input): void {
+    const use = this.quickItemUse; if (!use) return;
+    const otherQuickKey = this.quickSlotBindings.some((id, slot) => id && slot !== use.slot
+      && (input.isKeyDown(String(slot + 1)) || input.isKeyDown('Numpad' + (slot + 1))));
+    if (use.inputReset !== input.getResetVersion?.() || this.quickSlotBindings[use.slot] !== 'vaccine'
+      || otherQuickKey
+      || this.survival.getVaccineUseFailure(this.inventoryUseContext('gameplay', input))) {
+      this.quickItemUse = undefined; return;
+    }
+    use.elapsed = Math.min(1, use.elapsed + delta);
+    if (use.elapsed >= 1 - 1e-9) {
+      this.quickItemUse = undefined;
+      const message = this.activateInventoryItem('vaccine', 'gameplay', input);
+      if (message) this.showPickupText(message);
+    }
+  }
+  private performBackpackAction(id: BackpackItemId): string | null {
+    if (!this.active || !this.backpackPanel?.isOpen() || this.debugPanel?.isOpen() || !this.player.isAlive()) return null;
+    return this.activateInventoryItem(id, 'backpack');
+  }
+  private activateInventoryItem(id: BackpackItemId, source: 'gameplay' | 'backpack', input?: Input): string | null {
+    if (this.throwable.locked) return '手雷已拉环，请先投出';
+    if (isThrowable(id)) {
+      if (this.player.isRolling()) return '翻滚期间无法握持';
+      if (!this.throwable.equip(id, this.player.getActiveWeaponSlot())) return '物品不足';
+      this.player.cancelReload(); this.reloadVoice?.stop(0); this.reloadVoice = null;
+      this.player.holdingThrowable = true; this.weaponSwitchedThisFrame = true; this.quickItemUse = undefined;
+      return `已握持 ${THROWABLE_ITEMS[id].name}`;
+    }
+    this.cancelThrowable();
+    if (id === 'vaccine') {
+      const context = this.inventoryUseContext(source, input);
+      const failure = this.survival.getVaccineUseFailure(context);
+      if (failure) return failure;
+      const used = this.survival.tryUseVaccine(context);
+      return used ? '感染已治愈' : '无法使用疫苗';
+    }
+    if (id !== 'primary' && id !== 'secondary' && id !== 'melee') return null;
+    if (!this.player.hasWeapon(id)) return '未持有该武器';
+    this.weaponSwitchedThisFrame ||= this.player.getActiveWeaponSlot() !== id;
+    this.player.switchWeapon(id);
+    if (!this.player.getWeaponView().isReloading) { this.reloadVoice?.stop(0); this.reloadVoice = null; }
+    this.weaponListHud.update(0, this.player.getWeaponLoadoutView());
+    return `已装备 ${this.player.getWeaponName()}`;
+  }
+  private setExplicitPaused(paused: boolean): void {
+    this.explicitPaused = paused;
+    if (paused) { this.backpackPanel?.setOpen(false); this.debugPanel?.setOpen(false); }
+    this.pausePanel?.setOpen(paused); this.syncModalState();
+  }
+  private readonly minimapWheelListener = (event: WheelEvent) => {
+    if (event.target instanceof Element && event.target.closest('.backpack-panel, .backpack-menu')) return;
+    if (!this.active || this.paused || event.ctrlKey || event.metaKey || !Number.isFinite(event.deltaY) || !event.deltaY) return;
+    const v = this.getCanvasViewport(); if (!v) return;
+    const dpr = window.devicePixelRatio || 1;
+    const x = (event.clientX - v.left) * this.game.renderer.width / dpr / v.width;
+    const y = (event.clientY - v.top) * this.game.renderer.height / dpr / v.height;
+    if (!this.minimap.contains(x, y)) return;
+    event.preventDefault(); event.stopImmediatePropagation(); this.minimap.zoomBy(Math.sign(event.deltaY)); this.updateMinimap(0);
+  };
+  private syncModalState(): void {
+    const open = this.backpackPanel?.isOpen() === true || this.debugPanel?.isOpen() === true;
+    this.modalActive = open;
+    this.quickItemUse = undefined;
+    this.throwable.suspend();
+    this.setWorldPaused(this.explicitPaused || this.debugPanel?.isOpen() === true || this.focusPaused);
+    this.game.input.setBlocked(open || this.paused);
+    // 切换两个面板时也清除按住状态，关闭后必须重新按键/点击。
+    this.game.input.clear();
+    this.setCursorVisible(open || this.paused);
+  }
   private setWorldPaused(paused: boolean): void {
     if (this.paused === paused) return;
     this.paused = paused; this.deltaSinceLastFrame = 0;
+    if (paused) this.quickSlotHud.cancelDrag();
     this.interaction.reset(); this.pickupCandidates = []; this.pickupMarkers = []; this.completedPickupFeedback = null;
     this.tabHeld = this.cHeld = this.spaceHeld = this.reloadHeld = this.vaccineHeld = this.flashlightHeld = false;
     this.game?.input.clear();
@@ -1830,7 +2300,7 @@ export class GameScene extends Scene {  private player!: Player;
     for (const zombie of this.enemies.zombies) {
       targets.push({ id: this.getPerceptionId(zombie), category: "enemy", ...zombie.getCenter(), bounds: zombie.getRenderBounds() });
     }
-    for (const vaccine of this.vaccinePickups) targets.push({ id: this.getPerceptionId(vaccine), category: "loot", ...vaccine.getPickupAnchor(), bounds: vaccine.getRenderBounds() });
+    for (const vaccine of this.getGroundInventoryPickups()) targets.push({ id: this.getPerceptionId(vaccine), category: "loot", ...vaccine.getPickupAnchor(), bounds: vaccine.getRenderBounds() });
     for (const gold of this.goldPickups) {
       targets.push({
         id: this.getPerceptionId(gold),
@@ -1905,7 +2375,7 @@ export class GameScene extends Scene {  private player!: Player;
     const specs = this.minimapMarkerSpecs;
     specs.length = 0;
     for (const mineral of this.minimapMineralMarkers) specs.push(mineral);
-    for (const vaccine of this.vaccinePickups) specs.push({ id: entityMarkerId("pickup", this.getPerceptionId(vaccine)), type: "pickup",
+    for (const vaccine of this.getGroundInventoryPickups()) specs.push({ id: entityMarkerId("pickup", this.getPerceptionId(vaccine)), type: "pickup",
       ...vaccine.getPickupAnchor(), visible: this.getEntityVisibility(vaccine) === "identified" });
     for (const gold of this.goldPickups) {
       specs.push({
@@ -2037,12 +2507,17 @@ export class GameScene extends Scene {  private player!: Player;
     bloodDrawCandidates: this.enemyBlood.lastDrawCandidates + this.bloodStainSystem.lastDrawCandidates }; }
 
   private drawPerceptionSilhouettes(ctx: CanvasRenderingContext2D,
-    cameraX: number, cameraY: number): void {
+    cameraX: number, cameraY: number, smokeOnly = false): void {
     if (!this.perception) return;
     const paint = (bounds: { x: number; y: number; width: number; height: number },
       weight: number,
       drawSource: (sctx: CanvasRenderingContext2D, pad: number) => void): void => {
       if (weight <= 0.002) return;
+      if (smokeOnly) {
+        const p = this.player.getVisionState(), x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
+        if (Math.hypot(p.x - x, p.y - y) > TC.smokeNear || !hasLineOfSight(this.map, p.x, p.y, x, y)
+          || this.smoke.opacity(p.x, p.y, x, y) < .35) return;
+      }
       const pad = 8;
       const width = Math.max(1, Math.ceil(bounds.width + pad * 2));
       const height = Math.max(1, Math.ceil(bounds.height + pad * 2));
@@ -2065,6 +2540,7 @@ export class GameScene extends Scene {  private player!: Player;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = weight;
+      if (smokeOnly) ctx.filter = 'blur(1.4px)';
       ctx.drawImage(canvas, 0, 0, width, height,
         bounds.x - pad - cameraX, bounds.y - pad - cameraY, width, height);
       ctx.restore();
@@ -2079,11 +2555,15 @@ export class GameScene extends Scene {  private player!: Player;
     ctx.clip(ground, "evenodd");
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
+    if (smokeOnly && this.smoke.density(this.player.x + this.player.getSize() / 2, this.player.y + this.player.getSize() / 2) > .2) {
+      const size = this.player.getSize(), x = this.player.x - size / 2, y = this.player.y - size / 2;
+      paint({ x, y, width: size * 2, height: size * 2 }, .38, (sctx, pad) => this.player.draw(sctx, x - pad, y - pad));
+    }
     for (const zombie of this.enemies.zombies) {
       paint(zombie.getRenderBounds(), silhouetteWeight(zombie),
         (sctx, pad) => { const b = zombie.getRenderBounds(); zombie.drawSilhouette(sctx, b.x - pad, b.y - pad); });
     }
-    for (const vaccine of this.vaccinePickups) paint(vaccine.getRenderBounds(), silhouetteWeight(vaccine),
+    for (const vaccine of this.getGroundInventoryPickups()) paint(vaccine.getRenderBounds(), silhouetteWeight(vaccine),
       (sctx, pad) => vaccine.draw(sctx, vaccine.x - pad, vaccine.y - pad));
     for (const chicken of this.chickens) {
       if (!chicken.isRenderable()) continue;
@@ -2248,7 +2728,7 @@ export class GameScene extends Scene {  private player!: Player;
       if (!visible(zombie.x, zombie.y, 80) || !drawn(zombie)) continue;
       const b = zombie.getRenderBounds(); include(b.x - cameraOffset.x - 10, b.y - cameraOffset.y - 10, b.width + 20, b.height + 20);
     }
-    for (const vaccine of this.vaccinePickups) {
+    for (const vaccine of this.getGroundInventoryPickups()) {
       if (visible(vaccine.x, vaccine.y, 32) && drawn(vaccine)) include(vaccine.x - cameraOffset.x - 16, vaccine.y - cameraOffset.y - 16, 52, 52);
     }
     for (const bullet of bullets) {
@@ -2287,14 +2767,14 @@ export class GameScene extends Scene {  private player!: Player;
       effectBounds.height = Math.max(0, maxY - minY);
     }
 
-    if (this.goldPickups.length || this.chickens.length || this.meatPickups.length || this.enemies.zombies.length || this.vaccinePickups.length) {
+    if (this.goldPickups.length || this.chickens.length || this.meatPickups.length || this.enemies.zombies.length || this.vaccinePickups.length || this.weaponPickups.length) {
       units.save();
       // 与光照共用同一份世界坐标地形轮廓：已按瓦片内容缓存，避免每帧重建整屏裁剪路径。
       units.translate(-cameraOffset.x, -cameraOffset.y);
       units.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), "evenodd");
       units.setTransform(1, 0, 0, 1, 0, 0);
       // 和地图共用像素边界，地面投影不能覆盖墙壁、矿石的顶面。
-      for (const vaccine of this.vaccinePickups) {
+      for (const vaccine of this.getGroundInventoryPickups()) {
         if (visible(vaccine.x, vaccine.y, 32) && drawn(vaccine)) { units.globalAlpha = this.getEntityAlpha(vaccine); vaccine.drawShadow(units, cameraOffset.x, cameraOffset.y); }
       }
       for (const zombie of this.enemies.zombies) {
@@ -2326,7 +2806,7 @@ export class GameScene extends Scene {  private player!: Player;
     // 近身剪影用不透明彩色垫底、灰色叠加来保证互补比例；此时彩色本体也必须和
     // 灰色一样受地面轮廓裁剪，否则被墙挡住的部分会以暖色压在墙顶上。
     const clipSilhouetteBodies = threeLayer && (
-      this.vaccinePickups.some(v => this.getEntitySilhouette(v) > 0.002) ||
+      this.getGroundInventoryPickups().some(v => this.getEntitySilhouette(v) > 0.002) ||
       this.enemies.zombies.some(z => this.getEntitySilhouette(z) > 0.002) ||
       this.chickens.some(c => this.getEntitySilhouette(c) > 0.002) ||
       this.goldPickups.some(p => this.getEntitySilhouette(p) > 0.002) ||
@@ -2361,7 +2841,7 @@ export class GameScene extends Scene {  private player!: Player;
       units.restore();
     }
     // 小鸡在拾取物之上、子弹之下；随后统一做迷雾裁剪，因此迷雾外不可见。
-    for (const vaccine of this.vaccinePickups) {
+    for (const vaccine of this.getGroundInventoryPickups()) {
       if (visible(vaccine.x, vaccine.y, 32) && drawn(vaccine)) { units.globalAlpha = this.getEntityDrawAlpha(vaccine); vaccine.draw(units, cameraOffset.x, cameraOffset.y); }
     }
     for (const zombie of this.enemies.zombies) {
@@ -2406,6 +2886,8 @@ export class GameScene extends Scene {  private player!: Player;
     }
 
     // 绘制玩家（在所有元素上方），使用带震动偏移的相机位置
+    this.drawThrowableWorld(ctx, cameraOffset.x, cameraOffset.y);
+    for (const station of this.tradingStations) if (this.canObserveThrowPoint(station.x, station.y)) station.draw(ctx, cameraOffset.x, cameraOffset.y);
     this.player.draw(ctx, cameraOffset.x, cameraOffset.y);
 
     // 应用光照效果
@@ -2468,6 +2950,7 @@ export class GameScene extends Scene {  private player!: Player;
       this.soundRippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y,
         ctx.canvas.width, ctx.canvas.height);
     }
+    this.drawThrowableAim(ctx, cameraOffset.x, cameraOffset.y);
     this.player.drawUI(ctx, cameraOffset.x, cameraOffset.y);
     screenContext.drawImage(this.worldCanvas, 0, 0, screenContext.canvas.width, screenContext.canvas.height);
     ctx = screenContext;
@@ -2484,46 +2967,75 @@ export class GameScene extends Scene {  private player!: Player;
       (screenContext.canvas.width / textDpr) / this.camera.width);
     ctx.restore();
     // 左上角圆形小地图：世界合成之后的屏幕 HUD 阶段，用逻辑像素绘制。
-    ctx.save();
-    const minimapDpr = window.devicePixelRatio || 1;
-    ctx.scale(minimapDpr, minimapDpr);
-    this.minimap.draw(ctx);
-    ctx.restore();
-    // 黄金计数紧贴小地图下缘：不再与圆形小地图抢左上角，也不盖住它。
-    const goldRect = this.minimap.getGoldRect();
-    ctx.save();
-    const dpr = window.devicePixelRatio || 1;
-    ctx.scale(dpr, dpr);
-    ctx.fillStyle = "#ffd700";
-    ctx.fillRect(goldRect.iconX, goldRect.iconY, goldRect.iconSize, goldRect.iconSize);
-    ctx.font = goldRect.font;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`黄金 ${this.player.getGold()}`, goldRect.textX, goldRect.textY);
-    ctx.restore();
-    // 屏幕层 HUD：右侧武器列表与手电胶囊；生命/体力条仍在角色脚边。
-    // 单独按 dpr 缩放成逻辑像素，避免继承资源栏的 transform。
-    ctx.save();
-    const hudDpr = window.devicePixelRatio || 1;
-    ctx.scale(hudDpr, hudDpr);
-    const hudWidth = ctx.canvas.width / hudDpr;
-    const hudHeight = ctx.canvas.height / hudDpr;
-    const loadout = this.player.getWeaponLoadoutView();
-    const listLayout = getWeaponListLayout(hudWidth, hudHeight);
-    this.weaponListHud.draw(ctx, loadout, hudWidth, hudHeight);
-    this.statusHud.draw(ctx, this.survival.snapshot(), hudWidth, hudHeight, listLayout.area);
-    // 手电状态条贴在武器列表上方，文案右缘与弹药列右缘对齐。
-    this.flashlightHud.draw(
-      ctx,
-      getFlashlightHudRect(
+    // 背包只叠在世界上，避免小地图、黄金等透过物品列表造成文字重影。
+    if (!this.backpackPanel?.isOpen()) {
+      ctx.save();
+      const minimapDpr = window.devicePixelRatio || 1;
+      ctx.scale(minimapDpr, minimapDpr);
+      this.minimap.draw(ctx);
+      ctx.restore();
+      // 黄金计数紧贴小地图下缘：不再与圆形小地图抢左上角，也不盖住它。
+      const goldRect = this.minimap.getGoldRect();
+      ctx.save();
+      const dpr = window.devicePixelRatio || 1;
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = "#ffd700";
+      ctx.fillRect(goldRect.iconX, goldRect.iconY, goldRect.iconSize, goldRect.iconSize);
+      ctx.font = goldRect.font;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`黄金 ${this.player.getGold()}`, goldRect.textX, goldRect.textY);
+      ctx.font = '600 12px "Segoe UI", "Microsoft YaHei", sans-serif';
+      ctx.fillStyle = '#d4e3ec';
+      ctx.fillText(`战斗积分 ${this.combatScore.snapshot().score}`, goldRect.iconX, goldRect.textY + 24);
+      ctx.restore();
+      // 屏幕层 HUD：左下角生存状态与生命/体力，以及右侧武器列表、手电与背包。
+      // 单独按 dpr 缩放成逻辑像素，避免继承资源栏的 transform。
+      ctx.save();
+      const hudDpr = window.devicePixelRatio || 1;
+      ctx.scale(hudDpr, hudDpr);
+      const hudWidth = ctx.canvas.width / hudDpr;
+      const hudHeight = ctx.canvas.height / hudDpr;
+      const loadout = this.player.getWeaponLoadoutView();
+      const listLayout = getWeaponListLayout(hudWidth, hudHeight);
+      const inventoryView = this.getBackpackView();
+      const flashlightRect = getFlashlightHudRect(listLayout.area,
+        listLayout.area.x + listLayout.area.width - listLayout.metrics.paddingRight);
+      this.weaponListHud.draw(ctx, loadout, hudWidth, hudHeight);
+      this.statusHud.draw(ctx, this.survival.snapshot(), hudWidth, hudHeight, listLayout.area);
+      this.backpackHud.draw(ctx, hudWidth, hudHeight, listLayout.area, hudDpr,
+        inventoryView.load);
+      const reservedHud = [
+        getPlayerStatusHudRect(hudWidth, hudHeight, listLayout.area),
+        getBackpackHudRect(hudWidth, hudHeight, listLayout.area),
         listLayout.area,
-        listLayout.area.x + listLayout.area.width - listLayout.metrics.paddingRight,
-      ),
-      hudDpr,
-    );
-    ctx.restore();
+      ];
+      const vitalsRect = getPlayerVitalsHudRect(hudWidth, hudHeight, reservedHud);
+      if (this.player.isAlive()) this.killIndicator.draw(ctx, hudWidth, hudHeight, this.combatScore.snapshot(), [
+        ...reservedHud, vitalsRect, flashlightRect, getQuickSlotHudLayout(hudWidth, hudHeight, [...reservedHud, vitalsRect]),
+      ]);
+      drawPlayerVitalsHud(ctx, this.player, vitalsRect, hudDpr);
+      this.quickSlotHud.draw(ctx, hudWidth, hudHeight, [...reservedHud, vitalsRect],
+        createQuickSlotViews(loadout, this.survival.inventory.getVaccines(), this.getThrowableCounts(), this.quickSlotBindings),
+        this.throwable.locked ? { slot: this.quickSlotBindings.indexOf('grenade'), progress: 1 - this.throwable.fuse / TC.fuse, remaining: this.throwable.fuse }
+          : this.quickItemUse ? { slot: this.quickItemUse.slot, progress: this.quickItemUse.elapsed } : undefined);
+      // 手电状态条贴在武器列表上方，文案右缘与弹药列右缘对齐。
+      this.flashlightHud.draw(
+        ctx,
+        flashlightRect,
+        hudDpr,
+      );
+      ctx.restore();
+    }
     // 拾取标记与 E 提示放在 HUD 之后：交互提示优先于静态信息，且布局已避让 HUD 区域。
     this.drawPickupPrompts(screenContext, cameraOffset);
+    if (this.focusedStation && !this.paused && !this.modalActive) {
+      screenContext.save(); const dpr = window.devicePixelRatio || 1; screenContext.scale(dpr, dpr);
+      screenContext.font = '16px "Microsoft YaHei", sans-serif'; screenContext.textAlign = 'center';
+      const x = screenContext.canvas.width / dpr / 2, y = screenContext.canvas.height / dpr * .62;
+      screenContext.fillStyle = 'rgba(5,10,12,.85)'; screenContext.fillRect(x - 76, y - 24, 152, 36);
+      screenContext.fillStyle = '#d3d6c0'; screenContext.fillText('T 交易站', x, y); screenContext.restore();
+    }
     if (this.zombieDebugPaths) {
       const scale = screenContext.canvas.width / this.camera.width;
       ctx.save(); ctx.scale(scale, scale); ctx.translate(-cameraOffset.x, -cameraOffset.y);
@@ -2538,12 +3050,17 @@ export class GameScene extends Scene {  private player!: Player;
       const dpr = window.devicePixelRatio || 1;
       ctx.save(); ctx.scale(dpr, dpr);
       const width = ctx.canvas.width / dpr, height = ctx.canvas.height / dpr;
-      ctx.fillStyle = "rgba(12,8,10,.72)"; ctx.fillRect(0, height / 2 - 58, width, 116);
+      ctx.fillStyle = "rgba(12,8,10,.82)"; ctx.fillRect(0, height / 2 - 78, width, 156);
       ctx.fillStyle = "#f2c7c7"; ctx.textAlign = "center"; ctx.font = "bold 24px sans-serif";
       const cause = this.player.getDeathCause()?.kind;
-      ctx.fillText(cause === "infection" ? "感染致死" : cause === "melee" ? "遭丧尸袭击身亡" : "你已死亡", width / 2, height / 2 - 9);
+      ctx.fillText(cause === "infection" ? "感染致死" : cause === "melee" ? "遭丧尸袭击身亡" : "你已死亡", width / 2, height / 2 - 43);
+      const score = this.combatScore.snapshot();
+      ctx.fillStyle = '#e2edf2'; ctx.font = '600 15px "Microsoft YaHei", sans-serif';
+      ctx.fillText(`战斗积分 ${score.score}`, width / 2, height / 2 - 9);
+      ctx.font = '13px "Microsoft YaHei", sans-serif';
+      ctx.fillText(`黄金击杀 ${score.goldKills}   ·   最高连杀 ${score.bestChain}`, width / 2, height / 2 + 16);
       ctx.fillStyle = "#fff"; ctx.font = "16px sans-serif";
-      ctx.fillText("Enter 返回菜单", width / 2, height / 2 + 26); ctx.restore();
+      ctx.fillText("Enter 返回菜单", width / 2, height / 2 + 51); ctx.restore();
     }
     this.updateCrosshair();
   }
@@ -2658,16 +3175,38 @@ export class GameScene extends Scene {  private player!: Player;
 
   getPointerAim(input: Input): PlayerAimInput | undefined {
     const pointer = input.consumePointerState?.();
-    if (!pointer?.active || this.cursorVisible) return undefined;
+    if (!pointer?.active || !pointer.rightDown || this.cursorVisible || this.quickSlotHud?.isInteracting() || this.paused
+      || input.isBlocked?.() || !this.player.isAlive()) return undefined;
     const target = this.screenToWorld(pointer.clientX, pointer.clientY);
-    return target ? { target, fire: pointer.leftDown || pointer.leftPressed, face: pointer.rightDown } : undefined;
+    return target ? { target, fire: !this.throwable.held && (pointer.aimFireDown || pointer.aimFirePressed), face: true } : undefined;
+  }
+
+  private updateAimCamera(delta: number, input: Input): void {
+    if (!this.player.isAlive()) { this.camera.clearAimOffset(); return; }
+    let x = 0, y = 0;
+    const pointer = input.getPointerState?.();
+    if (pointer?.active && pointer.rightDown && !this.cursorVisible && !this.quickSlotHud?.isInteracting() && !input.isBlocked?.()) {
+      const rect = this.getCanvasViewport();
+      if (rect.width > 0 && rect.height > 0) {
+        const scaleX = this.camera.width / rect.width, scaleY = this.camera.height / rect.height;
+        // 使用基础跟随坐标，排除瞄准偏移与震屏；静止鼠标不会产生反馈漂移。
+        const dx = pointer.clientX - rect.left - (this.player.x + this.player.getSize() / 2 - this.camera.x) / scaleX;
+        const dy = pointer.clientY - rect.top - (this.player.y + this.player.getSize() / 2 - this.camera.y) / scaleY;
+        const distance = Math.hypot(dx, dy), s = Math.min(rect.width, rect.height), c = GameScene.AIM_CAMERA;
+        const t = Math.max(0, Math.min(1, (distance - c.deadZone * s) / ((c.fullDistance - c.deadZone) * s)));
+        const offset = Math.min(c.maxPixels, c.maxRatio * s) * t * t * (3 - 2 * t);
+        if (distance > 0) { x = dx / distance * offset * scaleX; y = dy / distance * offset * scaleY; }
+      }
+    }
+    this.camera.updateAimOffset(x, y, delta);
   }
 
   /** 唤出系统鼠标时收起准星并暂停瞄准，避免两套指针同时出现。 */
   private setCursorVisible(visible: boolean): void {
+    if (visible !== this.cursorVisible) this.game?.input?.clear();
     this.cursorVisible = visible;
     if (typeof document !== 'undefined') document.body.classList.toggle('cursor-visible', visible);
-    if (visible) this.crosshairOverlay?.setVisible(false);
+    if (visible) { this.crosshairTighten = 0; this.crosshairOverlay?.setVisible(false); }
   }
 
   /**
@@ -2677,13 +3216,11 @@ export class GameScene extends Scene {  private player!: Player;
   private updateCrosshair(): void {
     const overlay = this.crosshairOverlay;
     if (!overlay) return;
-    if (this.cursorVisible || !this.player.isAlive()) {
-      overlay.setVisible(false);
-      return;
-    }
     const pointer = this.game.input.getPointerState?.();
-    if (!pointer?.active) {
+    if (this.cursorVisible || this.quickSlotHud?.isInteracting() || this.paused || !this.player.isAlive() || this.game.input.isBlocked?.()
+      || !pointer?.active || !pointer.rightDown) {
       this.crosshairTighten = 0;
+      overlay.setAppearance(0, false);
       overlay.setVisible(false);
       return;
     }
@@ -2691,7 +3228,7 @@ export class GameScene extends Scene {  private player!: Player;
     overlay.setPosition(pointer.clientX, pointer.clientY);
     overlay.setVisible(true);
 
-    const overTarget = this.isCrosshairOnTarget(pointer);
+    const overTarget = !this.throwable.held && this.isCrosshairOnTarget(pointer);
     const onTarget = pointer.rightDown && overTarget;
     const dt = Math.min(Math.max(this.deltaSinceLastFrame, 0), 0.1);
     const rate = onTarget ? GameScene.CROSSHAIR_TIGHTEN_RATE : -GameScene.CROSSHAIR_RELEASE_RATE;

@@ -10,6 +10,7 @@ import type { PickupConfig } from "./PickupTypes";
 
 export interface PickupVisibilityInput {
   config: PickupConfig;
+  smokeTactile?: boolean;
   /** 感知系统给出的可见性等级。 */
   view: EntityVisibility;
   /** 玩家碰撞体中心到交互锚点的世界距离。 */
@@ -44,6 +45,7 @@ export function resolvePickupVisibility(
 ): PickupVisibilityDecision {
   if (!Number.isFinite(input.distance) || input.distance < 0) return NOT_VISIBLE;
 
+  if (input.smokeTactile && isInInteractionRange(input) && input.nearSense && input.lineOfSight) return { marker: false, prompt: true, named: false };
   if (input.visionMode === "legacy") {
     return resolveLegacyVisibility(input);
   }

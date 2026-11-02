@@ -64,8 +64,11 @@ test('source filtering rejects unknown and zombie/chicken noises; wall-hidden gu
 
 test('seeded two-kind encounters use connected dry legal positions and independent decision streams', () => {
   const m = makeMap(), origin = { x: 600, y: 600 };
-  const make = () => { const s = new EnemySystem(m, new ActorCollisionWorld(m), 123); s.spawn({ shambler: 2, runner: 2 }, origin); return s; };
+  const make = (counts = {}) => { const s = new EnemySystem(m, new ActorCollisionWorld(m), 123); s.spawn(counts, origin); return s; };
   const a = make(), b = make();
-  assert.deepEqual(a.snapshot(), b.snapshot()); assert.equal(a.zombies.length, 4);
+  assert.deepEqual(a.snapshot(), b.snapshot()); assert.equal(a.zombies.length, 20);
+  assert.deepEqual(a.spawnReports.map(r => [r.kind, r.requested, r.spawned, r.skipped]),
+    [['shambler', 10, 10, 0], ['runner', 10, 10, 0]]);
+  assert.equal(make({ shambler: 3, runner: 0 }).zombies.length, 3, 'explicit encounter counts still override defaults');
   for (const z of a.zombies) { const p = z.getCenter(), d = Math.hypot(p.x - origin.x, p.y - origin.y); assert.ok(d >= 350 && d <= 900); assert.ok(m.isShapeWalkable(z.getCollider())); assert.equal(m.getShapeSpeedFactor(z.getCollider()), 1); }
 });

@@ -140,6 +140,7 @@ export function canIdentifyPoint(
   const distance = Math.hypot(x - observer.x, y - observer.y);
   if (!Number.isFinite(distance) || distance > observer.maxObservationRange) return false;
   if (!hasLineOfSight(map, observer.x, observer.y, x, y)) return false;
+  if ((map.sightOpacity?.(observer.x, observer.y, x, y) ?? 0) >= .35) return false;
   if (rules.ambientIdentifies) return true;
   return illuminationStrengthAt(map, x, y, lights, rules) >= rules.identifyLightThreshold;
 }

@@ -206,6 +206,11 @@ export class PerceptionSystem {
     const distance = distanceBetween(observer.x, observer.y, target.x, target.y);
     const inRange = distance <= observer.maxObservationRange;
     const centerLos = hasLineOfSight(this.map, observer.x, observer.y, target.x, target.y);
+    const smoke = this.map.sightOpacity?.(observer.x, observer.y, target.x, target.y) ?? 0;
+    if (smoke >= .35) {
+      const silhouette = centerLos && distance <= 70 && (target.category === 'enemy' || target.category === 'player') ? .25 : 0;
+      return { level: silhouette ? 'silhouette' : 'hidden', alpha: 0, silhouette, lit: false };
+    }
     const near = distance <= observer.nearSenseRadius;
 
     // 滞回：已经点亮时使用更低的退出阈值，手电柔边附近不会在阈值上下反复翻转。
@@ -255,6 +260,7 @@ export class PerceptionSystem {
     const distance = distanceBetween(observer.x, observer.y, x, y);
     if (!Number.isFinite(distance) || distance > observer.maxObservationRange) return false;
     if (!hasLineOfSight(this.map, observer.x, observer.y, x, y)) return false;
+    if ((this.map.sightOpacity?.(observer.x, observer.y, x, y) ?? 0) >= .35) return false;
     if (distance <= observer.nearSenseRadius) return true;
     return canIdentifyPoint(this.map, observer, x, y, this.lights, this.rules);
   }
@@ -342,6 +348,7 @@ export class PerceptionSystem {
         hasLineOfSight(this.map, observer.x, observer.y, cx, cy);
       const lit = !near && canIdentifyPoint(this.map, observer, cx, cy, this.lights, this.rules);
       if (!near && !lit) continue;
+      if ((this.map.sightOpacity?.(observer.x, observer.y, cx, cy) ?? 0) >= .35) continue;
 
       if (!grid.isExploredCell(col, row)) grid.markCell(col, row);
       state.memory.captureWorld(cx, cy);
@@ -416,6 +423,7 @@ export class PerceptionSystem {
           const distance = distanceBetween(observer.x, observer.y, sampleX, sampleY);
           if (distance > maxDistance) continue;
           if (!hasLineOfSight(this.map, observer.x, observer.y, sampleX, sampleY)) continue;
+          if ((this.map.sightOpacity?.(observer.x, observer.y, sampleX, sampleY) ?? 0) >= .35) continue;
           const near = distance <= observer.nearSenseRadius;
           if (!near && !canIdentifyPoint(this.map, observer, sampleX, sampleY, this.lights, this.rules)) {
             continue;

@@ -63,6 +63,9 @@ interface TerrainConfig {
  * 管理游戏中的地图数据、碰撞检测、渲染等功能
  */
 export class TileMap {
+  sightOpacity?: (x0: number, y0: number, x1: number, y1: number) => number;
+  private staticObstacles: Collider[] = [];
+  setStaticObstacles(colliders: readonly Collider[]): void { this.staticObstacles = [...colliders]; this.invalidateNavigation(); }
   private navigationRevision = 0;
   getNavigationRevision(): number { return this.navigationRevision; }
   /** Call after directly editing tiles, tileSize or terrain movement costs. */
@@ -306,6 +309,10 @@ export class TileMap {
     if (bounds.x + bounds.width >= w) obstacles.push({ col: -1, row: -1, collider: this.getBoundaryCollider(1) });
     if (bounds.y <= 0) obstacles.push({ col: -1, row: -1, collider: this.getBoundaryCollider(2) });
     if (bounds.y + bounds.height >= h) obstacles.push({ col: -1, row: -1, collider: this.getBoundaryCollider(3) });
+    for (const collider of this.staticObstacles) {
+      const b = collider.bounds;
+      if (b.x <= bounds.x + bounds.width && b.x + b.width >= bounds.x && b.y <= bounds.y + bounds.height && b.y + b.height >= bounds.y) obstacles.push({ collider, col: -1, row: -1 });
+    }
     return obstacles.sort((a, b) => a.row - b.row || a.col - b.col);
   }
 

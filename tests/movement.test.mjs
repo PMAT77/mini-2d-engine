@@ -11,7 +11,7 @@ const { ParticleSystem } = load('objects/ParticleSystem');
 const { parsePlayerConfig, DEFAULT_MOVEMENT, DEFAULT_SPRINT } = load('objects/PlayerConfig');
 const { readFileSync } = await import('node:fs');
 const input = (...keys) => ({ isKeyDown: key => keys.includes(key), fire: keys.includes('MouseLeft') });
-const mouseAim = p => ({ target: { x: p.x + 24.5, y: p.y - 975.5 }, fire: true, face: false });
+const mouseAim = p => ({ target: { x: p.x + 24.5, y: p.y - 975.5 }, fire: true, face: true });
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b} (±${tolerance})`);
 const advance = (p, seconds, keys = input(), map, fps = 60) => {
   for (let left = seconds; left > 1e-9;) {

@@ -49,6 +49,8 @@ export class PerceptionRenderer {
   private memory: HTMLCanvasElement | null = null;
   private memoryCtx: CanvasRenderingContext2D | null = null;
   private scratch: HTMLCanvasElement | null = null;
+  private smokeCover: HTMLCanvasElement | null = null;
+  private smokeMask: HTMLCanvasElement | null = null;
   private scratchCtx: CanvasRenderingContext2D | null = null;
   private groundMask: HTMLCanvasElement | null = null;
   private groundMaskCtx: CanvasRenderingContext2D | null = null;
@@ -143,11 +145,28 @@ export class PerceptionRenderer {
     // 避免多光源时反复对大 Path2D 做 clip（软件栅格下这是主要开销）。
     if (wantsNear || wantsLight) this.prepareGroundMask(cameraX, cameraY, viewWidth, viewHeight);
 
+    // Preserve terrain memory/unknown shading before punching light holes.
+    const smokeCtx = this.map.sightOpacity ? this.smokeCover?.getContext('2d') : null;
+    if (smokeCtx && this.smokeCover) { smokeCtx.clearRect(0, 0, this.smokeCover.width, this.smokeCover.height); smokeCtx.drawImage(this.overlay, 0, 0); }
     // 3. 近身感知孔洞：硬墙遮挡，按 nearRevealAlpha 压暗而非完全去掉。
     if (wantsNear) this.punchNear(observer, cameraX, cameraY);
 
     // 4. 照明孔洞：光到达、且观察者能看见的区域完全露出。
     if (wantsLight) for (const light of lights) this.punchLight(observer, light, cameraX, cameraY);
+    if (smokeCtx && this.smokeCover && this.smokeMask && this.map.sightOpacity) {
+      const mask = this.smokeMask.getContext('2d')!, w = this.smokeMask.width, h = this.smokeMask.height;
+      const pixels = mask.createImageData(w, h);
+      for (let row = 0; row < h; row++) for (let col = 0; col < w; col++) {
+        const x = cameraX + (col + .5) * viewWidth / w, y = cameraY + (row + .5) * viewHeight / h;
+        if (Math.hypot(x - observer.x, y - observer.y) > observer.maxObservationRange + 50) continue;
+        pixels.data[(row * w + col) * 4 + 3] = Math.min(1, this.map.sightOpacity(observer.x, observer.y, x, y) / .35) * 255;
+      }
+      mask.putImageData(pixels, 0, 0);
+      smokeCtx.globalCompositeOperation = 'destination-in';
+      smokeCtx.drawImage(this.smokeMask, 0, 0, this.smokeCover.width, this.smokeCover.height);
+      smokeCtx.globalCompositeOperation = 'source-over';
+      overlay.drawImage(this.smokeCover, 0, 0);
+    }
 
     if (layer === "grid") this.drawExplorationGrid(explored, cameraX, cameraY);
 
@@ -174,6 +193,8 @@ export class PerceptionRenderer {
     this.memory = createCanvas(width, height);
     this.memoryCtx = this.memory.getContext("2d");
     this.scratch = createCanvas(width, height);
+    this.smokeCover = createCanvas(width, height);
+    this.smokeMask = createCanvas(Math.ceil(this.viewWidth / 24), Math.ceil(this.viewHeight / 24));
     this.scratchCtx = this.scratch.getContext("2d");
     this.groundMask = createCanvas(width, height);
     this.groundMaskCtx = this.groundMask.getContext("2d");

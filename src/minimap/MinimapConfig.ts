@@ -1,3 +1,4 @@
+export const MINIMAP_ZOOM_RADII = [300, 450, 600, 900, 1200] as const;
 import type {
   MinimapCellState,
   MinimapLayout,

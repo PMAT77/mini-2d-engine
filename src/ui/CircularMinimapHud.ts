@@ -1,5 +1,5 @@
 import {
-  computeGoldHudRect,
+  computeGoldHudRect, MINIMAP_ZOOM_RADII,
   computeMinimapLayout,
   createMinimapConfig,
   DEFAULT_MINIMAP_PALETTE,
@@ -127,6 +127,18 @@ export class CircularMinimapHud {
       padding: this.config.markerPadding,
       clusterDistance: this.config.markerClusterDistance,
     };
+  }
+
+  contains(x: number, y: number): boolean {
+    return Math.hypot(x - this.layout.centerX, y - this.layout.centerY) <= this.layout.radius;
+  }
+  zoomBy(direction: number): void {
+    if (!Number.isFinite(direction) || !direction) return;
+    const radii = MINIMAP_ZOOM_RADII;
+    const nearest = radii.reduce((best, r, i) => Math.abs(r - this.config.worldRadius) < Math.abs(radii[best] - this.config.worldRadius) ? i : best, 0);
+    this.config.worldRadius = radii[Math.max(0, Math.min(radii.length - 1, nearest + Math.sign(direction)))];
+    this.resize(this.viewport.width, this.viewport.height, this.viewport.dpr);
+    this.sinceRefresh = Infinity;
   }
 
   getLayout(): Readonly<MinimapLayout> {
@@ -469,16 +481,18 @@ export class CircularMinimapHud {
     ctx.arc(centerX, centerY, contentRadius + innerWidth / 2, 0, Math.PI * 2);
     ctx.stroke();
 
-    // 北向刻度：穿过两圈之间的间隙，只做一条 1px 细线，不抢地形。
-    const tickOuter = radius - outerWidth - 0.6;
-    const tickInner = contentRadius + innerWidth + 0.6;
-    if (tickOuter > tickInner) {
-      ctx.strokeStyle = this.palette.border;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(centerX, centerY - tickOuter);
-      ctx.lineTo(centerX, centerY - tickInner);
-      ctx.stroke();
+    // 地图始终上北下南；字母跨在圆环上，暗色描边让它们不被地形与外圈干扰。
+    const fontSize = Math.max(14, Math.min(30, this.layout.diameter * 0.1));
+    ctx.font = `400 ${fontSize}px "Segoe UI", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = this.palette.unknown;
+    ctx.fillStyle = this.palette.player;
+    for (const [label, y] of [["N", centerY - radius + 3], ["S", centerY + radius - 3]] as const) {
+      ctx.strokeText(label, centerX, y);
+      ctx.fillText(label, centerX, y);
     }
     ctx.restore();
   }

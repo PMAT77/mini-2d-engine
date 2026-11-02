@@ -7,7 +7,7 @@ const DISPLAY_SIZE = 36;
 const CANVAS_SIZE = 64;
 const IDLE_COLOR = '#d8faff';
 const TARGET_COLOR = '#ff3b30';
-/** body 上的标记类：对局内隐藏系统指针（见 index.html），只留准星。 */
+/** body 上的标记类：瞄准时隐藏系统指针（见 index.html），只留准星。 */
 const HIDE_CURSOR_CLASS = 'crosshair-active';
 
 /** 源图中的左右括弧与中心点。裁剪框留出透明边距，缩放时不会裁掉描边。 */
@@ -87,7 +87,7 @@ function drawPiece(
   );
 }
 
-/** 存活的准星图层数：场景切换时新旧图层可能短暂并存，最后一个销毁才恢复指针。 */
+/** 可见的准星图层数：新旧场景可能短暂并存，最后一个隐藏才恢复指针。 */
 let activeLayers = 0;
 
 function retainHiddenCursor(): void {
@@ -142,8 +142,6 @@ export class CrosshairOverlay {
     this.ctx = this.canvas.getContext('2d');
     this.root.appendChild(this.canvas);
     document.body.appendChild(this.root);
-    // 指针只在准星图层存在期间隐藏：回到菜单或场景退出时系统指针自动恢复。
-    retainHiddenCursor();
     this.load();
   }
 
@@ -156,7 +154,6 @@ export class CrosshairOverlay {
     this.x = x;
     this.y = y;
     this.root.style.transform = `translate3d(${x}px,${y}px,0)`;
-    this.setVisible(true);
   }
 
   /**
@@ -177,16 +174,17 @@ export class CrosshairOverlay {
     if (visible === this.visible) return;
     this.visible = visible;
     this.root.style.display = visible ? 'block' : 'none';
+    if (visible) retainHiddenCursor(); else releaseHiddenCursor();
   }
 
   dispose(): void {
     this.disposed = true;
+    this.setVisible(false);
     if (this.image) {
       this.image.onload = null;
       this.image.onerror = null;
     }
     this.root.remove();
-    releaseHiddenCursor();
   }
 
   private load(): void {

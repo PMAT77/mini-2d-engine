@@ -134,7 +134,7 @@ test('the default reload mode is validated and drives the R key', () => {
   assert.throws(() => player.setDefaultReloadMode('快速'), /无效补弹方式/);
 });
 
-test('a loading progress is frozen while another slot is active', () => {
+test('switching cancels loading, keeps seated rounds and restarts from zero', () => {
   const player = new Player(200.5, 200.5);
   player.shoot(new Vector2(1, 0));
   player.requestReload('load');
@@ -143,10 +143,15 @@ test('a loading progress is frozen while another slot is active', () => {
   const halfway = player.getWeaponView().reloadProgress;
   assert.ok(halfway > before);
 
+  const seated = player.getWeaponView().magazineAmmo;
   player.cycleFirearm(1);
   step(player, 1);
   player.cycleFirearm(-1);
-  near(player.getWeaponView().reloadProgress, halfway);
+  near(player.getWeaponView().reloadProgress, 0);
+  assert.equal(player.getWeaponView().isReloading, false);
+  assert.equal(player.getWeaponView().magazineAmmo, seated);
+  player.requestReload('load');
+  near(player.getWeaponView().reloadProgress, 0);
   step(player, 2);
   assert.equal(player.getWeaponView().magazineAmmo, 6);
 });
