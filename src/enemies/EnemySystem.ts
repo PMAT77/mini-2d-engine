@@ -7,6 +7,7 @@ import { ActorCollisionWorld } from '../physics/ActorCollisionWorld';
 import { NavigationScheduler } from '../navigation/NavigationScheduler';
 import type { NavigationResult } from '../navigation/NavigationScheduler';
 import { VisionSensor } from '../ai/VisionSensor';
+import type { EnvironmentPerception } from '../core/EnvironmentLighting';
 import { HearingSensor } from '../ai/HearingSensor';
 import type { PerceptionLight } from '../vision/VisionTypes';
 import { Zombie } from './Zombie';
@@ -31,6 +32,7 @@ interface EnemyRecord {
   stepDistance: number; groanLeft: number;
 }
 export interface EnemyContext {
+  environment?: EnvironmentPerception;
   target: Point & { alive: boolean; radius: number; emittingLightId?: string };
   lights: readonly PerceptionLight[]; playerNoises: readonly NoiseEvent[];
 }
@@ -54,9 +56,16 @@ export class EnemySystem {
     this.navigation = new NavigationScheduler(map);
   }
   get zombies(): readonly Zombie[] { return this.records.filter(r => r.zombie.getLifeState() !== 'removed').map(r => r.zombie); }
-  add(kind: ZombieKind, center: Point, facing = 0): Zombie {
-    const id = `zombie-${++this.nextId}`, config = ZOMBIE_CONFIG[kind], random = seededRandom((this.seed ^ Math.imul(this.nextId, 0x9e3779b1)) >>> 0);
-    const zombie = new Zombie(id, center.x - config.size / 2, center.y - config.size / 2, config, facing);
+  recoverAfterLoad(): void {
+    this.intents = [];
+    for (const zombie of this.zombies) zombie.attack.recoverAfterLoad(this.time);
+  }
+  add(kind: ZombieKind, center: Point, facing = 0, saved?: { id: string; hp: number }): Zombie {
+    const sequence = ++this.nextId, id = saved?.id ?? ('zombie-' + sequence), config = ZOMBIE_CONFIG[kind];
+    if (!config || !id || this.records.some(r => r.zombie.id === id) || ![center.x, center.y, facing].every(Number.isFinite)) throw new Error('敌人实例无效');
+    const salt = saved ? Array.from(id).reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261) : Math.imul(sequence, 0x9e3779b1);
+    const random = seededRandom((this.seed ^ salt) >>> 0);
+    const zombie = new Zombie(id, center.x - config.size / 2, center.y - config.size / 2, config, facing, saved?.hp);
     this.actors.register(id, zombie);
     zombie.setMotionResolver((body, move, angle) => this.actors.resolve(id, body, move, angle));
     this.records.push({ zombie, behavior: new ZombieBehavior(config, random), vision: new VisionSensor(config.senses), hearing: new HearingSensor(config.senses),
@@ -103,7 +112,7 @@ export class EnemySystem {
       const center = z.getCenter();
       if (!context.target.alive && r.targetAlive) { r.behavior.clearTarget(); r.vision.reset(); r.hearing.reset(); r.path = []; this.navigation.cancel(z.id); }
       r.targetAlive = context.target.alive;
-      const sight = context.target.alive ? r.vision.sense(delta, this.map, { ...center, facing: z.getFacingDirection() }, context.target, context.lights) : null;
+      const sight = context.target.alive ? r.vision.sense(delta, this.map, { ...center, facing: z.getFacingDirection() }, context.target, context.lights, context.environment) : null;
       const heard = context.target.alive ? r.hearing.poll(this.map, { id: z.id, ...center }, context.playerNoises)[0] : null;
       r.behavior.update(delta, center, sight?.visible ? context.target : null, heard ?? null);
       const moment = z.attack.advance(this.time);

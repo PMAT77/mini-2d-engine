@@ -46,6 +46,12 @@ export class MeleeAttackController {
     return { attackId: a.id, occurredAt: a.hit, facing: a.facing };
   }
   cancel(): void { if (this.current) this.current.cancelled = true; }
+  /** 同地图读档取消未结算攻击，经过一次既定恢复时间后才能重新起手。 */
+  recoverAfterLoad(now: number): void {
+    this.now = now;
+    this.current = { id: this.actorId + ':resume', start: now, hit: now, end: now + this.config.recovery,
+      facing: 0, emitted: true, cancelled: true };
+  }
   isValid(id: string): boolean { return this.current?.id === id && !this.current.cancelled; }
   isBusy(now: number): boolean { return !!this.current && now + 1e-9 < this.current.end; }
   getState(): 'idle' | 'windup' | 'recovery' {

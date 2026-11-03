@@ -160,7 +160,7 @@ globalThis.window = { innerWidth: 1200, innerHeight: 800, devicePixelRatio: 1,
 test('holding Enter creates exactly one loading scene', () => {
   const menu = new MenuScene(); let requests = 0;
   menu._setGame({ sceneManager: { changeScene() { requests++; } } });
-  for (let i = 0; i < 60; i++) menu.update(1 / 60, { isKeyDown: () => true });
+  for (let i = 0; i < 60; i++) menu.update(1 / 60, { isKeyDown: key => key === 'Enter', clear() {} });
   assert.equal(requests, 1);
 });
 test('loading scene reports real progress, displays errors and ignores completion after exit', async () => {

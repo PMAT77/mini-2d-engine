@@ -4,6 +4,13 @@ export class ConsumableInventory {
   private readonly counts: Record<ConsumableId, number> = { vaccine: 0, grenade: 0, smokeGrenade: 0 };
   private readonly reserved: Record<ConsumableId, number> = { vaccine: 0, grenade: 0, smokeGrenade: 0 };
   getCount(id: ConsumableId): number { return this.counts[id]; }
+  snapshot(): Record<ConsumableId, number> { return { ...this.counts }; }
+  restore(counts: Record<ConsumableId, number>): void {
+    const ids = Object.keys(this.counts) as ConsumableId[];
+    if (!counts || Object.keys(counts).length !== ids.length) throw new Error('库存格式无效');
+    for (const id of ids) this.validate(counts[id]);
+    for (const id of ids) { this.counts[id] = counts[id]; this.reserved[id] = 0; }
+  }
   getAvailable(id: ConsumableId): number { return this.counts[id] - this.reserved[id]; }
   getVaccines(): number { return this.getCount('vaccine'); }
   private validate(amount: number): void { if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('消耗品数量必须是非负安全整数'); }

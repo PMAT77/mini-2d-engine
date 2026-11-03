@@ -1,12 +1,15 @@
 import { Input } from "./Input";
 import { Renderer } from "./Renderer";
 import { SceneManager } from "./Scene";
+import type { LocationManager } from '../campaign/LocationManager';
 
 /**
  * 游戏主类
  * 负责初始化游戏核心组件、启动游戏循环并协调各系统工作
  */
 export class Game {
+  campaign?: LocationManager;
+  resetFrameTime(): void { this.lastTime = performance.now(); }
   /** 渲染器实例，负责所有图形绘制 */
   renderer: Renderer;
 

@@ -1,4 +1,5 @@
 import { Input } from "../core/Input";
+import type { EnvironmentPerception } from '../core/EnvironmentLighting';
 import { TileMap } from "../map/TileMap";
 import { Vector2 } from "../math/Vector2";
 import { circleCollider, Point } from "../physics/Collider";
@@ -37,6 +38,7 @@ const SILHOUETTE_COLOR = "#ffffff";
 
 /** 场景每帧喂给小鸡的感知输入：玩家位置、光源与噪声事件都由场景提供。 */
 export interface ChickenSenses {
+  environment?: EnvironmentPerception;
   targetX: number;
   targetY: number;
   lights?: readonly PerceptionLight[];
@@ -476,7 +478,7 @@ export class Chicken extends Entities {
     const centerY = this.y + this.size / 2;
     const sight = this.vision.sense(delta, map,
       { x: centerX, y: centerY, facing: this.currentRotation - Math.PI },
-      { x: senses.targetX, y: senses.targetY }, senses.lights ?? []);
+      { x: senses.targetX, y: senses.targetY }, senses.lights ?? [], senses.environment);
 
     let threat: { x: number; y: number } | null = null;
     if (sight.visible) threat = { x: senses.targetX, y: senses.targetY };

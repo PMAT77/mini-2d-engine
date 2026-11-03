@@ -187,8 +187,9 @@ export class Bullet {
   private hitTerrain(hit: ShapeCastHit, map: TileMap): void {
     this.particleSystem?.createExplosion(new Vector2(this.pos.x + this.size / 2, this.pos.y + this.size / 2),
       10, 130, 7, .45, IMPACT_SMOKE);
-    if (hit.obstacle.col >= 0) map.damageTile(hit.obstacle.col, hit.obstacle.row, this.damage);
     this.isDestroyed = true;
+    if (hit.obstacle.onProjectileHit) hit.obstacle.onProjectileHit(this.createImpact(this.traveledDistance, { fraction: hit.fraction }));
+    else if (hit.obstacle.col >= 0) map.damageTile(hit.obstacle.col, hit.obstacle.row, this.damage);
   }
 
   /** 按当前速度推进给定等效时间，共用首次命中、单位命中和出界处理。 */

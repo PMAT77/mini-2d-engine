@@ -1,8 +1,10 @@
 import { createVisionRules, type VisionRules } from './VisionRules';
 import { ExplorationGrid } from './ExplorationGrid';
 import { TerrainMemory } from './TerrainMemory';
+import type { ExplorationState } from '../campaign/CampaignState';
 import { anySampleVisible, distanceBetween, hasLineOfSight } from './SightGeometry';
 import { canIdentifyPoint, illuminationStrengthAt } from './IlluminationProbe';
+import { naturalLightStrength, type EnvironmentPerception } from '../core/EnvironmentLighting';
 import type {
   EntityVisibility,
   PerceptionLight,
@@ -53,6 +55,8 @@ const EMPTY_CELLS: ReadonlySet<number> = new Set<number>();
  * 多观察者从第一天就是一等公民；这里不假设只有一个玩家。
  */
 export class PerceptionSystem {
+  private environment?: EnvironmentPerception;
+  setEnvironment(environment: EnvironmentPerception | undefined): void { this.environment = environment ? { ...environment } : undefined; }
   readonly rules: VisionRules;
 
   private readonly map: SightMap;
@@ -110,7 +114,7 @@ export class PerceptionSystem {
   canIdentify(observerId: string, x: number, y: number): boolean {
     const state = this.states.get(observerId);
     if (!state) return false;
-    return canIdentifyPoint(this.map, state.observer, x, y, this.lights, this.rules);
+    return canIdentifyPoint(this.map, state.observer, x, y, this.lights, this.rules, this.environment);
   }
 
   getTerrainRecall(observerId: string, x: number, y: number): TerrainRecall {
@@ -153,6 +157,21 @@ export class PerceptionSystem {
 
   getTerrainMemory(observerId: string): TerrainMemory | null {
     return this.states.get(observerId)?.memory ?? null;
+  }
+
+  captureExploration(observerId: string): ExplorationState | null {
+    const state = this.states.get(observerId);
+    return state ? { cellSize: state.grid.cellSize, cols: state.grid.cols, rows: state.grid.rows,
+      exploredCellIndices: state.grid.capture(), observedTiles: state.memory.snapshot() } : null;
+  }
+  restoreExploration(observer: VisionObserver, saved: ExplorationState): void {
+    const grid = new ExplorationGrid(this.worldWidth, this.worldHeight, this.rules.explorationCellSize);
+    const memory = new TerrainMemory(this.terrain);
+    if (saved.cellSize !== grid.cellSize || saved.cols !== grid.cols || saved.rows !== grid.rows) throw new Error('探索地图尺寸不匹配');
+    grid.restore(saved.exploredCellIndices); memory.restore(saved.observedTiles);
+    const state = this.ensureObserver(observer);
+    state.grid = grid; state.memory = memory; state.views.clear(); state.observed.clear();
+    state.observedRevision++; state.discovery.initialized = false;
   }
 
   getObserver(observerId: string): VisionObserver | null {
@@ -219,7 +238,7 @@ export class PerceptionSystem {
       (wasLit ? this.rules.identifyLightHysteresis : 1);
     const strength = illuminationStrengthAt(this.map, target.x, target.y, this.lights, this.rules);
     const lit = inRange && centerLos &&
-      (this.rules.ambientIdentifies || strength >= threshold);
+      (this.rules.ambientIdentifies || Math.max(strength, naturalLightStrength(this.environment, distance)) >= threshold);
 
     return this.blendView(previous, near, lit, dt);
   }
@@ -262,7 +281,7 @@ export class PerceptionSystem {
     if (!hasLineOfSight(this.map, observer.x, observer.y, x, y)) return false;
     if ((this.map.sightOpacity?.(observer.x, observer.y, x, y) ?? 0) >= .35) return false;
     if (distance <= observer.nearSenseRadius) return true;
-    return canIdentifyPoint(this.map, observer, x, y, this.lights, this.rules);
+    return canIdentifyPoint(this.map, observer, x, y, this.lights, this.rules, this.environment);
   }
 
   private maybeExplore(state: ObserverState, dt: number): void {
@@ -320,7 +339,7 @@ export class PerceptionSystem {
       observer.x + observer.nearSenseRadius,
       observer.y + observer.nearSenseRadius
     );
-    if (this.rules.ambientIdentifies) {
+    if (this.rules.ambientIdentifies || (this.environment?.naturalRange ?? 0) > 0) {
       collect(
         observer.x - observer.maxObservationRange,
         observer.y - observer.maxObservationRange,
@@ -346,7 +365,7 @@ export class PerceptionSystem {
       const near =
         distance <= observer.nearSenseRadius &&
         hasLineOfSight(this.map, observer.x, observer.y, cx, cy);
-      const lit = !near && canIdentifyPoint(this.map, observer, cx, cy, this.lights, this.rules);
+      const lit = !near && canIdentifyPoint(this.map, observer, cx, cy, this.lights, this.rules, this.environment);
       if (!near && !lit) continue;
       if ((this.map.sightOpacity?.(observer.x, observer.y, cx, cy) ?? 0) >= .35) continue;
 
@@ -425,7 +444,7 @@ export class PerceptionSystem {
           if (!hasLineOfSight(this.map, observer.x, observer.y, sampleX, sampleY)) continue;
           if ((this.map.sightOpacity?.(observer.x, observer.y, sampleX, sampleY) ?? 0) >= .35) continue;
           const near = distance <= observer.nearSenseRadius;
-          if (!near && !canIdentifyPoint(this.map, observer, sampleX, sampleY, this.lights, this.rules)) {
+          if (!near && !canIdentifyPoint(this.map, observer, sampleX, sampleY, this.lights, this.rules, this.environment)) {
             continue;
           }
           captured = true;

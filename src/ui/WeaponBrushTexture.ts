@@ -62,6 +62,9 @@ export const BRUSH_FIBER = "110,140,170";
 /** 积墨内芯：少量更深的一段，避免主体读成一块均匀色块。 */
 export const BRUSH_CORE = "4,8,14";
 
+export type BrushTone = 'weapon' | 'charcoal';
+const CHARCOAL = { ink: '8,9,10', core: '2,3,4', fiber: '42,42,39' };
+
 const MAX_BRUSH_TEXTURES = 12;
 const MIN_TEXTURE_DPR = 1;
 const MAX_TEXTURE_DPR = 2;
@@ -348,6 +351,7 @@ function drawStreaks(
   profile: BrushProfile,
   rect: Rect,
   options: { erase: boolean; atop: boolean },
+  tone: BrushTone = 'weapon',
 ): void {
   const startAlpha = ctx.globalAlpha;
   const startComposite = ctx.globalCompositeOperation;
@@ -372,13 +376,14 @@ function drawStreaks(
         y,
         x + length,
         endY,
-        streak.kind === "ink" ? BRUSH_CORE : BRUSH_FIBER,
+        streak.kind === "ink" ? (tone === 'charcoal' ? CHARCOAL.core : BRUSH_CORE)
+          : (tone === 'charcoal' ? CHARCOAL.fiber : BRUSH_FIBER),
         clamp01(streak.alpha),
       );
       ctx.globalAlpha = startAlpha;
       ctx.lineCap = "round";
     }
-    ctx.lineWidth = Math.max(1, streak.thickness * rect.height);
+    ctx.lineWidth = Math.max(1, streak.thickness * rect.height * (tone === 'charcoal' && streak.kind === 'fiber' ? .22 : 1));
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x + length, endY);
@@ -395,8 +400,9 @@ function paintBrush(
   profile: BrushProfile,
   rect: Rect,
   allowErase: boolean,
+  tone: BrushTone,
 ): void {
-  const gradient = createInkGradient(ctx, rect);
+  const gradient = createInkGradient(ctx, rect, tone === 'charcoal' ? CHARCOAL.ink : BRUSH_INK);
   const baseAlpha = clamp01(ctx.globalAlpha);
   ctx.fillStyle = gradient;
   for (const band of profile.bands) {
@@ -406,7 +412,7 @@ function paintBrush(
     ctx.fill();
   }
   ctx.globalAlpha = baseAlpha;
-  drawStreaks(ctx, profile, rect, { erase: allowErase, atop: false });
+  drawStreaks(ctx, profile, rect, { erase: allowErase, atop: false }, tone);
 }
 
 function renderBrushTexture(
@@ -414,6 +420,7 @@ function renderBrushTexture(
   width: number,
   height: number,
   dpr: number,
+  tone: BrushTone,
 ): HTMLCanvasElement | null {
   if (typeof document === "undefined") return null;
   const canvasWidth = Math.max(4, Math.round(width * dpr));
@@ -425,7 +432,7 @@ function renderBrushTexture(
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     const rect: Rect = { x: 0, y: 0, width: canvasWidth, height: canvasHeight };
-    const gradient = createInkGradient(ctx, rect);
+    const gradient = createInkGradient(ctx, rect, tone === 'charcoal' ? CHARCOAL.ink : BRUSH_INK);
     for (const band of profile.bands) {
       traceBand(ctx, band, rect);
       ctx.globalAlpha = clamp01(band.alpha * BAND_WASH_ALPHA);
@@ -433,7 +440,7 @@ function renderBrushTexture(
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-    drawStreaks(ctx, profile, rect, { erase: true, atop: true });
+    drawStreaks(ctx, profile, rect, { erase: true, atop: true }, tone);
     return canvas;
   } catch {
     return null;
@@ -468,10 +475,11 @@ export class WeaponBrushTextures {
     dpr: number,
     seed: number,
     variant: number,
+    tone: BrushTone = 'weapon',
   ): HTMLCanvasElement | null {
     if (!(width > 0) || !(height > 0)) return null;
     const ratio = textureDpr(dpr);
-    const key = `${seed >>> 0}:${variant}:${Math.round(width)}x${Math.round(height)}@${ratio}`;
+    const key = `${seed >>> 0}:${variant}:${Math.round(width)}x${Math.round(height)}@${ratio}:${tone}`;
     const cached = this.canvases.get(key);
     if (cached) return cached;
     const canvas = renderBrushTexture(
@@ -479,6 +487,7 @@ export class WeaponBrushTextures {
       Math.round(width),
       Math.round(height),
       ratio,
+      tone,
     );
     // 没有 DOM 或创建失败时不缓存，避免把一次性失败钉死。
     if (!canvas) return null;
@@ -516,6 +525,8 @@ export interface BrushDrawOptions {
   dpr?: number;
   seed?: number;
   variant?: number;
+  /** 中性黑墨用于顶部时钟；省略时保留所有既有武器 HUD 的颜色。 */
+  tone?: BrushTone;
 }
 
 /**
@@ -533,7 +544,8 @@ export function drawBrush(
   const variant = options.variant ?? 0;
   const dpr = textureDpr(options.dpr ?? 1);
   const profile = weaponBrushTextures.getProfile(seed, variant);
-  const canvas = weaponBrushTextures.getCanvas(rect.width, rect.height, dpr, seed, variant);
+  const tone = options.tone ?? 'weapon';
+  const canvas = weaponBrushTextures.getCanvas(rect.width, rect.height, dpr, seed, variant, tone);
 
   ctx.save();
   try {
@@ -543,7 +555,7 @@ export function drawBrush(
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(canvas, rect.x, rect.y, rect.width, rect.height);
     } else {
-      paintBrush(ctx, profile, rect, false);
+      paintBrush(ctx, profile, rect, false, tone);
     }
   } finally {
     ctx.restore();

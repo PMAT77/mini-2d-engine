@@ -44,6 +44,7 @@ export class PickupItem extends GameObject {
   private expiryTimer: number = 0;     // 过期动画计时器
   private expiryDuration: number = 2;  // 过期动画持续时间（秒）
   private particleSystem?: any;        // 粒子系统引用
+  private fixedEffect?: Omit<Modifier, 'id'>;
 
   /**
    * 构造函数
@@ -52,10 +53,11 @@ export class PickupItem extends GameObject {
    * @param type 道具类型
    * @param particleSystem 可选的粒子系统引用
    */
-  constructor(x: number, y: number, type: PickupType, particleSystem?: any) {
+  constructor(x: number, y: number, type: PickupType, particleSystem?: any, effect?: Omit<Modifier, 'id'>) {
     super(x, y);
     this.type = type;
     this.particleSystem = particleSystem;
+    this.fixedEffect = effect && { ...effect };
   }
 
   /**
@@ -76,6 +78,10 @@ export class PickupItem extends GameObject {
    * 获取道具的修改器效果
    */
   getModifierEffect(): Omit<Modifier, 'id'> {
+    this.fixedEffect ??= this.generateModifierEffect();
+    return { ...this.fixedEffect };
+  }
+  private generateModifierEffect(): Omit<Modifier, 'id'> {
     const baseDuration = 5 + Math.random() * 3; // 5-8秒随机持续时间 
 
     const boost = Math.random();

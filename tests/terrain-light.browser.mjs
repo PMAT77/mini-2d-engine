@@ -107,6 +107,7 @@ try {
     await page.waitForFunction(() => terrainGame.sceneManager.getCurrentScene()?.loaded);
     const config = await page.evaluate(async () => {
       const game = terrainGame, scene = game.sceneManager.getCurrentScene();
+      scene.setEnvironmentPreview(960); scene.setAmbientLight('rgba(214,226,240,0.35)');
       scene.update = () => {};
       scene.map.tiles.forEach(row => row.fill('default'));
       for (let row = 3; row <= 9; row++) scene.map.tiles[row][20] = 'wall';

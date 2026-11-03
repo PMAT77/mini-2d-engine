@@ -6,10 +6,12 @@ import { GOLD_FRAGMENT_SIZE, SPECIAL_MINERAL_TYPES, TILE_TYPES, TileTypeId, getT
 import { PICKUP_ICONS } from '../objects/PickupItem';
 // 在文件顶部添加导入语句
 import { blendColorWithWhite } from '../utils/colorUtils';
-import { Bounds, Collider, ColliderShape, DEFAULT_SHAPE, Point, Polygon, areaInside, areaInsidePolygons, circlePolygonArea, collide, compileShape, rectangleCollider, transformCollider } from '../physics/Collider';
+import { Bounds, Collider, ColliderShape, DEFAULT_SHAPE, Point, Polygon, areaInside, areaInsidePolygons, circlePolygonArea, collide, compileShape, rectangleCollider, transformCollider, overlapsBounds, segmentsIntersect } from '../physics/Collider';
 import { CollisionObstacle, castCollider, queryContacts, resolveMotion } from '../physics/Motion';
 import { WATER_TYPES, WaterTerrain, seededRandom } from './WaterTerrain';
 import { SolidTerrain, solidPath } from './SolidTerrain';
+import type { TerrainChange } from '../campaign/CampaignState';
+import type { EnvironmentState } from '../core/EnvironmentLighting';
 
 /** A supplied seed reproduces both base tiles and continuous water geometry. */
 export interface TileMapOptions { seed?: number; generateWater?: boolean; }
@@ -66,11 +68,162 @@ export class TileMap {
   sightOpacity?: (x0: number, y0: number, x1: number, y1: number) => number;
   private staticObstacles: Collider[] = [];
   setStaticObstacles(colliders: readonly Collider[]): void { this.staticObstacles = [...colliders]; this.invalidateNavigation(); }
+  private readonly ownedSolids = new Map<string, CollisionObstacle[]>();
+  private solidGeometryRevision = 0;
+  private interiorSolidEdges?: Set<string>;
+  getSolidGeometryRevision(): number { return this.solidGeometryRevision; }
+
+  /** P1 的实心多边形入口：统一阻挡移动、弹道、视线和光照。释放令牌只撤销本次注册。 */
+  registerSolid(ownerId: string, colliders: readonly Collider[], onProjectileHit?: CollisionObstacle['onProjectileHit']): () => void {
+    if (typeof ownerId !== 'string' || !ownerId.trim() || !colliders.length
+      || (onProjectileHit !== undefined && typeof onProjectileHit !== 'function')) throw new Error('实心几何注册无效');
+    const owned = colliders.map(source => {
+      if (![source.pose.x, source.pose.y, source.pose.size, source.pose.rotation].every(Number.isFinite) || source.pose.size <= 0)
+        throw new Error('实心几何姿态无效');
+      const collider = transformCollider(compileShape(source.compiled.shape), source.pose);
+      if (!Object.values(collider.bounds).every(Number.isFinite) || collider.bounds.width <= 0 || collider.bounds.height <= 0)
+        throw new Error('实心几何边界无效');
+      if (collider.parts.some(part => part.type !== 'polygon')) throw new Error('实心遮挡目前只支持多边形');
+      return { ownerId, collider, col: -1, row: -1,
+        onProjectileHit: onProjectileHit ? (impact: Parameters<NonNullable<typeof onProjectileHit>>[0]) => {
+          if (this.ownedSolids.get(ownerId) === owned) onProjectileHit(impact);
+        } : undefined };
+    });
+    this.ownedSolids.set(ownerId, owned); this.invalidateSolidGeometry();
+    return () => {
+      if (this.ownedSolids.get(ownerId) !== owned) return;
+      this.ownedSolids.delete(ownerId); this.invalidateSolidGeometry();
+    };
+  }
+  private invalidateSolidGeometry(): void {
+    this.solidGeometryRevision++; this.groundContour = null; this.interiorSolidEdges = undefined; this.invalidateNavigation();
+  }
+  private solidEdgeKey(a: Point, b: Point): [string, number] {
+    const first = Math.round(a.x * 1e8) + ',' + Math.round(a.y * 1e8), second = Math.round(b.x * 1e8) + ',' + Math.round(b.y * 1e8);
+    return first < second ? [first + '|' + second, 1] : [second + '|' + first, 2];
+  }
+  private getInteriorSolidEdges(): Set<string> {
+    if (this.interiorSolidEdges) return this.interiorSolidEdges;
+    const directions = new Map<string, number>();
+    for (const { collider } of this.solidObstacles()) for (const part of collider.parts) if (part.type === 'polygon')
+      for (let i = 0; i < part.vertices.length; i++) if (part.edges[i]) {
+        const [key, direction] = this.solidEdgeKey(part.vertices[i], part.vertices[(i + 1) % part.vertices.length]);
+        directions.set(key, (directions.get(key) ?? 0) | direction);
+      }
+    this.interiorSolidEdges = new Set(Array.from(directions).filter(([, direction]) => direction === 3).map(([key]) => key));
+    return this.interiorSolidEdges;
+  }
+  // ponytail: 少量 P1/P2 墙体线性查询；建筑规模达到数百个时在此处增加空间索引。
+  private solidObstacles(bounds?: Bounds): CollisionObstacle[] {
+    const result: CollisionObstacle[] = [];
+    for (const owned of this.ownedSolids.values()) for (const obstacle of owned)
+      if (!bounds || overlapsBounds(bounds, obstacle.collider.bounds)) result.push(obstacle);
+    return result;
+  }
+  private solidContains(x: number, y: number): boolean {
+    const point = { x, y };
+    for (const { collider } of this.solidObstacles({ x, y, width: 0, height: 0 })) for (const part of collider.parts) {
+      if (part.type !== 'polygon') continue;
+      let inside = false;
+      for (let i = 0, j = part.vertices.length - 1; i < part.vertices.length; j = i++) {
+        const a = part.vertices[i], b = part.vertices[j];
+        if (segmentsIntersect(point, point, a, b)) return true;
+        if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) inside = !inside;
+      }
+      if (inside) return true;
+    }
+    return false;
+  }
   private navigationRevision = 0;
   getNavigationRevision(): number { return this.navigationRevision; }
   /** Call after directly editing tiles, tileSize or terrain movement costs. */
   invalidateNavigation(): void { this.navigationRevision++; }
+  /** 在未激活的候选地图上静默恢复，不触发掉落回调。 */
+  restoreTerrain(changes: readonly TerrainChange[]): void {
+    const seen = new Set<number>();
+    for (const t of changes) {
+      const key = t.row * this.width + t.col, terrain = this.terrainMap.get(t.tileTypeId);
+      if (!Number.isInteger(t.col) || !Number.isInteger(t.row) || t.col < 0 || t.row < 0 || t.col >= this.width || t.row >= this.height
+        || seen.has(key) || !terrain || !Number.isFinite(t.hp) || t.hp < 0 || t.hp > (terrain.maxHp ?? 0))
+        throw new Error('地图地形快照无效');
+      seen.add(key);
+    }
+    for (const t of changes) {
+      this.tiles[t.row][t.col] = t.tileTypeId; this.tileHp[t.row][t.col] = t.hp; this.tileHighlight[t.row][t.col] = 0;
+    }
+    this.mineralDamage.clear(); this.terrainChunks.clear(); this.obstacleColliders.clear();
+    for (const t of changes) {
+      const maxHp = this.terrainMap.get(t.tileTypeId)?.maxHp;
+      if (maxHp && t.hp > 0 && t.hp < maxHp) this.ensureDamageMarks(t.col, t.row, t.tileTypeId);
+    }
+    this.solids = new SolidTerrain((col, row) => this.isBlockingTile(col, row, 'light'));
+    this.invalidateNavigation();
+  }
   readonly water?: WaterTerrain;
+  private surfacePalette: { ground: string; wall: string } | null = null;
+  setSurfacePalette(palette: { ground: string; wall: string } | null): void {
+    if (palette?.ground === this.surfacePalette?.ground && palette?.wall === this.surfacePalette?.wall) return;
+    this.surfacePalette = palette ? { ...palette } : null;
+    this.terrainChunks.clear();
+  }
+  private surfaceColor(type: TileTypeId): string {
+    return (type === TileTypeId.DEFAULT ? this.surfacePalette?.ground : type === TileTypeId.WALL ? this.surfacePalette?.wall : undefined) ?? TILE_TYPES[type].color;
+  }
+  /** Ground and solid albedo remain cached; directional edge response is a small dynamic pass. */
+  drawSunFaces(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, state: EnvironmentState): void {
+    if (state.sunIntensity <= 0 || state.edgeIntensity <= 0) return;
+    const edges = this.getShadowEdges(x + width / 2, y + height / 2, Math.hypot(width, height) / 2 + this.tileSize);
+    ctx.save(); ctx.translate(-x, -y); ctx.clip(this.getTerrainTopContour(x, y, width, height)); ctx.lineWidth = 4;
+    for (const sunny of [false, true]) {
+      ctx.beginPath();
+      for (const edge of edges) {
+        const dx = edge.bx - edge.ax, dy = edge.by - edge.ay, length = Math.hypot(dx, dy);
+        const col = Math.floor(((edge.ax + edge.bx) / 2 - dy / length * .25) / this.tileSize);
+        const row = Math.floor(((edge.ay + edge.by) / 2 + dx / length * .25) / this.tileSize);
+        if (!getTileType(this.tiles[row]?.[col]).blocksLight) continue; // Owned walls shade themselves only when observed.
+        const facing = (-state.sunDirection.x * dy + state.sunDirection.y * dx) / length;
+        if ((facing > 0) !== sunny || Math.abs(facing) < .15) continue;
+        ctx.moveTo(edge.ax, edge.ay); ctx.lineTo(edge.bx, edge.by);
+      }
+      ctx.globalAlpha = state.edgeIntensity * Math.min(1, state.sunIntensity / .24) * (sunny ? 1 : .8);
+      ctx.strokeStyle = sunny ? state.sunColor : '#182638'; ctx.stroke();
+    }
+    ctx.restore();
+  }
+  drawSurfaceHighlights(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, state: EnvironmentState): void {
+    this.water?.drawHighlights(ctx, x, y, width, height, this.tileSize, state.waterHighlight);
+    const size = this.tileSize;
+    ctx.save(); ctx.translate(-x, -y); ctx.lineWidth = 1.5;
+    for (let row = Math.max(0, Math.floor(y / size)); row < Math.min(this.height, Math.ceil((y + height) / size)); row++)
+      for (let col = Math.max(0, Math.floor(x / size)); col < Math.min(this.width, Math.ceil((x + width) / size)); col++) {
+        const type = this.tiles[row][col], metal = type !== TileTypeId.WALL && !!getTileType(type).blocksLight;
+        const water = WATER_TYPES.includes(type);
+        if ((!metal && !water) || (water && this.water?.getCell(col, row, size))) continue;
+        ctx.save();
+        if (metal) { ctx.beginPath(); solidPath(ctx, this.tilePolygons(col, row), 0, 0); ctx.clip(); }
+        ctx.globalAlpha *= metal ? state.metalHighlight : state.waterHighlight;
+        ctx.strokeStyle = state.sunIntensity > 0 ? state.sunColor : '#FFF4E8';
+        ctx.beginPath(); ctx.moveTo((col + .18) * size, (row + .2) * size); ctx.lineTo((col + .78) * size, (row + .2) * size);
+        ctx.moveTo((col + .18) * size, (row + .2) * size); ctx.lineTo((col + .18) * size, (row + .5) * size); ctx.stroke(); ctx.restore();
+      }
+    ctx.restore();
+  }
+  getSurfaceHighlightBounds(x: number, y: number, width: number, height: number): Bounds | null {
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    const add = (b: Bounds) => {
+      const l = Math.max(x, b.x - 2), t = Math.max(y, b.y - 2), r = Math.min(x + width, b.x + b.width + 2), d = Math.min(y + height, b.y + b.height + 2);
+      if (r <= l || d <= t) return;
+      left = Math.min(left, l); top = Math.min(top, t); right = Math.max(right, r); bottom = Math.max(bottom, d);
+    };
+    for (const lake of this.water?.lakes ?? []) add({ x: lake.bounds.x * this.tileSize, y: lake.bounds.y * this.tileSize,
+      width: lake.bounds.width * this.tileSize, height: lake.bounds.height * this.tileSize });
+    for (let row = Math.max(0, Math.floor(y / this.tileSize)); row < Math.min(this.height, Math.ceil((y + height) / this.tileSize)); row++)
+      for (let col = Math.max(0, Math.floor(x / this.tileSize)); col < Math.min(this.width, Math.ceil((x + width) / this.tileSize)); col++) {
+        const tile = this.tiles[row][col];
+        if (tile !== TileTypeId.WALL && (getTileType(tile).blocksLight || WATER_TYPES.includes(tile))) add({ x: col * this.tileSize, y: row * this.tileSize, width: this.tileSize, height: this.tileSize });
+      }
+    return right > left ? { x: left, y: top, width: right - left, height: bottom - top } : null;
+  }
   tileSize = 50;                    // 瓦片大小（像素）
   width: number;                    // 地图宽度（瓦片数）
   height: number;                   // 地图高度（瓦片数）
@@ -180,21 +333,30 @@ export class TileMap {
   /** A light sample is a point, independent of the entity collision shape/solver. */
   blocksLightAt(x: number, y: number): boolean {
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= this.width * this.tileSize || y >= this.height * this.tileSize) return true;
-    return this.solids.contains(x, y, this.tileSize);
+    return this.solids.contains(x, y, this.tileSize) || (this.ownedSolids.size > 0 && this.solidContains(x, y));
   }
 
   blocksSightBetween(ax: number, ay: number, bx: number, by: number): boolean {
     if (![ax, ay, bx, by].every(Number.isFinite) || this.blocksLightAt(ax, ay) || this.blocksLightAt(bx, by)) return true;
-    return (ax !== bx || ay !== by) && this.solids.intersectsSegment({ x: ax, y: ay }, { x: bx, y: by }, this.tileSize, this.width, this.height);
+    if (ax === bx && ay === by) return false;
+    if (this.solids.intersectsSegment({ x: ax, y: ay }, { x: bx, y: by }, this.tileSize, this.width, this.height)) return true;
+    if (!this.ownedSolids.size) return false;
+    const a = { x: ax, y: ay }, b = { x: bx, y: by };
+    return this.solidObstacles({ x: Math.min(ax, bx), y: Math.min(ay, by), width: Math.abs(bx - ax), height: Math.abs(by - ay) })
+      .some(({ collider }) => collider.parts.some(part => part.type === 'polygon' && part.vertices.some((c, i) =>
+        segmentsIntersect(a, b, c, part.vertices[(i + 1) % part.vertices.length]))));
   }
 
   /** Clockwise exposed edges in world coordinates; internal edges do not cast shadows. */
   getShadowEdges(lightX: number, lightY: number, radius: number): ShadowEdge[] {
     if (!Number.isFinite(radius) || radius <= 0) return [];
     const edges: ShadowEdge[] = [];
-    for (const { vertices, edges: exposed } of this.getBlockingPolygons(lightX - radius, lightY - radius, radius * 2, radius * 2)) {
+    const interior = this.ownedSolids.size ? this.getInteriorSolidEdges() : undefined;
+    for (const polygon of this.getBlockingPolygons(lightX - radius, lightY - radius, radius * 2, radius * 2)) {
+      const { vertices, edges: exposed } = polygon;
       for (let i = 0; i < vertices.length; i++) if (exposed[i]) {
         const a = vertices[i], b = vertices[(i + 1) % vertices.length];
+        if (!polygon.terrain && interior?.has(this.solidEdgeKey(a, b)[0])) continue;
         const dx = b.x - a.x, dy = b.y - a.y;
         const t = Math.max(0, Math.min(1, ((lightX - a.x) * dx + (lightY - a.y) * dy) / (dx * dx + dy * dy)));
         if (Math.hypot(a.x + t * dx - lightX, a.y + t * dy - lightY) <= radius)
@@ -204,10 +366,15 @@ export class TileMap {
     return edges;
   }
 
-  /** Disjoint convex tops, including fillets owned by adjacent source tiles. */
+  /** Terrain tops (including fillets) and registered solid polygon tops. */
   getBlockingPolygons(x: number, y: number, width: number, height: number): Polygon[] {
     if (width <= 0 || height <= 0) return [];
-    return this.solids.query({ x, y, width, height }, this.tileSize, this.width, this.height).map(p => p.polygon);
+    const bounds = { x, y, width, height };
+    const polygons = this.solids.query(bounds, this.tileSize, this.width, this.height).map(p => p.polygon);
+    if (!this.ownedSolids.size) return polygons;
+    for (const { collider } of this.solidObstacles(bounds)) for (const part of collider.parts)
+      if (part.type === 'polygon') polygons.push(part);
+    return polygons;
   }
 
   private isBlockingTile(col: number, row: number, purpose: CollisionPurpose | 'light' = 'movement'): boolean {
@@ -224,6 +391,7 @@ export class TileMap {
    * 世界坐标系里的实心地形轮廓。查询范围向四周扩两格瓦片并对齐到瓦片网格，因此相机移动后
    * 可以复用同一份路径，不必每帧重新查询多边形；调用方在相机空间使用时先 translate(-cameraX, -cameraY)。
    * 瓦片数组可能被直接改写（挖矿/测试），所以路径只在区域内瓦片类型完全不变时复用。
+   * 注册物体可能相交，地面绘制请通过 clipGround/fillGround 处理完整并集，不直接以 evenodd 使用此原始路径。
    */
   getGroundContour(cameraX: number, cameraY: number, width: number, height: number): Path2D {
     const size = this.tileSize, margin = size * 2;
@@ -252,6 +420,21 @@ export class TileMap {
   getTerrainTopContour(cameraX: number, cameraY: number, width: number, height: number): Path2D {
     this.getGroundContour(cameraX, cameraY, width, height);
     return this.groundContour!.tops;
+  }
+
+  /** 世界坐标裁剪；逐个扣除注册物体，避免相交墙体在 evenodd 轮廓中互相抵消。 */
+  clipGround(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, contour?: Path2D): void {
+    ctx.clip(contour ?? this.getGroundContour(x, y, width, height), 'evenodd');
+    if (!this.ownedSolids.size) return;
+    for (const { collider } of this.solidObstacles({ x, y, width, height })) for (const part of collider.parts) {
+      if (part.type !== 'polygon') continue;
+      const inverse = new Path2D(); inverse.rect(x, y, width, height); solidPath(inverse, [part], 0, 0);
+      ctx.clip(inverse, 'evenodd');
+    }
+  }
+  fillGround(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, contour?: Path2D): void {
+    if (!this.ownedSolids.size) { ctx.fill(contour ?? this.getGroundContour(x, y, width, height), 'evenodd'); return; }
+    ctx.save(); this.clipGround(ctx, x, y, width, height, contour); ctx.fillRect(x, y, width, height); ctx.restore();
   }
 
   /** Coarse grid rectangles for compatibility; use getBlockingPolygons for exact tops. */
@@ -325,6 +508,7 @@ export class TileMap {
       const b = collider.bounds;
       if (b.x <= bounds.x + bounds.width && b.x + b.width >= bounds.x && b.y <= bounds.y + bounds.height && b.y + b.height >= bounds.y) obstacles.push({ collider, col: -1, row: -1 });
     }
+    if (this.ownedSolids.size) obstacles.push(...this.solidObstacles(bounds));
     return obstacles.sort((a, b) => a.row - b.row || a.col - b.col);
   }
 
@@ -465,30 +649,36 @@ export class TileMap {
     if (this.tileHp[row][col] <= 0) {
       this.breakTile(col, row);
     } else {
-      const key = row * this.width + col;
-      if (!this.mineralDamage.has(key)) {
-        const colors = tileTypeId === TileTypeId.MINERAL ? MINERAL_DAMAGE_COLORS :
-          [0.8, 0.6, 0.4, 0.2].map(factor => {
-            const rgb = [1, 3, 5].map(start => Math.round(parseInt(tileType.color.slice(start, start + 2), 16) * factor));
-            return `rgb(${rgb.join(',')})`;
-          });
-        const columns = Math.floor(this.tileSize / GOLD_FRAGMENT_SIZE);
-        const padding = (this.tileSize - columns * GOLD_FRAGMENT_SIZE) / 2;
-        const cells = Array.from({ length: columns * columns }, (_, i) => i);
-        for (let i = cells.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [cells[i], cells[j]] = [cells[j], cells[i]];
-        }
-        const shadeOffset = Math.floor(Math.random() * colors.length);
-        // 位置只随机一次，四色交替分配，让首次普通命中的三格已有深浅差异。
-        this.mineralDamage.set(key, cells.slice(0, 24).map((cell, i) => ({
-          x: padding + cell % columns * GOLD_FRAGMENT_SIZE,
-          y: padding + Math.floor(cell / columns) * GOLD_FRAGMENT_SIZE,
-          color: colors[(i + shadeOffset) % colors.length]
-        })));
-      }
+      this.ensureDamageMarks(col, row, tileTypeId);
       this.onTileDamaged?.(col, row, tileTypeId, this.tileHp[row][col], terrain.maxHp);
     }
+  }
+
+  /** 恢复破损外观时复用绘制缓存，不重放伤害或掉落。 */
+  private ensureDamageMarks(col: number, row: number, tileTypeId: TileTypeId): void {
+    const tileType = getTileType(tileTypeId);
+  const key = row * this.width + col;
+  if (!this.mineralDamage.has(key)) {
+    const colors = tileTypeId === TileTypeId.MINERAL ? MINERAL_DAMAGE_COLORS :
+      [0.8, 0.6, 0.4, 0.2].map(factor => {
+        const rgb = [1, 3, 5].map(start => Math.round(parseInt(tileType.color.slice(start, start + 2), 16) * factor));
+        return `rgb(${rgb.join(',')})`;
+      });
+    const columns = Math.floor(this.tileSize / GOLD_FRAGMENT_SIZE);
+    const padding = (this.tileSize - columns * GOLD_FRAGMENT_SIZE) / 2;
+    const cells = Array.from({ length: columns * columns }, (_, i) => i);
+    for (let i = cells.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [cells[i], cells[j]] = [cells[j], cells[i]];
+    }
+    const shadeOffset = Math.floor(Math.random() * colors.length);
+    // 位置只随机一次，四色交替分配，让首次普通命中的三格已有深浅差异。
+    this.mineralDamage.set(key, cells.slice(0, 24).map((cell, i) => ({
+      x: padding + cell % columns * GOLD_FRAGMENT_SIZE,
+      y: padding + Math.floor(cell / columns) * GOLD_FRAGMENT_SIZE,
+      color: colors[(i + shadeOffset) % colors.length]
+    })));
+  }
   }
 
   /**
@@ -616,7 +806,7 @@ export class TileMap {
         if (col < 0 || col >= this.width) continue;
         const localX = Math.round(col * tileSize - worldX);
         const localW = Math.round((col + 1) * tileSize - worldX) - localX;
-        ctx.fillStyle = TILE_TYPES[this.isBlockingTile(col, row, 'light') ? TileTypeId.DEFAULT : this.tiles[row][col]].color;
+        ctx.fillStyle = this.surfaceColor(this.isBlockingTile(col, row, 'light') ? TileTypeId.DEFAULT : this.tiles[row][col]);
         ctx.fillRect(localX, localY, localW, localH);
       }
     }
@@ -629,7 +819,7 @@ export class TileMap {
       return;
     }
     ctx.beginPath(); solidPath(ctx, patches.map(p => p.polygon), worldX, worldY);
-    ctx.fillStyle = TILE_TYPES[TileTypeId.WALL].color; ctx.fill();
+    ctx.fillStyle = this.surfaceColor(TileTypeId.WALL); ctx.fill();
     const owners = new Map<number, Polygon[]>();
     for (const patch of patches) {
       const key = patch.row * this.width + patch.col;
@@ -640,12 +830,12 @@ export class TileMap {
     const materials = new Map<string, Polygon[]>();
     for (const [key, polygons] of owners) {
       const col = key % this.width, row = Math.floor(key / this.width);
-      const color = TILE_TYPES[this.tiles[row][col]].color;
+      const color = this.surfaceColor(this.tiles[row][col]);
       const list = materials.get(color);
       if (list) { for (const polygon of polygons) list.push(polygon); } else materials.set(color, polygons.slice());
     }
     for (const [color, polygons] of materials) {
-      if (color === TILE_TYPES[TileTypeId.WALL].color) continue;
+      if (color === this.surfaceColor(TileTypeId.WALL)) continue;
       ctx.beginPath(); solidPath(ctx, polygons, worldX, worldY); ctx.fillStyle = color; ctx.fill();
     }
     chunk.fingerprint = fingerprint;
@@ -679,7 +869,7 @@ export class TileMap {
           this.tileHighlight[row][col] = Math.max(0, highlight - delta);
           if (polygons.length) {
             ctx.beginPath(); solidPath(ctx, polygons, cameraX, cameraY);
-            ctx.fillStyle = blendColorWithWhite(TILE_TYPES[type].color, Math.min(highlight / this.highlightDuration, 1));
+            ctx.fillStyle = blendColorWithWhite(this.surfaceColor(type), Math.min(highlight / this.highlightDuration, 1));
             ctx.fill();
           }
         }
@@ -727,7 +917,7 @@ export class TileMap {
     for (let row = startRow; row <= endRow; row++) {
       for (let col = startCol; col <= endCol; col++) {
         const rect = tileScreenRect({ x: col * this.tileSize, y: row * this.tileSize, width: this.tileSize, height: this.tileSize }, cameraX, cameraY);
-        ctx.fillStyle = TILE_TYPES[this.isBlockingTile(col, row, 'light') ? TileTypeId.DEFAULT : this.tiles[row][col]].color;
+        ctx.fillStyle = this.surfaceColor(this.isBlockingTile(col, row, 'light') ? TileTypeId.DEFAULT : this.tiles[row][col]);
         ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
       }
     }
@@ -735,7 +925,7 @@ export class TileMap {
     const patches = this.solids.query({ x: cameraX, y: cameraY, width: canvasWidth, height: canvasHeight }, this.tileSize, this.width, this.height);
     if (!patches.length) return;
     ctx.beginPath(); solidPath(ctx, patches.map(p => p.polygon), cameraX, cameraY);
-    ctx.fillStyle = TILE_TYPES[TileTypeId.WALL].color; ctx.fill();
+    ctx.fillStyle = this.surfaceColor(TileTypeId.WALL); ctx.fill();
     const owners = new Map<number, Polygon[]>();
     for (const patch of patches) {
       const key = patch.row * this.width + patch.col;
@@ -746,7 +936,7 @@ export class TileMap {
     const materials = new Map<string, Polygon[]>();
     for (const [key, polygons] of owners) {
       const col = key % this.width, row = Math.floor(key / this.width);
-      let color = TILE_TYPES[this.tiles[row][col]].color;
+      let color = this.surfaceColor(this.tiles[row][col]);
       const highlight = this.tileHighlight[row][col];
       if (highlight > 0) {
         color = blendColorWithWhite(color, Math.min(highlight / this.highlightDuration, 1));
@@ -756,7 +946,7 @@ export class TileMap {
       materials.get(color)!.push(...polygons);
     }
     for (const [color, polygons] of materials) {
-      if (color === TILE_TYPES[TileTypeId.WALL].color) continue;
+      if (color === this.surfaceColor(TileTypeId.WALL)) continue;
       ctx.beginPath(); solidPath(ctx, polygons, cameraX, cameraY); ctx.fillStyle = color; ctx.fill();
     }
     for (const [key, polygons] of owners) {

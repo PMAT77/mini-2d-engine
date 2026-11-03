@@ -3,6 +3,7 @@ import type { PointerState } from '../core/Input';
 import type { WeaponSlot } from '../objects/Weapon';
 import type { ConsumableInventory } from '../survival/ConsumableInventory';
 import { THROWABLE_CONFIG as C, type ThrowableId } from './ThrowableConfig';
+import type { HeldGrenadeState } from '../campaign/LocationResumeState';
 
 /** Owns only the item in hand; launched bodies have independent lifetimes. */
 export class ThrowableController {
@@ -14,6 +15,17 @@ export class ThrowableController {
   private releaseOwned = false;
   constructor(private readonly inventory: ConsumableInventory) {}
   get locked(): boolean { return this.held === 'grenade' && this.prepared; }
+  captureHeldGrenade(): HeldGrenadeState | null {
+    return this.locked ? { fuse: this.fuse, target: { ...this.target }, returnWeapon: this.returnWeapon } : null;
+  }
+  restoreHeldGrenade(saved: HeldGrenadeState | null): void {
+    if (saved && (this.inventory.getCount('grenade') < 1 || ![saved.fuse, saved.target.x, saved.target.y].every(Number.isFinite)
+      || saved.fuse < 0 || saved.fuse > C.fuse || !['primary', 'secondary', 'melee'].includes(saved.returnWeapon))) throw new Error('手雷恢复状态无效');
+    this.dispose();
+    if (!saved) return;
+    this.inventory.reserve('grenade'); this.held = 'grenade'; this.prepared = true;
+    this.fuse = saved.fuse; this.target = { ...saved.target }; this.returnWeapon = saved.returnWeapon;
+  }
   equip(id: ThrowableId, previous: WeaponSlot): boolean {
     if (this.locked || this.inventory.getCount(id) < 1) return false;
     if (!this.held) this.returnWeapon = previous;

@@ -360,9 +360,14 @@ try {
     assert.equal(await field('graphics.playerLight.radius').inputValue(), String(await page.evaluate(() => debugTest.initialLight.radius)));
 
     await page.setViewportSize({ width: 360, height: 640 });
+    // Chromium may briefly pan its visual viewport around the focused field on resize.
+    await page.waitForFunction(() => {
+      const r = document.querySelector('#player-debug-panel').getBoundingClientRect();
+      return Math.abs(r.x + r.width / 2 - innerWidth / 2) <= 2 && Math.abs(r.y + r.height / 2 - innerHeight / 2) <= 2;
+    });
     const bounds = await panel.boundingBox();
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 360 && bounds.y >= 0 && bounds.y + bounds.height <= 640);
-    assert.ok(Math.abs(bounds.x + bounds.width / 2 - 180) <= 2 && Math.abs(bounds.y + bounds.height / 2 - 320) <= 2, 'narrow viewport keeps the modal centered');
+    assert.ok(Math.abs(bounds.x + bounds.width / 2 - 180) <= 2 && Math.abs(bounds.y + bounds.height / 2 - 320) <= 2, `narrow viewport keeps the modal centered: ${JSON.stringify({ dpr, bounds })}`);
     assert.ok(await panel.locator('.debug-content').evaluate(element => element.scrollHeight > element.clientHeight));
     await panel.locator('.debug-content').evaluate(element => { element.scrollTop = element.scrollHeight; });
     await page.screenshot({ path: join(output, `debug-panel-narrow-dpr-${dpr}.png`) });

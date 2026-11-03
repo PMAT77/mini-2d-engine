@@ -34,8 +34,10 @@ export class Zombie extends Entities {
   private headHitAge = 10;
   private deathFinished: ZombieDeathEvent | null = null;
   private knockback?: KnockbackMotion;
-  constructor(readonly id: string, x: number, y: number, readonly config: Readonly<ZombieConfig>, facing = 0) {
-    super(x, y); this.health = config.maxHealth; this.size = config.size; this.rotationSpeed = config.turnSpeed;
+  constructor(readonly id: string, x: number, y: number, readonly config: Readonly<ZombieConfig>, facing = 0, hp = config.maxHealth) {
+    super(x, y);
+    if (!Number.isFinite(hp) || hp <= 0 || hp > config.maxHealth) throw new Error('敌人生命值无效');
+    this.health = hp; this.size = config.size; this.rotationSpeed = config.turnSpeed;
     this.attack = new MeleeAttackController(id, config);
     this.currentRotation = facing + Math.PI; this.setCollider({ type: 'circle', radius: .5 });
     this.maxSpeed = config.wanderSpeed; this.accel = config.wanderAcceleration; this.decel = 1000;

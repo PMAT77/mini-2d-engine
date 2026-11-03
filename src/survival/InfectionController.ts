@@ -11,4 +11,9 @@ export class InfectionController {
     return ticks;
   }
   getRemainder(): number { return this.remainder; }
+  restore(infected: boolean, remainder: number): void {
+    if (typeof infected !== 'boolean' || !Number.isFinite(remainder) || remainder < 0 || remainder >= 1 || (!infected && remainder !== 0))
+      throw new Error('感染状态无效');
+    this.infected = infected; this.remainder = remainder;
+  }
 }

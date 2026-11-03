@@ -2,12 +2,13 @@
  * 调试面板的声明式字段表：配置里每个可调叶子都必须在这里出现一次，
  * `tests/config-sync.test.mjs` 会用配置默认值反向检查，漏项或悬空项都会失败。
  */
+import { DEFAULT_DAY_NIGHT, type EnvironmentPreset } from '../core/EnvironmentLighting';
 export type DebugTabId = "character" | "visual" | "audio";
 export type ConfigDomain = "player" | "graphics" | "audio";
 
 export type SectionId =
   | "life" | "combat" | "ballistics" | "movement" | "stamina" | "roll" | "ammo" | "waterDrag" | "body" | "ui"
-  | "camera" | "ambient" | "playerLight" | "flashlight" | "fog" | "visibility"
+  | "camera" | "ambient" | "dayNight" | "playerLight" | "flashlight" | "fog" | "visibility"
   | "master" | "weapon" | "footsteps" | "pickups" | "chicken";
 
 export interface ConfigControl {
@@ -49,6 +50,7 @@ export const DEBUG_SECTIONS: { id: SectionId; tab: DebugTabId; title: string; no
   { id: "ui", tab: "character", title: "界面" },
   { id: "camera", tab: "visual", title: "视角" },
   { id: "ambient", tab: "visual", title: "环境光" },
+  { id: 'dayNight', tab: 'visual', title: '昼夜光照', note: '自动跟随世界时间；手动模式使用下方环境光。仅调整表现，不改变感知规则。' },
   { id: "playerLight", tab: "visual", title: "角色微光", note: "只照地面，不影响地形顶面" },
   { id: "flashlight", tab: "visual", title: "锥形手电筒", note: "G 键开关；默认张角 120°" },
   { id: "fog", tab: "visual", title: "战争迷雾", note: "只影响单位的可见范围；地形始终可见" },
@@ -86,6 +88,19 @@ const waterDragLabels: Record<string, string> = {
 };
 
 export const CONFIG_CONTROLS: ConfigControl[] = [
+  control({ domain: 'graphics', group: 'dayNight', key: 'mode', section: 'dayNight', label: '环境模式', unit: '', kind: 'select',
+    options: [{ value: 'auto', label: '自动昼夜' }, { value: 'manual', label: '手动光照' }] }),
+  ...(['groundColor', 'wallColor'] as const).map(key => control({ domain: 'graphics', group: 'dayNight', key, section: 'dayNight',
+    label: key === 'groundColor' ? '地表反照色' : '墙体反照色', unit: '', kind: 'color' })),
+  ...(['day', 'dusk', 'night'] as const).map(phase => {
+    const title = { day: '白昼', dusk: '黄昏', night: '夜晚' }[phase];
+    const labels: Record<keyof EnvironmentPreset, string> = { ambientColor: '环境色', ambientIntensity: '环境光', sunColor: '太阳色', sunIntensity: '太阳光',
+      shadowScale: '投影长度', shadowOpacity: '太阳遮蔽', softnessScale: '阴影柔边', edgeIntensity: '受光边缘', waterHighlight: '水面高光',
+      metalHighlight: '金属高光', hazeOpacity: '空气层', artificialWeight: '人工光权重' };
+    return (Object.keys(DEFAULT_DAY_NIGHT[phase]) as (keyof EnvironmentPreset)[]).map(key => key === 'ambientColor' || key === 'sunColor'
+      ? control({ domain: 'graphics', group: 'dayNight', key: `${phase}.${key}`, section: 'dayNight', label: `${title} · ${labels[key]}`, unit: '', kind: 'color' })
+      : graphicsNumber('dayNight', `${phase}.${key}`, 'dayNight', `${title} · ${labels[key]}`, '', 0, .01, { max: key === 'shadowScale' ? 4 : key === 'artificialWeight' ? 2 : 1 }));
+  }).reduce((all, controls) => all.concat(controls), [] as ConfigControl[]),
   // 角色。max 同时决定滑条上限与数值框校验边界。
   playerNumber("base", "maxHealth", "life", "血量上限", "", 1, 1, { max: 1000 }),
   playerNumber("activeFirearm", "damage", "combat", "基础攻击力", "", 0.01, 1, { max: 1000 }),

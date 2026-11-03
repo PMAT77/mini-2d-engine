@@ -1,4 +1,15 @@
+import { StructureSystem, structureCollider } from '../structures/StructureSystem';
+import { WOOD_WALL } from '../structures/StructureDefinition';
+import { StructurePanel } from '../ui/StructurePanel';
 import { PausePanel } from '../ui/PausePanel';
+import { DayClockHud } from '../ui/DayClockHud';
+import type { DayClockHudState } from '../ui/DayClockHudLayout';
+import type { LocationManager } from '../campaign/LocationManager';
+import type { LocationState, PersistentPlayerState, CurrentLocationCheckpoint, GroundItemState, Pose, QuickSlots, EffectStat } from '../campaign/CampaignState';
+import { parsePersistentPlayer } from '../campaign/CampaignState';
+import { captureFirearm } from '../objects/Player';
+import { LOCATION_DEFINITIONS } from '../campaign/LocationDefinitions';
+import { ZOMBIE_CONFIG } from '../enemies/ZombieConfig';
 import { TradingStation } from '../objects/TradingStation';
 import { collectBlastTerrain } from '../throwables/BlastTerrain';
 import { Camera } from "../core/Camera";
@@ -42,6 +53,8 @@ import { Player, PlayerAimInput } from "../objects/Player";
 import { PlayerConfig } from "../objects/PlayerConfig";
 import { THROWABLE_CONFIG as TC, THROWABLE_IDS, THROWABLE_ITEMS, isThrowable, blastDamage, type ThrowableId } from '../throwables/ThrowableConfig';
 import { ThrowableController } from '../throwables/ThrowableController';
+import { parseLocationResume } from '../campaign/LocationResumeState';
+import type { LocationResumeState } from '../campaign/LocationResumeState';
 import { launchThrowable, stepThrowable, previewThrow, type ThrowableBody } from '../throwables/ThrowablePhysics';
 import { SmokeSystem } from '../throwables/SmokeSystem';
 import { ThrowablePickup, drawThrowable } from '../throwables/ThrowablePickup';
@@ -61,6 +74,8 @@ import { ConfigLoader } from "../core/ConfigLoader";
 import { LightSource } from "../core/LightSource";
 import { ConeLight } from "../core/ConeLight";
 import { LightingSystem } from "../core/LightingSystem";
+import { sampleEnvironment, type EnvironmentState } from '../core/EnvironmentLighting';
+import { drawBodySunShadow, type DirectionalLight } from '../core/DirectionalShadow';
 import { VisibilitySystem } from "../core/VisibilitySystem";
 import { PerceptionSystem } from "../vision/PerceptionSystem";
 import { HearingSensor } from "../ai/HearingSensor";
@@ -194,9 +209,22 @@ export interface GameSceneOptions extends TileMapOptions {
   playerSpawn?: { x: number; y: number };
   encounters?: { shambler?: number; runner?: number; vaccines?: number; grenades?: number; smokeGrenades?: number; tradingStations?: number };
   chickenCount?: number;
+  campaignData?: { location: LocationState; player?: PersistentPlayerState; pose: Pose; nextInstanceSequence: number; runtime?: LocationResumeState };
 }
 
-export class GameScene extends Scene {  private player!: Player;
+export class InvalidLocationStateError extends Error {}
+
+export class GameScene extends Scene {
+  private player!: Player;
+  campaign?: LocationManager;
+  private readonly dayClockHud = new DayClockHud();
+  private dayClockPreview?: DayClockHudState;
+  private transitionPaused = false;
+  private hiddenPaused = false;
+  private readonly baseTiles: TileTypeId[][];
+  private readonly baseHp: number[][];
+  private readonly persistentItemIds = new WeakMap<object, string>();
+  private nextInstanceSequence = 0;
   private readonly actorWorld: ActorCollisionWorld;
   private readonly enemies: EnemySystem;
   private readonly enemyBlood: BloodStainSystem;
@@ -215,9 +243,14 @@ export class GameScene extends Scene {  private player!: Player;
   private throwableRemainder = 0;
   private explosions: { x: number; y: number; age: number }[] = [];
   private focusPaused = false;
-  private readonly onFocusLost = () => { if (this.active) { this.focusPaused = true; this.syncModalState(); } };
-  private readonly onFocusGained = () => { if (this.active && !document.hidden) { this.focusPaused = false; this.syncModalState(); } };
-  private readonly onVisibilityChange = () => document.hidden ? this.onFocusLost() : this.onFocusGained();
+  private readonly onFocusLost = () => { if (this.active) { this.cancelConstructionDrag(); this.focusPaused = true; this.syncModalState(); this.campaign?.requestSave(); } };
+  private readonly onFocusGained = () => { if (this.active) { this.focusPaused = false; this.game?.resetFrameTime?.(); this.syncModalState(); } };
+  private readonly onVisibilityChange = () => {
+    if (this.active) {
+      this.hiddenPaused = document.hidden; this.game?.resetFrameTime?.(); this.syncModalState();
+      if (this.hiddenPaused) { this.cancelConstructionDrag(); this.campaign?.requestSave(); }
+    }
+  };
   private readonly quickSlotBindings: (BackpackItemId | null)[] = [null, null, null, null];
   private quickItemUse?: { slot: number; elapsed: number; inputReset: number | undefined };
   private vaccineHeld = false;
@@ -295,6 +328,36 @@ export class GameScene extends Scene {  private player!: Player;
   private active = false;
   private debugPanel?: PlayerDebugPanel;
   private backpackPanel?: BackpackPanel;
+  private structures?: StructureSystem;
+  private structurePanel?: StructurePanel;
+  private structuresChanged = false;
+  private constructionDrag?: { pointerId: number; target: HTMLElement; overMap: boolean };
+  private constructionTouchAction = '';
+  private readonly constructionPointer = (event: PointerEvent) => {
+    if (!this.structurePanel?.isOpen()) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (event.button !== 0 || !event.isPrimary || this.constructionDrag) return;
+    if (this.selectConstructionPoint(event) && !this.structures?.at(this.structurePanel.col, this.structurePanel.row)) this.startConstructionDrag(event);
+  };
+  private readonly constructionHover = (event: PointerEvent) => {
+    const panel = this.structurePanel;
+    if (panel?.isOpen() && !this.constructionDrag && event.pointerType === 'mouse' && !event.buttons && !this.structures?.at(panel.col, panel.row)) this.selectConstructionPoint(event);
+  };
+  private readonly constructionMove = (event: PointerEvent) => {
+    if (this.constructionDrag?.pointerId !== event.pointerId) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    this.constructionDrag.overMap = this.selectConstructionPoint(event);
+  };
+  private readonly constructionRelease = (event: PointerEvent) => {
+    if (this.constructionDrag?.pointerId !== event.pointerId || event.button !== 0) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const overMap = this.selectConstructionPoint(event);
+    this.cancelConstructionDrag();
+    if (overMap) this.structurePanel?.perform('build');
+  };
+  private readonly constructionCancel = (event: PointerEvent) => {
+    if (this.constructionDrag?.pointerId === event.pointerId) this.cancelConstructionDrag();
+  };
   private modalActive = false;
   private initialPlayerConfig?: PlayerConfig;
   private initialGraphics?: GraphicsConfig;
@@ -304,11 +367,22 @@ export class GameScene extends Scene {  private player!: Player;
    * 用旧 viewport 采样。拖拽 resize 的连续开销由浏览器自身的 resize 节流承担。
    */
   private readonly resizeListener = () => {
+    this.cancelConstructionDrag();
     this.handleResize();
   };
   /** ESC owns pause before any panel keyboard handlers. */
   private readonly cursorKeyListener = (event: KeyboardEvent) => {
-    if (event.key !== 'Escape' || event.repeat || !this.active || !this.loaded) return;
+    if (!this.active || !this.loaded || event.repeat) return;
+    if (this.structurePanel?.isOpen() && ['Escape', 'r', 'R', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const panel = this.structurePanel;
+      if (event.key === 'Escape') panel.setOpen(false);
+      else if (event.key === 'r' || event.key === 'R') panel.rotate();
+      else panel.select(panel.col + (event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0),
+        panel.row + (event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0));
+      return;
+    }
+    if (event.key !== 'Escape') return;
     event.preventDefault(); event.stopImmediatePropagation(); this.setExplicitPaused(!this.explicitPaused);
   };
   private cursorVisible = false;
@@ -415,6 +489,11 @@ export class GameScene extends Scene {  private player!: Player;
   private minimapMineralMarkers: MinimapMarkerSpec[] = [];
   // 光照系统
   private lightingSystem: LightingSystem;
+  private environment = sampleEnvironment(360);
+  private environmentPreview?: number;
+  private environmentStage = 4;
+  private raidVisualState?: DayClockHudState['raid'];
+  private facilityLights: LightSource[] = [];
   private visibilitySystem = new VisibilitySystem();
   // 属性修改器
   private modifierManager: ModifierManager;
@@ -438,6 +517,9 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 100×100 个瓦片，每格 50 像素
     this.map = sceneOptions.map ?? new TileMap(100, 100, { ...sceneOptions, seed: this.runSeed });
+    this.baseTiles = sceneOptions.campaignData ? this.map.tiles.map(row => row.slice()) : [];
+    this.baseHp = sceneOptions.campaignData ? this.map.tileHp.map(row => row.slice()) : [];
+    this.nextInstanceSequence = sceneOptions.campaignData?.nextInstanceSequence ?? 0;
     this.smoke = new SmokeSystem(this.map);
     this.actorWorld = new ActorCollisionWorld(this.map);
     this.enemies = new EnemySystem(this.map, this.actorWorld, this.runSeed ^ 0x7a6f6d62, this.noiseSystem);
@@ -541,11 +623,16 @@ export class GameScene extends Scene {  private player!: Player;
     this.flashlight.setInnerRadius(torch.innerRadius, torch.innerFade);
     this.lightingSystem.addLightSource(this.flashlight);
 
-    this.torches = Torch.generate(this.map, seededRandom(this.runSeed ^ 0x746f7263));
+    this.torches = sceneOptions.campaignData ? [] : Torch.generate(this.map, seededRandom(this.runSeed ^ 0x746f7263));
     this.torches.forEach(torch => this.lightingSystem.addLightSource(torch.light));
+    const locationId = sceneOptions.campaignData?.location.locationId;
+    for (const definition of locationId ? LOCATION_DEFINITIONS[locationId].facilityLights ?? [] : []) {
+      const source = new LightSource(new Vector2(definition.x, definition.y), definition.radius, definition.color, definition.intensity, definition.sourceRadius);
+      source.groundOnly = true; this.facilityLights.push(source); this.lightingSystem.addLightSource(source);
+    }
 
     // 小鸡围绕出生点随机生成，平时只在干地上自由活动；属于单位层，会被迷雾裁剪。
-    const chickenCount = sceneOptions.chickenCount ?? GameScene.CHICKEN_COUNT;
+    const chickenCount = sceneOptions.campaignData ? 0 : sceneOptions.chickenCount ?? GameScene.CHICKEN_COUNT;
     if (!Number.isSafeInteger(chickenCount) || chickenCount < 0 || chickenCount > 1000) throw new Error("小鸡数量必须为 0–1000 的整数");
     this.chickens = Chicken.spawn(this.map, chickenCount, playerCenter, seededRandom(this.runSeed ^ 0x63686963));
     for (const chicken of this.chickens) {
@@ -860,6 +947,7 @@ export class GameScene extends Scene {  private player!: Player;
       }
       this.perceptionRenderer.resize(this.camera.width, this.camera.height, this.graphics.visibility);
       this.perceptionRenderer.setDebugLayer(this.visionDebugLayer);
+      this.perceptionRenderer.setEnvironment(this.environment);
     }
   }
 
@@ -1006,6 +1094,10 @@ export class GameScene extends Scene {  private player!: Player;
       for (const target of this.enemies.zombies) entries.push({ id: target.id, target });
       const hit = resolveFirstMeleeHit(origin, this.player.getVisualFacing(), PUNCH_RANGE, move.halfAngle, entries,
         point => !!this.map.castShape(circleCollider(origin.x, origin.y, 1), { x: point.x - origin.x, y: point.y - origin.y }, 'projectile'));
+      const structure = this.structures?.meleeHit(origin, this.player.getVisualFacing(), PUNCH_RANGE, move.halfAngle);
+      if (structure && (!hit || structure.distance < Math.hypot(hit.point.x - origin.x, hit.point.y - origin.y))) {
+        this.structures?.damage(structure.id, this.player.getModifiedValue(move.damage, 'damage')); continue;
+      }
       if (!hit) continue;
       const dx = hit.point.x - origin.x, dy = hit.point.y - origin.y, length = Math.hypot(dx, dy);
       const facing = this.player.getVisualFacing();
@@ -1435,6 +1527,22 @@ export class GameScene extends Scene {  private player!: Player;
   }
 
   private applyEnvironmentLight(): void {
+    this.environment = sampleEnvironment(this.environmentPreview ?? this.campaign?.session.getClockReading().worldMinute ?? 360, this.graphics.dayNight);
+    this.perception?.setEnvironment(this.environment);
+    this.perceptionRenderer?.setEnvironment(this.environment);
+    const auto = this.graphics.dayNight.mode === 'auto', state = this.environment;
+    this.map.setSurfacePalette(auto ? { ground: this.graphics.dayNight.groundColor, wall: this.graphics.dayNight.wallColor } : null);
+    const weight = auto ? state.artificialWeight : 1;
+    for (const light of [this.playerLight, this.flashlight, ...this.torches.map(torch => torch.light)]) if (light) light.visualWeight = weight;
+    for (const light of this.facilityLights) light.visualWeight = weight * (this.raidVisualState && state.phase === 'night' ? 1.15 : 1);
+    if (auto) {
+      this.lightingSystem.setAmbientLight(hexToRgba(state.ambientColor, state.ambientIntensity));
+      this.lightingSystem.setTerrainLight(null);
+      const sun = this.getSunLight();
+      this.lightingSystem.setDirectionalLight(this.environmentStage >= 2 ? sun : { ...sun, shadowLength: 0, shadowOpacity: 0 });
+      return;
+    }
+    this.lightingSystem.setDirectionalLight(null);
     const { ambient, terrainLight } = this.graphics;
     this.lightingSystem.setAmbientLight(hexToRgba(ambient.color, ambient.intensity));
     this.lightingSystem.setTerrainLight({
@@ -1443,6 +1551,67 @@ export class GameScene extends Scene {  private player!: Player;
       shadowLength: this.map.tileSize * terrainLight.shadowScale,
       softness: this.map.tileSize * terrainLight.softnessScale,
     });
+  }
+
+  private getSunLight(): DirectionalLight {
+    const state = this.environment;
+    return { direction: state.sunDirection, color: state.sunColor, intensity: state.sunIntensity,
+      shadowLength: state.shadowScale * this.map.tileSize, shadowOpacity: state.shadowOpacity, softness: state.softnessScale * this.map.tileSize };
+  }
+  /** Development-only, deterministic inspection: never advances or saves campaign time. */
+  setEnvironmentPreview(worldMinute: number | null): void {
+    if (!isDevelopmentBuild()) throw new Error('时段预览仅用于开发构建');
+    if (worldMinute !== null) sampleEnvironment(worldMinute);
+    this.environmentPreview = worldMinute ?? undefined; this.applyEnvironmentLight();
+  }
+  setEnvironmentStage(stage: number): void {
+    if (!isDevelopmentBuild() || !Number.isInteger(stage) || stage < 1 || stage > 4) throw new Error('阶段预览需要 1–4');
+    this.environmentStage = stage; this.applyEnvironmentLight();
+  }
+  getEnvironmentState(): EnvironmentState { return { ...this.environment, sunDirection: { ...this.environment.sunDirection } }; }
+  /** Real raid systems may supply their current wave; absence never fabricates a raid. */
+  setRaidVisualState(raid: DayClockHudState['raid']): void {
+    if (raid && (!Number.isSafeInteger(raid.wave) || !Number.isSafeInteger(raid.totalWaves) || raid.wave < 1 || raid.wave > raid.totalWaves)) throw new Error('夜袭波次无效');
+    this.raidVisualState = raid ? { ...raid } : undefined; this.applyEnvironmentLight();
+  }
+
+  private drawSunShadows(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    if (this.graphics.dayNight.mode !== 'auto' || this.environmentStage < 2 || this.environment.sunIntensity <= 0) return;
+    const sun = this.getSunLight();
+    const vision = this.player.getVisionState();
+    ctx.save(); ctx.translate(-ox, -oy); this.map.clipGround(ctx, ox, oy, ctx.canvas.width, ctx.canvas.height); ctx.translate(ox, oy);
+    const body = (x: number, y: number, size: number, alpha = 1) => {
+      if (this.visionMode !== 'three-layer' && (Math.hypot(x - vision.x, y - vision.y) > vision.range
+        || !hasLineOfSight(this.map, vision.x, vision.y, x, y))) return;
+      const pad = sun.shadowLength + size;
+      if (x < ox - pad || y < oy - pad || x > ox + ctx.canvas.width + pad || y > oy + ctx.canvas.height + pad) return;
+      drawBodySunShadow(ctx, x - ox, y - oy, size, sun, alpha);
+    };
+    const size = this.player.getSize(); body(this.player.x + size / 2, this.player.y + size / 2, size);
+    for (const zombie of this.enemies.zombies) { const p = zombie.getCenter(); body(p.x, p.y, zombie.config.size, this.getEntityAlpha(zombie)); }
+    for (const chicken of this.chickens) { const s = chicken.getSize(); body(chicken.x + s / 2, chicken.y + s / 2, s, this.getEntityAlpha(chicken)); }
+    for (const pickup of this.goldPickups) body(pickup.x + GoldPickup.SIZE / 2, pickup.y + GoldPickup.SIZE / 2, GoldPickup.SIZE, this.getEntityAlpha(pickup));
+    for (const station of this.tradingStations) if (this.canObserveThrowPoint(station.x, station.y)) station.drawSunShadow(ctx, ox, oy, sun);
+    ctx.restore();
+  }
+  private drawFacilityLights(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    for (const light of this.facilityLights) {
+      const p = light.getPosition(), x = p.x - ox, y = p.y - oy;
+      ctx.save(); ctx.strokeStyle = '#424C49'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x, y + 14); ctx.lineTo(x, y - 10); ctx.stroke();
+      ctx.fillStyle = '#323C3B'; ctx.fillRect(x - 9, y - 15, 18, 9);
+      ctx.fillStyle = '#FFE0A4'; ctx.globalAlpha = Math.min(1, light.visualWeight); ctx.fillRect(x - 6, y - 12, 12, 4); ctx.restore();
+    }
+  }
+  private drawEnvironmentAtmosphere(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const state = this.environment;
+    if (this.graphics.dayNight.mode !== 'auto' || this.environmentStage < 3 || state.hazeOpacity <= 0) return;
+    const vision = this.player.getVisionState(), x = vision.x - ox, y = vision.y - oy;
+    ctx.save();
+    const fog = ctx.createRadialGradient(x, y, 140, x, y, 650);
+    fog.addColorStop(0, 'rgba(0,0,0,0)'); fog.addColorStop(1, hexToRgba(state.ambientColor, state.hazeOpacity));
+    ctx.fillStyle = fog;
+    const left = Math.max(0, x - 450), top = Math.max(0, y - 450);
+    ctx.fillRect(left, top, Math.max(0, Math.min(ctx.canvas.width, x + 450) - left), Math.max(0, Math.min(ctx.canvas.height, y + 450) - top)); ctx.restore();
   }
 
   private applyAudio(config: AudioConfig): void {
@@ -1497,6 +1666,11 @@ export class GameScene extends Scene {  private player!: Player;
       this.initialPlayerConfig = this.player.getConfigSnapshot();
       this.initialGraphics = cloneGraphicsConfig(this.graphics);
       this.initialAudio = cloneAudioConfig(this.audio);
+      if (this.sceneOptions.campaignData) {
+        try { this.restoreCampaignLocation(); }
+        catch (error) { throw new InvalidLocationStateError(error instanceof Error ? error.message : String(error)); }
+        onProgress?.(1, 1); this.loaded = true; return;
+      }
       if (!this.map.isShapeWalkable(this.player.getCollider())) {
         const body = this.player.getCollider();
         const spawn = this.map.getRandomWalkablePosition(this.player.getSize(), body.compiled.shape, body.pose.rotation);
@@ -1536,142 +1710,413 @@ export class GameScene extends Scene {  private player!: Player;
 
   async onEnter(): Promise<void> {
     this.active = true;
-    this.focusPaused = false; this.explicitPaused = false;
-    // Also support direct entry through SceneManager, outside the normal loading flow.
     try {
       await this.load();
-      if (!this.active) return;
-      this.resizeCamera();
-      this.resizeMinimap();
-      this.initLightingSystem();
-      this.game.input.setPointerEnabled(true);
-      // Tab 交给背包；只在场景有效时拦截浏览器默认的焦点导航。
-      this.game.input.setCapturedKeys?.(["Tab"]);
-      this.interactionEnabled = true;
-      this.interaction.reset();
-      this.pickupPrompt.preload();
-      this.tradingPrompt.preload();
-      // 武器 HUD 的装饰素材只触发加载，不参与启动成败判定；失败时 HUD 自己回退矢量图。
-      preloadWeaponHudAssets();
-      this.killIndicator.preload();
-      // 准星改成独立图层：鼠标一动就更新，不必等这一帧的世界渲染。
-      if (typeof document !== 'undefined') {
-        window.addEventListener('blur', this.onFocusLost); window.addEventListener('focus', this.onFocusGained);
-        document.addEventListener('visibilitychange', this.onVisibilityChange);
-        this.crosshairOverlay ??= new CrosshairOverlay();
-        this.game.input.onPointerMove = (x, y) => this.crosshairOverlay?.setPosition(x, y);
-      }
-      if (typeof document !== 'undefined') {
-        document.addEventListener('keydown', this.cursorKeyListener, true);
-        document.addEventListener('wheel', this.minimapWheelListener, { capture: true, passive: false });
-        this.pausePanel ??= new PausePanel(() => this.setExplicitPaused(false));
-        this.quickSlotHud.attach(this.game.renderer.ctx.canvas, {
-          canEdit: () => this.active && this.player.isAlive() && !this.paused,
-          beforeEdit: () => { this.backpackPanel?.setOpen(false); this.game.input.clear(); this.quickItemUse = undefined; },
-          bound: slot => this.quickSlotBindings[slot] !== null,
-          swap: (from, to) => { [this.quickSlotBindings[from], this.quickSlotBindings[to]] = [this.quickSlotBindings[to], this.quickSlotBindings[from]]; },
-          unbind: slot => { this.quickSlotBindings[slot] = null; },
-        });
-      }
-      this.debugPanel ??= new PlayerDebugPanel({
-        canOpen: () => !this.explicitPaused,
-        onPause: () => this.setExplicitPaused(true),
-        player: this.player,
-        input: this.game.input,
-        canvas: this.game.renderer.ctx.canvas,
-        getGraphics: () => this.graphics,
-        setGraphics: config => this.applyGraphics(config),
-        getAudio: () => this.audio,
-        setAudio: config => this.applyAudio(config),
-        initialPlayer: this.initialPlayerConfig,
-        initialGraphics: this.initialGraphics,
-        initialAudio: this.initialAudio,
-        // 三层视野不读 fog.range/fog.feather，留着这两根滑杆只会误导调参。
-        hiddenSections: this.visionMode === "three-layer" ? ["fog"] : [],
-        onReset: () => { this.throwable.dispose(); this.player.holdingThrowable = false; this.survival.resetLife(); this.damageFeedback.clear(); this.camera.clearDamageKick(); this.camera.clearAimOffset(); },
-        onOpenChange: open => {
-          if (open) this.backpackPanel?.setOpen(false);
-          this.syncModalState();
-        },
-      });
-      this.backpackPanel ??= new BackpackPanel({
-        canOpen: () => this.active && this.loaded && this.player.isAlive() && !this.explicitPaused && !this.debugPanel?.isOpen(),
-        onPause: () => this.setExplicitPaused(true),
-        getView: () => this.getBackpackView(),
-        onAction: id => this.performBackpackAction(id),
-        onDrop: id => this.dropBackpackItem(id),
-        onBind: (id, slot) => this.bindQuickSlot(id, slot),
-        onOpenChange: open => {
-          if (open) this.debugPanel?.setOpen(false);
-          this.syncModalState();
-        },
-      });
-      window.addEventListener('resize', this.resizeListener);
-
+      if (this.active) this.onEnterPrepared();
     } catch (error) {
       if (this.active) this.loadError = error instanceof Error ? error.message : String(error);
     }
   }
 
-  onExit(): void {
-    this.player.cancelPunch();
+  onEnterPrepared(): void {
+    if (!this.loaded) throw new Error('场景尚未完成准备');
+    this.active = true; this.explicitPaused = false;
+    this.applyEnvironmentLight();
+    this.focusPaused = typeof document !== 'undefined' && typeof document.hasFocus === 'function' && !document.hasFocus();
+    this.hiddenPaused = typeof document !== 'undefined' && document.hidden;
+    this.resizeCamera();
+    this.resizeMinimap();
+    this.initLightingSystem();
+    this.game.input.setPointerEnabled(true);
+    // Tab 交给背包；只在场景有效时拦截浏览器默认的焦点导航。
+    this.game.input.setCapturedKeys?.(["Tab"]);
+    this.interactionEnabled = true;
+    this.interaction.reset();
+    this.pickupPrompt.preload();
+    this.tradingPrompt.preload();
+    // 武器 HUD 的装饰素材只触发加载，不参与启动成败判定；失败时 HUD 自己回退矢量图。
+    preloadWeaponHudAssets();
+    this.killIndicator.preload();
+    // 准星改成独立图层：鼠标一动就更新，不必等这一帧的世界渲染。
+    if (typeof document !== 'undefined') {
+      window.addEventListener('blur', this.onFocusLost); window.addEventListener('focus', this.onFocusGained);
+      document.addEventListener('visibilitychange', this.onVisibilityChange);
+      this.crosshairOverlay ??= new CrosshairOverlay();
+      this.game.input.onPointerMove = (x, y) => this.crosshairOverlay?.setPosition(x, y);
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('keydown', this.cursorKeyListener, true);
+      document.addEventListener('wheel', this.minimapWheelListener, { capture: true, passive: false });
+      this.pausePanel ??= new PausePanel(() => this.setExplicitPaused(false));
+      this.quickSlotHud.attach(this.game.renderer.ctx.canvas, {
+        canEdit: () => this.active && this.player.isAlive() && !this.paused,
+        beforeEdit: () => { this.backpackPanel?.setOpen(false); this.game.input.clear(); this.quickItemUse = undefined; },
+        bound: slot => this.quickSlotBindings[slot] !== null,
+        swap: (from, to) => { [this.quickSlotBindings[from], this.quickSlotBindings[to]] = [this.quickSlotBindings[to], this.quickSlotBindings[from]]; },
+        unbind: slot => { this.quickSlotBindings[slot] = null; },
+      });
+    }
+    this.debugPanel ??= new PlayerDebugPanel({
+      canOpen: () => !this.explicitPaused && !this.isConstructionPlanning(),
+      onPause: () => this.setExplicitPaused(true),
+      player: this.player,
+      input: this.game.input,
+      canvas: this.game.renderer.ctx.canvas,
+      getGraphics: () => this.graphics,
+      setGraphics: config => this.applyGraphics(config),
+      getAudio: () => this.audio,
+      setAudio: config => this.applyAudio(config),
+      initialPlayer: this.initialPlayerConfig,
+      initialGraphics: this.initialGraphics,
+      initialAudio: this.initialAudio,
+      // 三层视野不读 fog.range/fog.feather，留着这两根滑杆只会误导调参。
+      hiddenSections: this.visionMode === "three-layer" ? ["fog"] : [],
+      onReset: () => { this.throwable.dispose(); this.player.holdingThrowable = false; this.survival.resetLife(); this.damageFeedback.clear(); this.camera.clearDamageKick(); this.camera.clearAimOffset(); },
+      onOpenChange: open => {
+        if (open) this.backpackPanel?.setOpen(false);
+        this.syncModalState();
+      },
+    });
+    this.backpackPanel ??= new BackpackPanel({
+      canOpen: () => this.active && this.loaded && this.player.isAlive() && !this.explicitPaused && !this.debugPanel?.isOpen() && !this.isConstructionPlanning(),
+      onPause: () => this.setExplicitPaused(true),
+      getView: () => this.getBackpackView(),
+      onAction: id => this.performBackpackAction(id),
+      onDrop: id => this.dropBackpackItem(id),
+      onBind: (id, slot) => this.bindQuickSlot(id, slot),
+      onOpenChange: open => {
+        if (open) this.debugPanel?.setOpen(false);
+        this.syncModalState();
+      },
+    });
+    window.addEventListener('resize', this.resizeListener);
+    if (this.getCampaignLocationId() === 'outpost') {
+      this.structurePanel = new StructurePanel(() => this.getStructurePanelView(), action => this.performStructureAction(action), open => {
+        if (open) { this.backpackPanel?.setOpen(false); this.debugPanel?.setOpen(false); }
+        const canvas = this.game.renderer.ctx.canvas;
+        if (open) { this.constructionTouchAction = canvas.style.touchAction; canvas.style.touchAction = 'none'; }
+        else { this.cancelConstructionDrag(); canvas.style.touchAction = this.constructionTouchAction; }
+        this.syncModalState();
+      }, event => this.startConstructionDrag(event));
+      this.game.renderer.ctx.canvas.addEventListener('pointerdown', this.constructionPointer, true);
+      this.game.renderer.ctx.canvas.addEventListener('pointermove', this.constructionHover, true);
+    }
+    this.campaign?.attachHud(this);
+    this.dayClockHud.attach();
+    this.syncModalState();
+    this.game?.resetFrameTime?.();
+  }
+
+  onResume(): void { this.onEnterPrepared(); }
+
+  onSuspend(): void {
+    if (!this.active) return;
+    if (this.structurePanel) {
+      this.structurePanel.setOpen(false); this.structurePanel.dispose(); this.structurePanel = undefined;
+      this.game.renderer.ctx.canvas.removeEventListener('pointerdown', this.constructionPointer, true);
+      this.game.renderer.ctx.canvas.removeEventListener('pointermove', this.constructionHover, true);
+    }
+    this.active = false;
     window.removeEventListener('blur', this.onFocusLost); window.removeEventListener('focus', this.onFocusGained);
-    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    window.removeEventListener('resize', this.resizeListener);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange);
+      document.removeEventListener('keydown', this.cursorKeyListener, true);
+      document.removeEventListener('wheel', this.minimapWheelListener, true);
+    }
+    this.backpackPanel?.dispose(); this.backpackPanel = undefined;
+    this.debugPanel?.dispose(); this.debugPanel = undefined;
+    this.pausePanel?.dispose(); this.pausePanel = undefined;
+    this.crosshairOverlay?.dispose(); this.crosshairOverlay = undefined;
+    this.quickSlotHud.dispose(); this.campaign?.detachHud(this);
+    this.dayClockHud.dispose();
+    this.sfx.pauseAll();
+    this.game?.input?.setPointerEnabled(false); this.game?.input?.clear();
+    this.game?.input?.setCapturedKeys?.([]); this.game?.input?.setBlocked?.(false);
+    if (this.game?.input) this.game.input.onPointerMove = undefined;
+    this.setCursorVisible(false);
+  }
+
+  onExit(): void { this.onSuspend(); this.disposePrepared(); }
+
+  /** 只释放此候选拥有的资源；未激活候选不能改动当前场景的输入或 DOM。 */
+  disposePrepared(): void {
+    this.active = false; this.interactionEnabled = false; this.player.cancelPunch(); this.player.cancelReload();
     this.throwable.dispose(); this.player.holdingThrowable = false;
     this.throwableBodies = []; this.throwablePickups = []; this.explosions = []; this.smoke.clear();
     if (this.map.sightOpacity === this.smoke.opacity) this.map.sightOpacity = undefined;
-    this.active = false;
-    this.quickItemUse = undefined;
-    this.backpackPanel?.dispose();
-    this.backpackPanel = undefined;
-    this.killIndicator.clear();
-    this.combatScore.reset();
-    this.actorWorld.clear();
-    this.enemies.dispose();
-    this.survival.dispose(); this.vaccinePickups = []; this.weaponPickups = []; this.quickSlotBindings.fill(null); this.enemyBlood.clear();
+    this.quickItemUse = undefined; this.killIndicator.clear(); this.combatScore.reset();
+    this.structures?.dispose(); this.enemies.dispose(); this.actorWorld.clear(); this.survival.dispose();
+    this.vaccinePickups = []; this.weaponPickups = []; this.quickSlotBindings.fill(null); this.enemyBlood.clear();
     this.zombieGore.clear(); this.damageFeedback.clear(); this.player.consumeDamageEvents();
     this.bloodStainSystem.clear(); this.particleSystem.clear(); this.camera.clearDamageKick(); this.camera.clearAimOffset();
-    // 循环音效不会自己停，离开场景时立即收掉，免得声音跟着残留。
-    this.sfx.stopAll();
-    // 换弹声也要跟着停，否则重进场景后还会响到采样结束。
-    this.reloadVoice?.stop(0);
-    this.reloadVoice = null;
-    // 正在响的鸡叫也失去跟踪对象了，离开场景时硬停，重新进入时从头开始。
-    this.activeClucks.forEach(cluck => cluck.handle.stop(0));
-    this.activeClucks.length = 0;
-    this.pendingCluckStops.length = 0;
-    // 声音提示与听觉水位都是本局状态：重进场景不继承上一局的弧线与去重表。
-    this.soundRippleSystem.clear();
-    this.playerHearing.reset();
-    this.noiseSystem.clear();
-    // 冷却表跟着场景一起丢弃，重进场景时不继承上一局的叫声节奏。
-    this.chickenCluckCooldowns.clear();
-    this.game?.input?.setPointerEnabled(false);
-    this.game?.input?.clear();
-    // 退出场景后 Tab 恢复浏览器默认行为；交互进度与按住状态一并清空。
-    this.game?.input?.setCapturedKeys?.([]);
-    this.interactionEnabled = false;
-    this.interaction.reset();
-    this.pickupCandidates = [];
-    this.pickupMarkers = [];
-    this.spaceHeld = false;
-    if (this.game?.input) this.game.input.onPointerMove = undefined;
-    this.crosshairOverlay?.dispose();
-    this.crosshairOverlay = undefined;
-    // 小地图离屏纹理随场景一起释放，重进游戏不会残留上一局的地形缓存。
-    this.minimap.dispose();
-    this.displayedView = undefined;
-    this.viewportCache = null;
-    this.debugPanel?.dispose();
-    this.debugPanel = undefined;
-    this.game?.input?.setBlocked?.(false);
-    window.removeEventListener('resize', this.resizeListener);
-    if (typeof document !== 'undefined') document.removeEventListener('keydown', this.cursorKeyListener, true);
-    if (typeof document !== 'undefined') document.removeEventListener('wheel', this.minimapWheelListener, true);
-    this.quickSlotHud.dispose(); this.pausePanel?.dispose(); this.pausePanel = undefined;
+    this.sfx.stopAll(); this.reloadVoice?.stop(0); this.reloadVoice = null;
+    this.activeClucks.forEach(cluck => cluck.handle.stop(0)); this.activeClucks = []; this.pendingCluckStops = [];
+    this.soundRippleSystem.clear(); this.playerHearing.reset(); this.noiseSystem.clear(); this.chickenCluckCooldowns.clear();
+    this.interaction.reset(); this.pickupCandidates = []; this.pickupMarkers = []; this.spaceHeld = false;
+    this.minimap.dispose(); this.displayedView = undefined; this.viewportCache = null;
     this.map.setStaticObstacles([]); this.tradingStations = [];
-    this.setCursorVisible(false);
   }
+
+  getCampaignLocationId() { return this.sceneOptions.campaignData?.location.locationId; }
+  getStructures(): StructureSystem | undefined { return this.structures; }
+  consumeStructureChanges(): boolean { const changed = this.structuresChanged; this.structuresChanged = false; return changed; }
+  isConstructionPlanning(): boolean { return this.structurePanel?.isOpen() === true; }
+  canStartConstruction(): boolean {
+    const clock = this.campaign?.session.getClockReading();
+    return !!this.structures && this.getCampaignLocationId() === 'outpost' && this.player.isAlive() && !this.campaign?.isEnded()
+      && !this.transitionPaused && !this.hasDangerousThrowables() && clock?.phase === 'day'
+      && !clock.pauseReasons.some(reason => reason !== 'construction');
+  }
+  toggleConstruction(): void {
+    if (!this.structurePanel) return;
+    if (this.structurePanel.isOpen()) { this.structurePanel.setOpen(false); return; }
+    if (!this.canStartConstruction()) return;
+    const p = this.player.getCollider().pose;
+    this.structurePanel.select(Math.floor(p.x / this.map.tileSize) + 2, Math.floor(p.y / this.map.tileSize));
+    this.structurePanel.setOpen(true);
+  }
+  private selectConstructionPoint(event: PointerEvent): boolean {
+    const panel = this.structurePanel, canvas = this.game.renderer.ctx.canvas;
+    // Pointer capture keeps delivering events over panels and outside the canvas; these are not drop targets.
+    if (!panel?.isOpen() || document.elementFromPoint(event.clientX, event.clientY) !== canvas) return false;
+    const point = this.screenToWorld(event.clientX, event.clientY); if (!point) return false;
+    panel.select(Math.floor(point.x / this.map.tileSize), Math.floor(point.y / this.map.tileSize)); return true;
+  }
+  private startConstructionDrag(event: PointerEvent): void {
+    if (!this.structurePanel?.isOpen() || !this.canStartConstruction() || event.button !== 0 || !event.isPrimary || this.constructionDrag) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const target = event.currentTarget as HTMLElement;
+    this.constructionDrag = { pointerId: event.pointerId, target, overMap: this.selectConstructionPoint(event) };
+    window.addEventListener('pointermove', this.constructionMove, { capture: true, passive: false });
+    window.addEventListener('pointerup', this.constructionRelease, true);
+    window.addEventListener('pointercancel', this.constructionCancel, true);
+    window.addEventListener('lostpointercapture', this.constructionCancel, true);
+    target.setPointerCapture(event.pointerId);
+  }
+  private cancelConstructionDrag(): void {
+    const drag = this.constructionDrag; this.constructionDrag = undefined;
+    if (!drag) return;
+    window.removeEventListener('pointermove', this.constructionMove, true);
+    window.removeEventListener('pointerup', this.constructionRelease, true);
+    window.removeEventListener('pointercancel', this.constructionCancel, true);
+    window.removeEventListener('lostpointercapture', this.constructionCancel, true);
+    if (drag.target.hasPointerCapture(drag.pointerId)) drag.target.releasePointerCapture(drag.pointerId);
+  }
+  private placementContext() {
+    const entrance = LOCATION_DEFINITIONS[this.getCampaignLocationId()!].entrance.position;
+    const actors = [this.player.getCollider(), ...this.enemies.zombies.map(z => z.getCollider()), ...this.chickens.map(c => c.getCollider())];
+    for (const pickup of [...this.vaccinePickups, ...this.throwablePickups, ...this.weaponPickups]) {
+      const point = pickup.getPickupAnchor(); actors.push(circleCollider(point.x, point.y, 12));
+    }
+    for (const gold of this.goldPickups) { const point = gold.getRestPosition(); actors.push(circleCollider(point.x, point.y, 8)); }
+    return { actors, player: this.player.getCollider(), entrance: { x: entrance.x + this.player.getSize() / 2, y: entrance.y + this.player.getSize() / 2 } };
+  }
+  private structureAccessError(col: number, row: number): string | null {
+    if (!this.canStartConstruction()) return '只能在营地白天安全建设';
+    const p = this.player.getCollider().pose, target = { x: (col + .5) * this.map.tileSize, y: (row + .5) * this.map.tileSize };
+    if (Math.hypot(p.x - target.x, p.y - target.y) > 175) return '距离过远，请靠近后操作';
+    const hit = this.map.castShape(circleCollider(p.x, p.y, .1), { x: target.x - p.x, y: target.y - p.y }, 'projectile');
+    const state = this.structures?.at(col, row);
+    return hit && hit.obstacle.ownerId !== state?.instanceId ? '建筑被其他障碍遮挡' : null;
+  }
+  private getStructurePanelView() {
+    const panel = this.structurePanel, system = this.structures;
+    if (!panel || !system) return { error: '当前地点无法建设', selected: null, canRepair: false, canRemove: false };
+    const selected = system.at(panel.col, panel.row), access = this.structureAccessError(panel.col, panel.row);
+    const error = access || system.placementError(panel.col, panel.row, panel.rotation, this.placementContext(), false);
+    const hp = selected?.observedHp;
+    return { error, selected: selected && !this.constructionDrag ? (hp === 0 ? '木墙残骸 · 可清理后重建' : '木墙 · 耐久 ' + (hp ?? '未观察') + '/' + WOOD_WALL.maxHp) : null,
+      canRepair: !this.constructionDrag && !access && hp != null && hp > 0 && hp < WOOD_WALL.maxHp,
+      canRemove: !this.constructionDrag && !access && !!selected && hp !== null };
+  }
+  private performStructureAction(action: 'build' | 'repair' | 'remove'): void {
+    const panel = this.structurePanel, system = this.structures;
+    if (!panel?.isOpen() || !system) throw new Error('请先进入营地建设');
+    const error = this.structureAccessError(panel.col, panel.row); if (error) throw new Error(error);
+    if (action === 'build') {
+      if (!Number.isSafeInteger(this.nextInstanceSequence + 1)) throw new Error('建筑实例序号溢出');
+      system.build('structure-' + this.nextInstanceSequence, panel.col, panel.row, panel.rotation, this.placementContext()); this.nextInstanceSequence++;
+    } else {
+      const selected = system.at(panel.col, panel.row); if (!selected) throw new Error('此处没有建筑');
+      if (action === 'repair') system.repair(selected.instanceId); else system.dismantle(selected.instanceId);
+    }
+    this.campaign?.requestSave(); this.structuresChanged = false; panel.refresh();
+  }
+  private drawConstructionPreview(ctx: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const panel = this.structurePanel; if (!panel?.isOpen() || !this.structures) return;
+    const size = this.map.tileSize, player = this.player.getCollider().pose;
+    ctx.save(); ctx.translate(-ox, -oy);
+    ctx.save(); ctx.beginPath(); ctx.arc(player.x, player.y, 175, 0, Math.PI * 2); ctx.clip();
+    ctx.strokeStyle = '#b6d9be44'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let col = Math.max(0, Math.floor((player.x - 175) / size)); col <= Math.min(this.map.width, Math.ceil((player.x + 175) / size)); col++) {
+      ctx.moveTo(col * size, Math.max(0, player.y - 175)); ctx.lineTo(col * size, Math.min(this.map.height * size, player.y + 175));
+    }
+    for (let row = Math.max(0, Math.floor((player.y - 175) / size)); row <= Math.min(this.map.height, Math.ceil((player.y + 175) / size)); row++) {
+      ctx.moveTo(Math.max(0, player.x - 175), row * size); ctx.lineTo(Math.min(this.map.width * size, player.x + 175), row * size);
+    }
+    ctx.stroke(); ctx.restore();
+    if (this.constructionDrag && !this.constructionDrag.overMap) { ctx.restore(); return; }
+    const selected = this.constructionDrag ? undefined : this.structures.at(panel.col, panel.row), body = structureCollider(selected ?? panel, size);
+    const error = this.getStructurePanelView().error;
+    ctx.strokeStyle = selected ? '#e7ce94' : error ? '#f5a18d' : '#b6f2c0'; ctx.lineWidth = 1;
+    ctx.strokeRect(panel.col * size, panel.row * size, size, size);
+    ctx.fillStyle = selected ? '#e7ce9411' : error ? '#e1837155' : '#9dd5ab66';
+    ctx.strokeStyle = selected ? '#e7ce94' : error ? '#f5a18d' : '#b6f2c0'; ctx.lineWidth = 2;
+    ctx.fillRect(body.bounds.x, body.bounds.y, body.bounds.width, body.bounds.height); ctx.strokeRect(body.bounds.x, body.bounds.y, body.bounds.width, body.bounds.height); ctx.restore();
+  }
+  settleCampaignDeath(): void { if (!this.player.isAlive()) this.releaseThrowable(true); }
+  captureCampaignRuntime(): LocationResumeState {
+    return parseLocationResume({ heldGrenade: this.throwable.captureHeldGrenade(),
+      bodies: this.throwableBodies.filter(body => !body.dead).map(body => ({ id: body.id, kind: body.kind,
+        x: body.x, y: body.y, vx: body.vx, vy: body.vy, z: body.z, vz: body.vz, rotation: body.rotation,
+        fuse: body.fuse, landed: body.landed, resting: body.resting, smokeAge: body.smokeAge })),
+      lastThrowableId: this.throwableId, stepRemainder: this.throwableRemainder }, this.captureCampaignPlayer());
+  }
+  captureCampaignPlayer(): PersistentPlayerState {
+    return parsePersistentPlayer({ ...this.player.capturePersistentCore(),
+      infection: { infected: this.survival.infection.isInfected(), remainderSeconds: this.survival.infection.getRemainder() },
+      consumables: this.survival.inventory.snapshot(), quickSlots: this.quickSlotBindings.slice() as QuickSlots,
+      effects: this.modifierManager.capturePersistentState(),
+      preferences: { autoReload: this.player.getAutoReload(), defaultReloadMode: this.player.getDefaultReloadMode(), flashlightOn: this.flashlightOn } });
+  }
+  captureCampaignPose(): Pose {
+    return { position: { x: this.player.x, y: this.player.y }, facing: this.player.getVisualFacing() };
+  }
+  getTravelBlock(): string | null {
+    if (!this.player.isAlive()) return '失去战斗能力时无法离开';
+    if (this.hasDangerousThrowables()) return '请等待投掷物和烟雾结束后再离开';
+    if (this.player.isRolling()) return '翻滚结束后才能离开';
+    const id = this.getCampaignLocationId();
+    if (!id) return '当前不是战役地图';
+    const entrance = LOCATION_DEFINITIONS[id].entrance.position;
+    if (Math.hypot(this.player.x - entrance.x, this.player.y - entrance.y) > 90) return '返回入口标记处可切换地点';
+    return null;
+  }
+  hasDangerousThrowables(): boolean { return this.throwable.locked || this.throwableBodies.some(body => !body.dead); }
+  prepareTravel(): void {
+    const blocked = this.getTravelBlock(); if (blocked) throw new Error(blocked);
+    this.cancelThrowable(); this.player.cancelReload(); this.player.cancelPunch();
+    this.reloadVoice?.stop(0); this.reloadVoice = null;
+    this.backpackPanel?.setOpen(false); this.quickItemUse = undefined; this.interaction.reset();
+  }
+  setTransitionPaused(paused: boolean): void { this.transitionPaused = paused; if (this.active) this.syncModalState(); }
+
+  captureCampaignCheckpoint(day: number): CurrentLocationCheckpoint {
+    const previous = this.sceneOptions.campaignData?.location;
+    if (!previous || !this.loaded) throw new Error('战役地点尚未就绪');
+    const itemId = (object: object) => {
+      let id = this.persistentItemIds.get(object);
+      if (!id) {
+        if (!Number.isSafeInteger(this.nextInstanceSequence + 1)) throw new Error('物品实例序号溢出');
+        id = 'dynamic-' + this.nextInstanceSequence++;
+        this.persistentItemIds.set(object, id);
+      }
+      return id;
+    };
+    const loot = new Map<string, GroundItemState>();
+    const add = (object: object, position: { x: number; y: number }, item: GroundItemState['item']) => {
+      const instanceId = itemId(object); loot.set(instanceId, { instanceId, position: { x: position.x, y: position.y }, item });
+    };
+    for (const item of this.vaccinePickups) if (item.isPickupReady()) add(item, item, { kind: 'consumable', itemId: 'vaccine', quantity: 1 });
+    for (const item of this.throwablePickups) if (item.isPickupReady()) add(item, item, { kind: 'consumable', itemId: item.item, quantity: 1 });
+    for (const item of this.weaponPickups) if (item.isPickupReady()) add(item, item, { kind: 'firearm', weapon: captureFirearm(item.weapon) });
+    for (const item of this.goldPickups) add(item, item.getRestPosition(), { kind: 'gold', quantity: 1 });
+    for (const item of this.pickupItems) {
+      const effect = item.getModifierEffect();
+      add(item, item, { kind: 'effect', stat: effect.stat as EffectStat | 'health', value: effect.value,
+        isMultiplier: effect.isMultiplier, durationSeconds: effect.duration || null });
+    }
+    const enemies = new Map(this.enemies.zombies.filter(z => z.isAlive()).map(z => [z.id, z] as const));
+    const location: LocationState = { ...previous, initialized: true, lastVisitedDay: day, spawns: {},
+      groundItems: [], terrainChanges: [], exploration: this.perception?.captureExploration('player') ?? null, structures: this.structures?.snapshot() ?? [] };
+    for (const [id, spawn] of Object.entries(previous.spawns)) {
+      if (spawn.occupant.kind === 'enemy') {
+        const z = spawn.occupant.value && enemies.get(spawn.occupant.value.instanceId);
+        location.spawns[id] = { ...spawn, occupant: { kind: 'enemy', value: z ? {
+          instanceId: z.id, kind: z.config.kind, hp: z.getHealth(),
+          pose: { position: { x: z.x, y: z.y }, facing: z.getFacingDirection() } } : null } };
+        if (z) enemies.delete(z.id);
+      } else {
+        const value = spawn.occupant.value && loot.get(spawn.occupant.value.instanceId);
+        location.spawns[id] = { ...spawn, occupant: { kind: 'loot', value: value ?? null } };
+        if (value) loot.delete(value.instanceId);
+      }
+    }
+    if (enemies.size) throw new Error('存在未登记的战役敌人');
+    location.groundItems = Array.from(loot.values());
+    for (let row = 0; row < this.map.height; row++) for (let col = 0; col < this.map.width; col++) {
+      const tileTypeId = this.map.tiles[row][col], hp = this.map.tileHp[row][col], goldAlreadyIssued = this.goldDroppedByTile.get(row * this.map.width + col) ?? 0;
+      if (tileTypeId !== this.baseTiles[row][col] || hp !== this.baseHp[row][col] || goldAlreadyIssued)
+        location.terrainChanges.push({ row, col, tileTypeId, hp, goldAlreadyIssued });
+    }
+    return { locationId: location.locationId, player: this.captureCampaignPlayer(), pose: this.captureCampaignPose(),
+      location, nextInstanceSequence: this.nextInstanceSequence, reason: { kind: 'checkpoint' } };
+  }
+
+  private restoreCampaignLocation(): void {
+    const data = this.sceneOptions.campaignData!;
+    this.map.restoreTerrain(data.location.terrainChanges);
+    for (const tile of data.location.terrainChanges) if (tile.goldAlreadyIssued)
+      this.goldDroppedByTile.set(tile.row * this.map.width + tile.col, tile.goldAlreadyIssued);
+    this.structures = new StructureSystem(this.map, data.location.structures ?? [], () => { this.structuresChanged = true; });
+    this.player.restorePersistentState(data.player ?? this.captureCampaignPlayer(), data.pose);
+    if (data.player) {
+      this.survival.restore(data.player);
+      this.modifierManager.restorePersistentState(data.player.effects);
+      this.quickSlotBindings.splice(0, 4, ...data.player.quickSlots); this.flashlightOn = data.player.preferences.flashlightOn;
+    }
+    if (!this.map.isShapeWalkable(this.player.getCollider())) throw new Error('保存的玩家位置不可通行');
+    const restoreLoot = (saved: GroundItemState) => {
+      const { x, y } = saved.position, item = saved.item;
+      if (x < 0 || y < 0 || x >= this.map.width * this.map.tileSize || y >= this.map.height * this.map.tileSize)
+        throw new Error('保存的物品位置超出地图');
+      let object: object;
+      if (item.kind === 'consumable') {
+        if (item.quantity !== 1) throw new Error('当前地点只支持单件地面消耗品');
+        if (item.itemId === 'vaccine') { const pickup = new VaccinePickup(x, y, saved.instanceId); this.vaccinePickups.push(pickup); object = pickup; }
+        else { const pickup = new ThrowablePickup(x, y, item.itemId, saved.instanceId); this.throwablePickups.push(pickup); object = pickup; }
+      } else if (item.kind === 'firearm') {
+        const pickup = new DroppedWeaponPickup(x, y, this.player.createPersistentFirearm(item.weapon), saved.instanceId);
+        this.weaponPickups.push(pickup); object = pickup;
+      } else if (item.kind === 'gold') {
+        if (item.quantity !== 1) throw new Error('当前地点只支持单个金块');
+        const pickup = new GoldPickup(x, y, x, y); pickup.update(GoldPickup.SCATTER_DURATION); this.goldPickups.push(pickup); object = pickup;
+      } else {
+        const type = { health: PickupType.HEALTH, maxSpeed: PickupType.SPEED_BOOST, damage: PickupType.DAMAGE_BOOST,
+          fireRate: PickupType.FIRE_RATE_BOOST, bulletSpeed: PickupType.BULLET_SPEED_BOOST }[item.stat];
+        const pickup = new PickupItem(x, y, type, this.particleSystem, { stat: item.stat, value: item.value,
+          duration: item.durationSeconds ?? 0, isMultiplier: item.isMultiplier, description: item.stat });
+        this.pickupItems.push(pickup); object = pickup;
+      }
+      this.persistentItemIds.set(object, saved.instanceId);
+    };
+    for (const spawn of Object.values(data.location.spawns)) {
+      if (spawn.occupant.kind === 'loot') { if (spawn.occupant.value) restoreLoot(spawn.occupant.value); }
+      else if (spawn.occupant.value) {
+        const saved = spawn.occupant.value, size = ZOMBIE_CONFIG[saved.kind].size;
+        const z = this.enemies.add(saved.kind, { x: saved.pose.position.x + size / 2, y: saved.pose.position.y + size / 2 },
+          saved.pose.facing, { id: saved.instanceId, hp: saved.hp });
+        if (!this.map.isShapeWalkable(z.getCollider())) throw new Error('保存的敌人位置不可通行');
+      }
+    }
+    data.location.groundItems.forEach(restoreLoot);
+    if (data.runtime) {
+      const runtime = parseLocationResume(data.runtime, this.captureCampaignPlayer());
+      if (runtime.bodies.some(body => body.x < 0 || body.y < 0 || body.x >= this.map.width * this.map.tileSize || body.y >= this.map.height * this.map.tileSize))
+        throw new Error('保存的投掷物位置超出地图');
+      this.throwable.restoreHeldGrenade(runtime.heldGrenade); this.player.holdingThrowable = this.throwable.locked;
+      this.throwableBodies = runtime.bodies.map(body => ({ ...body, dead: false }));
+      this.throwableId = runtime.lastThrowableId; this.throwableRemainder = runtime.stepRemainder;
+      this.smoke.sync(this.throwableBodies);
+      this.map.sightOpacity = this.throwableBodies.some(body => body.kind === 'smokeGrenade' && body.smokeAge >= 0) ? this.smoke.opacity : undefined;
+      this.enemies.recoverAfterLoad();
+    }
+    if (this.perception && this.perceptionObserver && data.location.exploration)
+      this.perception.restoreExploration(this.perceptionObserver, data.location.exploration);
+    this.flashlight.setActive(this.flashlightOn); this.actorWorld.sync();
+  }
+
 
 
   /**
@@ -1680,21 +2125,24 @@ export class GameScene extends Scene {  private player!: Player;
    * @param input 输入状态对象
    */
   update(delta: number, input: Input) {
-    this.deltaSinceLastFrame = this.paused ? 0 : delta;
+    this.campaign?.refreshHud(this);
+    this.deltaSinceLastFrame = this.isWorldPaused() ? 0 : delta;
 
     if (!this.loaded) return;
+    if (this.campaign?.isEnded()) return;
     this.debugPanel?.update(delta);
     if (!this.player.isAlive()) {
       this.backpackPanel?.setOpen(false); this.quickItemUse = undefined;
       this.combatScore.endChain(); this.killIndicator.clear();
     }
-    this.backpackPanel?.refresh();
+    this.backpackPanel?.refresh(); this.structurePanel?.refresh();
     const lifeReset = this.player.getLifeResetVersion();
     if (lifeReset !== this.feedbackResetVersion) {
       this.feedbackResetVersion = lifeReset; this.damageFeedback.clear(); this.camera.clearDamageKick(); this.camera.clearAimOffset();
       this.combatScore.reset(); this.killIndicator.clear();
     }
-    if (this.paused || !Number.isFinite(delta) || delta < 0) return;
+    if (this.isWorldPaused() || !Number.isFinite(delta) || delta < 0) return;
+    this.applyEnvironmentLight();
     // Advance existing feedback before this frame's hits so a new flash is always displayed.
     this.killIndicator.update(delta);
     this.combatScore.update(delta);
@@ -1712,7 +2160,7 @@ export class GameScene extends Scene {  private player!: Player;
       this.flashlight?.setActive(false);
       this.interaction.reset();
       const enter = input.isKeyDown("Enter");
-      if (enter && !this.deathEnterHeld) {
+      if (!this.campaign && enter && !this.deathEnterHeld) {
         this.game?.sceneManager.changeScene(new MenuScene(true), 0);
         return;
       }
@@ -1842,6 +2290,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.rebuildPerceptionLights();
 
     this.enemies.update(delta, {
+      environment: this.environment,
       target: { x: playerCenterX, y: playerCenterY, alive: this.player.isAlive(), radius: this.player.getCollider().radius, emittingLightId: "flashlight" },
       lights: this.perceptionLights,
       playerNoises: selectPlayerNoises(this.noiseSystem.getEvents()),
@@ -1875,6 +2324,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.chickens.forEach(chicken => chicken.update(delta, input, this.map, {
       targetX: playerCenterX,
       targetY: playerCenterY,
+      environment: this.environment,
       lights: this.perceptionLights,
       noiseEvents: this.noiseSystem.getEvents(),
       soundSourceId: this.getChickenSoundId(chicken),
@@ -1910,7 +2360,10 @@ export class GameScene extends Scene {  private player!: Player;
     this.updateMeatPickups(delta);
 
     // 感知先于按键与交互结算：拾取系统只使用本帧的可见性结果，不读上一帧。
+    this.campaign?.advance(this, delta);
+    this.applyEnvironmentLight();
     this.updatePerception(delta);
+    this.structures?.observe((x, y) => this.perception ? this.perception.canIdentify('player', x, y) : this.canObserveThrowPoint(x, y));
     // 小地图消费同一份感知结果：观察格/记忆刚更新过，当帧就能反映。
     this.updateMinimap(delta);
     // 声音提示只消费世界噪声事件，不参与感知，也不会被感知遮罩擦掉。
@@ -1934,7 +2387,12 @@ export class GameScene extends Scene {  private player!: Player;
   getSurvivalSystem(): PlayerSurvivalSystem { return this.survival; }
   getPlayer(): Player { return this.player; }
   getVaccinePickups(): readonly VaccinePickup[] { return this.vaccinePickups; }
-  isWorldPaused(): boolean { return this.paused; }
+  isWorldPaused(): boolean { return this.paused || this.campaign?.session.getClockReading().paused === true; }
+  /** 仅开发构建的外部状态预览，不修改 CampaignSession，也不推进任何世界时间。 */
+  setDayClockPreview(state: Readonly<DayClockHudState> | null): void {
+    if (!isDevelopmentBuild()) return;
+    this.dayClockPreview = state ? { ...state, raid: state.raid ? { ...state.raid } : undefined } : undefined;
+  }
   private getGroundInventoryPickups(): (VaccinePickup | DroppedWeaponPickup | ThrowablePickup)[] { return [...this.vaccinePickups, ...this.weaponPickups, ...this.throwablePickups]; }
   private getThrowableCounts() { return { grenade: this.survival.inventory.getCount('grenade'), smokeGrenade: this.survival.inventory.getCount('smokeGrenade') }; }
   private cancelThrowable(): void {
@@ -1982,7 +2440,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.map.sightOpacity = this.throwableBodies.some(b => b.kind === 'smokeGrenade' && b.smokeAge >= 0) ? this.smoke.opacity : undefined;
   }
   private explodeThrowable(x: number, y: number): void {
-    const terrainHits = collectBlastTerrain(this.map, x, y);
+    const terrainHits = collectBlastTerrain(this.map, x, y), structureHits = this.structures?.collectBlast(x, y) ?? [];
     this.explosions.push({ x, y, age: 0 });
     this.particleSystem.createExplosion(new Vector2(x, y), 32, 320, 4, .5, ['#bcb39a', '#e7bd72', '#807c71']);
     this.noiseSystem.emit('explosion', x, y, { sourceId: 'player' });
@@ -2010,6 +2468,7 @@ export class GameScene extends Scene {  private player!: Player;
     const self = impactAt(player);
     if (self) this.player.applyDamage({ amount: self.damage, kind: 'explosion', sourceId: 'player', sourcePosition: { x, y } });
     for (const hit of terrainHits) this.map.damageTile(hit.col, hit.row, hit.damage);
+    for (const hit of structureHits) this.structures?.damage(hit.id, hit.damage);
   }
   private spawnTradingStations(): void {
     const random = seededRandom(this.runSeed ^ 0x74726164);
@@ -2205,6 +2664,7 @@ export class GameScene extends Scene {  private player!: Player;
     this.explicitPaused = paused;
     if (paused) { this.backpackPanel?.setOpen(false); this.debugPanel?.setOpen(false); }
     this.pausePanel?.setOpen(paused); this.syncModalState();
+    if (paused) this.campaign?.requestSave();
   }
   private readonly minimapWheelListener = (event: WheelEvent) => {
     if (event.target instanceof Element && event.target.closest('.backpack-panel, .backpack-menu')) return;
@@ -2218,12 +2678,18 @@ export class GameScene extends Scene {  private player!: Player;
   };
   private syncModalState(): void {
     this.player.cancelPunch();
-    const open = this.backpackPanel?.isOpen() === true || this.debugPanel?.isOpen() === true;
+    const planning = this.structurePanel?.isOpen() === true;
+    const open = planning || this.backpackPanel?.isOpen() === true || this.debugPanel?.isOpen() === true;
     this.modalActive = open;
     this.quickItemUse = undefined;
     this.throwable.suspend();
-    this.setWorldPaused(this.explicitPaused || this.debugPanel?.isOpen() === true || this.focusPaused);
-    this.game.input.setBlocked(open || this.paused);
+    this.setWorldPaused(this.explicitPaused || planning || this.debugPanel?.isOpen() === true || this.focusPaused || this.hiddenPaused || this.transitionPaused);
+    if (this.campaign) {
+      for (const [reason, paused] of [['menu', this.explicitPaused], ['debug', this.debugPanel?.isOpen() === true],
+        ['blur', this.focusPaused], ['hidden', this.hiddenPaused], ['loading', this.transitionPaused], ['construction', planning]] as const)
+        this.campaign.session.setTimePaused(reason, paused);
+    }
+    this.game.input.setBlocked?.(open || this.paused);
     // 切换两个面板时也清除按住状态，关闭后必须重新按键/点击。
     this.game.input.clear();
     this.setCursorVisible(open || this.paused);
@@ -2251,6 +2717,11 @@ export class GameScene extends Scene {  private player!: Player;
     if (!this.playerLight || !this.flashlight) return;
     const lights = this.perceptionLights;
     lights.length = 0;
+    for (let i = 0; i < this.facilityLights.length; i++) {
+      const light = this.facilityLights[i], position = light.getPosition();
+      lights.push({ id: `facility-${i}`, x: position.x, y: position.y, radius: light.getEffectiveRadius(), intensity: light.getIntensity(),
+        active: light.isLightActive(), revealsDetails: true, kind: 'facility' });
+    }
     const glowPosition = this.playerLight.getPosition();
     lights.push({
       id: "player-glow",
@@ -2520,7 +2991,7 @@ export class GameScene extends Scene {  private player!: Player;
     const flashing = this.enemies.zombies.filter(z => z.getPose().flash > 0 && this.getEntityAlpha(z) > .002);
     if (!flashing.length && !this.zombieGore.getStats().flying) return;
     ctx.save(); ctx.translate(-ox, -oy);
-    ctx.clip(this.map.getGroundContour(ox, oy, ctx.canvas.width, ctx.canvas.height), "evenodd");
+    this.map.clipGround(ctx, ox, oy, ctx.canvas.width, ctx.canvas.height);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     for (const zombie of flashing) {
       const b = zombie.getRenderBounds();
@@ -2581,10 +3052,9 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 地面轮廓裁剪：落在墙体/矿石顶面的剪影像素会被裁掉，避免“部分露出”变成整只画在墙上。
     // 轮廓路径是世界坐标，先平移再建立裁剪区，随后恢复屏幕坐标绘制。
-    const ground = this.map.getGroundContour(cameraX, cameraY, ctx.canvas.width, ctx.canvas.height);
     ctx.save();
     ctx.translate(-cameraX, -cameraY);
-    ctx.clip(ground, "evenodd");
+    this.map.clipGround(ctx, cameraX, cameraY, ctx.canvas.width, ctx.canvas.height);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     if (smokeOnly && this.smoke.density(this.player.x + this.player.getSize() / 2, this.player.y + this.player.getSize() / 2) > .2) {
@@ -2678,13 +3148,17 @@ export class GameScene extends Scene {  private player!: Player;
 
     // 地形与静态装饰始终可见：地形顶面只受环境光和单位光提亮，不会被视野遮住。
     this.map.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height, this.deltaSinceLastFrame);
+    this.structures?.draw(ctx, cameraOffset.x, cameraOffset.y, false,
+      this.graphics.dayNight.mode === 'auto' && this.environmentStage >= 2 ? this.environment : undefined);
+    if (this.graphics.dayNight.mode === 'auto' && this.environmentStage >= 2)
+      this.map.drawSunFaces(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height, this.environment);
     // 脚印、涟漪、弹坑与血迹属于地面装饰：在地图之后、单位层之前绘制，始终可见且受光照。
     this.footprintSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.rippleSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.craterSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     // 血迹压在弹坑之上：后画的斑块不会被弹坑的暗色吃掉。
     ctx.save(); ctx.translate(-cameraOffset.x, -cameraOffset.y);
-    ctx.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height), "evenodd");
+    this.map.clipGround(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.bloodStainSystem.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height);
     this.enemyBlood.draw(ctx, cameraOffset.x, cameraOffset.y, ctx.canvas.width, ctx.canvas.height,
@@ -2693,6 +3167,8 @@ export class GameScene extends Scene {  private player!: Player;
       (x, y) => !this.perception || this.perception.canIdentify("player", x, y));
     ctx.restore();
     this.torches.forEach(torch => torch.draw(ctx, cameraOffset.x, cameraOffset.y));
+    this.drawFacilityLights(ctx, cameraOffset.x, cameraOffset.y);
+    this.drawSunShadows(ctx, cameraOffset.x, cameraOffset.y);
 
     // 单位层：只有迷雾范围内的单位才绘制，地形不参与裁剪。
     // 迷雾外的单位本来就不可见：先按视野半径剔除，既省绘制也把单位层包围盒压到视野附近。
@@ -2803,7 +3279,7 @@ export class GameScene extends Scene {  private player!: Player;
       units.save();
       // 与光照共用同一份世界坐标地形轮廓：已按瓦片内容缓存，避免每帧重建整屏裁剪路径。
       units.translate(-cameraOffset.x, -cameraOffset.y);
-      units.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), "evenodd");
+      this.map.clipGround(units, cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height);
       units.setTransform(1, 0, 0, 1, 0, 0);
       // 和地图共用像素边界，地面投影不能覆盖墙壁、矿石的顶面。
       for (const vaccine of this.getGroundInventoryPickups()) {
@@ -2817,13 +3293,13 @@ export class GameScene extends Scene {  private player!: Player;
       for (const pickup of this.goldPickups) {
         if (visible(pickup.x, pickup.y, 48) && drawn(pickup)) {
           units.globalAlpha = this.getEntityAlpha(pickup);
-          pickup.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
+          pickup.drawShadow(units, cameraOffset.x, cameraOffset.y, this.graphics.dayNight.mode === 'auto' && this.environment.sunIntensity > 0 ? undefined : this.playerLight.getPosition());
         }
       }
       for (const chicken of this.chickens) {
         if (visible(chicken.x, chicken.y, 72) && drawn(chicken)) {
           units.globalAlpha = this.getEntityAlpha(chicken);
-          chicken.drawShadow(units, cameraOffset.x, cameraOffset.y, this.playerLight.getPosition());
+          chicken.drawShadow(units, cameraOffset.x, cameraOffset.y, this.graphics.dayNight.mode === 'auto' && this.environment.sunIntensity > 0 ? undefined : this.playerLight.getPosition());
         }
       }
       for (const pickup of this.meatPickups) {
@@ -2848,7 +3324,7 @@ export class GameScene extends Scene {  private player!: Player;
     if (clipSilhouetteBodies) {
       units.save();
       units.translate(-cameraOffset.x, -cameraOffset.y);
-      units.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), "evenodd");
+      this.map.clipGround(units, cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height);
       units.setTransform(1, 0, 0, 1, 0, 0);
     }
     for (const pickup of this.goldPickups) {
@@ -2879,7 +3355,7 @@ export class GameScene extends Scene {  private player!: Player;
     for (const zombie of this.enemies.zombies) {
       if (visible(zombie.x, zombie.y, 80) && drawn(zombie)) {
         units.save(); units.translate(-cameraOffset.x, -cameraOffset.y);
-        units.clip(this.map.getGroundContour(cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height), "evenodd");
+        this.map.clipGround(units, cameraOffset.x, cameraOffset.y, this.unitCanvas.width, this.unitCanvas.height);
         units.setTransform(1, 0, 0, 1, 0, 0);
         units.globalAlpha = this.getEntityDrawAlpha(zombie); zombie.draw(units, cameraOffset.x, cameraOffset.y); units.restore();
       }
@@ -2920,10 +3396,21 @@ export class GameScene extends Scene {  private player!: Player;
     // 绘制玩家（在所有元素上方），使用带震动偏移的相机位置
     this.drawThrowableWorld(ctx, cameraOffset.x, cameraOffset.y);
     for (const station of this.tradingStations) if (this.canObserveThrowPoint(station.x, station.y)) station.draw(ctx, cameraOffset.x, cameraOffset.y);
+    const locationId = this.getCampaignLocationId();
+    if (locationId) {
+      const entrance = LOCATION_DEFINITIONS[locationId].entrance.position;
+      const x = entrance.x + 24.5 - cameraOffset.x, y = entrance.y + 24.5 - cameraOffset.y;
+      ctx.save(); ctx.strokeStyle = '#a4d6be'; ctx.fillStyle = '#dcf7e8'; ctx.lineWidth = 2;
+      ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.arc(x, y, 55, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.font = '16px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('出入口', x, y + 76); ctx.restore();
+    }
     this.player.draw(ctx, cameraOffset.x, cameraOffset.y);
 
     // 应用光照效果
     this.applyLighting(ctx, cameraOffset.x, cameraOffset.y);
+    if (this.graphics.dayNight.mode === 'auto' && this.environmentStage >= 3)
+      this.lightingSystem.drawSurfaceResponse(ctx, this.map, cameraOffset.x, cameraOffset.y, this.environment);
+    this.drawEnvironmentAtmosphere(ctx, cameraOffset.x, cameraOffset.y);
     // A local white mask remains readable under ambient lighting, still below the perception mask.
     this.drawEnemyHitFlashes(ctx, cameraOffset.x, cameraOffset.y);
     // 边界反馈画在光照之后：贴边本身是玩法信号，不能在暗处被乘暗。
@@ -2984,6 +3471,8 @@ export class GameScene extends Scene {  private player!: Player;
     }
     this.drawThrowableAim(ctx, cameraOffset.x, cameraOffset.y);
     this.player.drawUI(ctx, cameraOffset.x, cameraOffset.y);
+    this.structures?.draw(ctx, cameraOffset.x, cameraOffset.y, true);
+    this.drawConstructionPreview(ctx, cameraOffset.x, cameraOffset.y);
     screenContext.drawImage(this.worldCanvas, 0, 0, screenContext.canvas.width, screenContext.canvas.height);
     ctx = screenContext;
     ctx.save();
@@ -2999,6 +3488,22 @@ export class GameScene extends Scene {  private player!: Player;
       (screenContext.canvas.width / textDpr) / this.camera.width);
     ctx.restore();
     // 左上角圆形小地图：世界合成之后的屏幕 HUD 阶段，用逻辑像素绘制。
+    // 时间独立于背包的隐藏分支；暂停时继续重画同一份权威读数。
+    const clockDpr = window.devicePixelRatio || 1;
+    const clockWidth = window.innerWidth, clockHeight = window.innerHeight;
+    const clockReading = this.campaign?.session.getClockReading();
+    const clockState = this.dayClockPreview ?? (clockReading ? { worldMinute: clockReading.worldMinute,
+      location: this.getCampaignLocationId() === 'outpost' ? 'camp' as const : 'field' as const, raid: this.raidVisualState } : null);
+    const minimapLayout = this.minimap.getLayout();
+    const clockBackpackOpen = this.backpackPanel?.isOpen() === true;
+    const clockLayout = this.dayClockHud.draw(this.active && this.player.isAlive() ? clockState : null, clockWidth, clockHeight, clockDpr, [
+      { x: clockWidth - 108, y: 0, width: 108, height: 52 },
+      ...clockBackpackOpen ? [] : [
+        { x: minimapLayout.left, y: 0, width: minimapLayout.diameter, height: minimapLayout.top + minimapLayout.diameter + 58 },
+        getWeaponListLayout(clockWidth, clockHeight).area,
+      ],
+    ], clockBackpackOpen);
+    this.campaign?.layoutHud(this, clockLayout);
     // 背包只叠在世界上，避免小地图、黄金等透过物品列表造成文字重影。
     if (!this.backpackPanel?.isOpen()) {
       ctx.save();
@@ -3085,7 +3590,7 @@ export class GameScene extends Scene {  private player!: Player;
       ctx.font = '13px "Microsoft YaHei", sans-serif';
       ctx.fillText(`黄金击杀 ${score.goldKills}   ·   最高连杀 ${score.bestChain}`, width / 2, height / 2 + 16);
       ctx.fillStyle = "#fff"; ctx.font = "16px sans-serif";
-      ctx.fillText("Enter 返回菜单", width / 2, height / 2 + 51); ctx.restore();
+      ctx.fillText(this.campaign ? '战役等待恢复结算' : 'Enter 返回菜单', width / 2, height / 2 + 51); ctx.restore();
     }
     this.updateCrosshair();
   }
@@ -3327,6 +3832,9 @@ export class GameScene extends Scene {  private player!: Player;
    * 设置环境光
    */
   public setAmbientLight(color: string): void {
+    if (this.graphics.dayNight.mode !== 'manual') {
+      this.graphics.dayNight.mode = 'manual'; this.applyEnvironmentLight();
+    }
     this.lightingSystem.setAmbientLight(color);
   }
 }

@@ -1,4 +1,5 @@
 import { Player } from '../objects/Player';
+import type { PersistentEffect } from '../campaign/CampaignState';
 
 /**
  * 属性修改器类型定义
@@ -102,6 +103,23 @@ export class ModifierManager {
    */
   getActiveModifiers(): Modifier[] {
     return Array.from(this.activeModifiers.values());
+  }
+
+  capturePersistentState(): PersistentEffect[] {
+    return this.getActiveModifiers().map(m => ({ id: m.id, stat: m.stat as PersistentEffect['stat'], value: m.value,
+      isMultiplier: m.isMultiplier, remainingSeconds: m.duration === 0 ? null : m.duration }));
+  }
+  restorePersistentState(effects: readonly PersistentEffect[]): void {
+    const stats = new Set<string>(), ids = new Set<string>();
+    for (const e of effects) {
+      if (!['maxSpeed', 'fireRate', 'bulletSpeed', 'damage'].includes(e.stat) || !e.id || ids.has(e.id) || stats.has(e.stat)
+        || !Number.isFinite(e.value) || (e.isMultiplier && e.value <= -1) || typeof e.isMultiplier !== 'boolean'
+        || (e.remainingSeconds !== null && (!Number.isFinite(e.remainingSeconds) || e.remainingSeconds <= 0))) throw new Error('增益快照无效');
+      ids.add(e.id); stats.add(e.stat);
+    }
+    this.clearAllModifiers();
+    for (const e of effects) this.addModifier({ stat: e.stat, value: e.value, isMultiplier: e.isMultiplier,
+      duration: e.remainingSeconds ?? 0, description: e.stat }, e.id);
   }
 
   /**

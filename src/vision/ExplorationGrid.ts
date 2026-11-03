@@ -26,6 +26,18 @@ export class ExplorationGrid {
   }
 
   get exploredCount(): number { return this.exploredCells; }
+  capture(): number[] {
+    const result: number[] = [];
+    this.cells.forEach((value, index) => { if (value) result.push(index); });
+    return result;
+  }
+  restore(indices: readonly number[]): void {
+    if (new Set(indices).size !== indices.length || indices.some(i => !Number.isInteger(i) || i < 0 || i >= this.cells.length))
+      throw new Error('探索覆盖快照无效');
+    this.clear();
+    for (const i of indices) this.cells[i] = 1;
+    this.exploredCells = indices.length;
+  }
 
   cellIndex(col: number, row: number): number {
     return row * this.cols + col;

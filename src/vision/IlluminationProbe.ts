@@ -2,6 +2,7 @@ import { lightFalloff } from '../core/LightingSystem';
 import type { PerceptionLight, PerceptionTarget, SightMap, VisionObserver } from './VisionTypes';
 import type { VisionRules } from './VisionRules';
 import { hasLineOfSight } from './SightGeometry';
+import { naturalLightStrength, type EnvironmentPerception } from '../core/EnvironmentLighting';
 
 const TAU = Math.PI * 2;
 const DEFAULT_INNER_FADE = 14;
@@ -135,13 +136,15 @@ export function canIdentifyPoint(
   x: number,
   y: number,
   lights: readonly PerceptionLight[],
-  rules: VisionRules
+  rules: VisionRules,
+  environment?: EnvironmentPerception
 ): boolean {
   const distance = Math.hypot(x - observer.x, y - observer.y);
   if (!Number.isFinite(distance) || distance > observer.maxObservationRange) return false;
   if (!hasLineOfSight(map, observer.x, observer.y, x, y)) return false;
   if ((map.sightOpacity?.(observer.x, observer.y, x, y) ?? 0) >= .35) return false;
   if (rules.ambientIdentifies) return true;
+  if (naturalLightStrength(environment, distance) >= rules.identifyLightThreshold) return true;
   return illuminationStrengthAt(map, x, y, lights, rules) >= rules.identifyLightThreshold;
 }
 
@@ -151,7 +154,8 @@ export function canIdentifyTarget(
   observer: VisionObserver,
   target: PerceptionTarget,
   lights: readonly PerceptionLight[],
-  rules: VisionRules
+  rules: VisionRules,
+  environment?: EnvironmentPerception
 ): boolean {
-  return canIdentifyPoint(map, observer, target.x, target.y, lights, rules);
+  return canIdentifyPoint(map, observer, target.x, target.y, lights, rules, environment);
 }

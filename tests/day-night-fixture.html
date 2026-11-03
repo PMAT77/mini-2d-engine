@@ -1,0 +1,43 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/src/ui/PlayerDebugPanel.css"><style>html,body{margin:0;overflow:hidden;background:#101615}canvas#game{display:block;width:100vw;height:100vh}</style>
+<canvas id="game"></canvas><script type="module">
+import { Game } from '/src/core/Game.ts';
+import { GameScene } from '/src/scenes/GameScene.ts';
+import { TileMap } from '/src/map/TileMap.ts';
+import { TradingStation } from '/src/objects/TradingStation.ts';
+import { createLocationMap, CAMPAIGN_DEFINITION_VERSION } from '/src/campaign/LocationDefinitions.ts';
+const params = new URLSearchParams(location.search), scenario = params.get('scenario') || 'street';
+const game = new Game(document.querySelector('#game'));
+const pond = scenario === 'water', camp = scenario === 'camp';
+const map = camp ? createLocationMap('outpost', 817) : new TileMap(pond ? 100 : 40, pond ? 100 : 30, { seed: 8351, generateWater: pond });
+if (!camp) { map.tiles.forEach(row => row.fill('default')); map.tileHp.forEach(row => row.fill(0)); }
+const center = pond ? { x: map.water.lakes[0].center.x * 50 - 150, y: map.water.lakes[0].center.y * 50 } : camp ? { x: 550, y: 500 } : scenario === 'corner' ? { x: 1000, y: 775 } : { x: 800, y: 750 };
+if (!pond && !camp) {
+  for (let row = 8; row <= 20; row++) if (row !== 16) map.tiles[row][22] = 'wall';
+  for (let col = 6; col < 15; col++) map.tiles[9][col] = 'wall';
+  for (const [col,row] of [[19,12],[12,18]]) { map.tiles[row][col] = 'mineral'; map.tileHp[row][col] = 100; }
+}
+map.invalidateNavigation();
+const spawn = { x: center.x - 24.5, y: center.y - 24.5 };
+const campaignData = camp ? { location: { locationId: 'outpost', definitionVersion: CAMPAIGN_DEFINITION_VERSION, seed: 817, initialized: true, lastVisitedDay: 1, spawns: {}, containers: {}, groundItems: [], terrainChanges: [], exploration: null, structures: [] }, pose: { position: spawn, facing: -.35 }, nextInstanceSequence: 0 } : undefined;
+const scene = new GameScene({ map, seed: 817, campaignData, chickenCount: 0, playerSpawn: spawn, encounters: { shambler: 0, runner: 0, vaccines: 0 } });
+await scene.load(); game.sceneManager.changePreparedScene(scene, () => {});
+await new Promise(requestAnimationFrame);
+scene.torches.forEach(t => scene.lightingSystem.removeLightSource(t.light)); scene.torches = [];
+scene.tradingStations = pond ? [] : [new TradingStation('fixture', center.x - 160, center.y + 80)];
+if (!pond) scene.getEnemySystem().add('shambler', { x: 960, y: 805 }, Math.PI);
+scene.player.directionAngle = -.35; scene.flashlight.setDirection(-.35);
+scene.camera.x = center.x - scene.camera.width / 2 + .35; scene.camera.y = center.y - scene.camera.height / 2 + .65;
+const render = (minute = 360, torch = false, stage = 4) => {
+  scene.setEnvironmentPreview?.(minute);
+  scene.setEnvironmentStage?.(stage);
+  scene.flashlightOn = torch; scene.flashlight.setActive(torch);
+  scene.flashlightHud.update(.2, torch);
+  scene.flashlight.setPosition(scene.playerLight.getPosition());
+  for (let i = 0; i < 20; i++) scene.updatePerception(1 / 60);
+  scene.updateMinimap(0); scene.deltaSinceLastFrame = 0;
+  scene.draw(game.renderer.ctx);
+};
+window.fixture = { game, scene, map, center, render, scenario };
+render();
+</script></html>

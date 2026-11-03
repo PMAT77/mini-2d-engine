@@ -1,5 +1,7 @@
+import { cloneDayNight, DEFAULT_DAY_NIGHT, type DayNightConfig, type EnvironmentPreset } from './EnvironmentLighting';
 /** 画面配置：所有字段都有默认值，JSON 只需写想覆盖的部分。 */
 export interface GraphicsConfig {
+  dayNight: DayNightConfig;
   camera: { zoom: number };
   ambient: { color: string; intensity: number };
   terrainLight: {
@@ -34,6 +36,7 @@ export interface VisibilityConfig {
 }
 
 export const DEFAULT_GRAPHICS_CONFIG: GraphicsConfig = {
+  dayNight: cloneDayNight(),
   camera: { zoom: 1 },
   ambient: { color: "#D6E2F0", intensity: 0.35 },
   terrainLight: { color: "#B4C8E0", intensity: 0.06, shadowScale: 0.4, softnessScale: 0.04 },
@@ -49,6 +52,7 @@ export const DEFAULT_GRAPHICS_CONFIG: GraphicsConfig = {
 /** 配置是纯 JSON 结构；面板改一个字段时用它做可写快照。 */
 export function cloneGraphicsConfig(config: GraphicsConfig = DEFAULT_GRAPHICS_CONFIG): GraphicsConfig {
   return {
+    dayNight: cloneDayNight(config.dayNight),
     camera: { ...config.camera },
     ambient: { ...config.ambient },
     terrainLight: { ...config.terrainLight },
@@ -59,7 +63,7 @@ export function cloneGraphicsConfig(config: GraphicsConfig = DEFAULT_GRAPHICS_CO
   };
 }
 
-const GROUPS = ["camera", "ambient", "terrainLight", "playerLight", "flashlight", "fog", "visibility"] as const;
+const GROUPS = ["dayNight", "camera", "ambient", "terrainLight", "playerLight", "flashlight", "fog", "visibility"] as const;
 const HEX = /^#[0-9a-f]{6}$/i;
 const isObject = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
@@ -98,6 +102,24 @@ export function parseGraphicsConfig(value: unknown): GraphicsConfig {
     if (!GROUPS.includes(key as (typeof GROUPS)[number])) throw new Error(`无效配置分组: graphics.${key}`);
   }
   const result = cloneGraphicsConfig();
+
+  const cycle = group(value, 'dayNight');
+  rejectUnknown(cycle, 'dayNight.', ['mode', 'groundColor', 'wallColor', 'day', 'dusk', 'night']);
+  if (cycle.mode !== undefined) {
+    if (cycle.mode !== 'auto' && cycle.mode !== 'manual') throw new Error('昼夜模式必须是 auto 或 manual');
+    result.dayNight.mode = cycle.mode;
+  }
+  for (const key of ['groundColor', 'wallColor'] as const) if (cycle[key] !== undefined) result.dayNight[key] = color(cycle[key], `dayNight.${key}`);
+  for (const phase of ['day', 'dusk', 'night'] as const) {
+    const preset = cycle[phase]; if (preset === undefined) continue;
+    if (!isObject(preset)) throw new Error(`无效昼夜预设: ${phase}`);
+    rejectUnknown(preset, `dayNight.${phase}.`, Object.keys(DEFAULT_DAY_NIGHT[phase]));
+    for (const key of Object.keys(preset) as (keyof EnvironmentPreset)[]) {
+      const path = `dayNight.${phase}.${key}`;
+      if (key === 'ambientColor' || key === 'sunColor') result.dayNight[phase][key] = color(preset[key], path);
+      else result.dayNight[phase][key] = number(preset[key], path, 0, key === 'shadowScale' ? 4 : key === 'artificialWeight' ? 2 : 1);
+    }
+  }
 
   const camera = group(value, "camera");
   rejectUnknown(camera, "camera.", ["zoom"]);

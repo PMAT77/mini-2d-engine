@@ -1,4 +1,5 @@
 import { lightStrengthAt } from "../vision/IlluminationProbe";
+import type { EnvironmentPerception } from '../core/EnvironmentLighting';
 import type { PerceptionLight, SightMap } from "../vision/VisionTypes";
 import { hasLineOfSight } from "../vision/SightGeometry";
 import { DEFAULT_SENSE_RULES, type SenseRules } from "./SenseRules";
@@ -79,7 +80,8 @@ export class VisionSensor {
     map: SightMap | undefined,
     viewer: VisionViewer,
     target: VisionTarget,
-    lights: readonly PerceptionLight[] = []
+    lights: readonly PerceptionLight[] = [],
+    environment?: EnvironmentPerception
   ): VisionSample {
     const distance = Math.hypot(target.x - viewer.x, target.y - viewer.y);
     const hidden: VisionSample = { detected: false, visible: false, distance, illuminated: false };
@@ -92,8 +94,10 @@ export class VisionSensor {
       light.id === target.emittingLightId && light.active && light.revealsDetails &&
       lightStrengthAt(light, viewer.x, viewer.y) >= this.illuminationThreshold &&
       hasLineOfSight(map, light.x, light.y, viewer.x, viewer.y));
-    const illuminated = exposed || illuminationAt(map, target.x, target.y, lights) >= this.illuminationThreshold;
-    const range = illuminated ? this.rules.visionRange : this.rules.darkVisionRange;
+    const local = exposed || illuminationAt(map, target.x, target.y, lights) >= this.illuminationThreshold;
+    const daylight = Math.max(0, Math.min(1, environment?.daylight ?? 0));
+    const illuminated = local || daylight >= this.illuminationThreshold;
+    const range = this.rules.darkVisionRange + (this.rules.visionRange - this.rules.darkVisionRange) * (local ? 1 : daylight);
     if (distance > range) {
       this.seenSeconds = 0;
       return { ...hidden, illuminated };

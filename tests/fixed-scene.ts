@@ -12,5 +12,9 @@ export async function createFixedScene(game: Game, width: number, height: number
   await scene.load(); game.sceneManager.changeScene(scene, 0);
   // onEnter's resource/canvas setup completes at the next microtask turn, without an rAF loop.
   await new Promise(resolve => setTimeout(resolve, 0));
+  // Existing isolated light/vision/UI cases explicitly exercise static night lighting.
+  // The day-night fixture separately verifies the automatic clock-driven path.
+  scene.setEnvironmentPreview(960);
+  scene.setAmbientLight('rgba(214,226,240,0.35)');
   return scene;
 }

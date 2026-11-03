@@ -81,6 +81,8 @@
 
 `graphicsConfig.json` 中所有字段都可省略。
 
+`dayNight.mode` 默认 `auto`，跟随战役世界时间（自由测试为 12:00）；`manual` 使用下表原有的 `ambient` / `terrainLight`。`dayNight.groundColor` / `wallColor` 默认 `#596057` / `#747870`，其 `day` / `dusk` / `night` 子组提供环境色/强度、太阳色/强度、投影长度/遮蔽/柔边、受光边缘、水面/金属高光、空气层和人工光视觉权重。全部可在 F2 调整，详见 [昼夜参数与实现记录](../../docs/reviews/day-night-visual-upgrade.md)。这些预设只控制表现，辨识距离与怪物感知仍由权威世界时间决定。
+
 | 分组 | 字段 | 默认值 | 含义 |
 | --- | --- | --- | --- |
 | camera | zoom | 1 | 相机缩放；视口世界尺寸 = 渲染尺寸 ÷ zoom，范围 0.5–2 |

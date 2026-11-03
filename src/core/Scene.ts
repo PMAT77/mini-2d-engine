@@ -51,6 +51,9 @@ export abstract class Scene {
    * 当场景被切换到后台时调用
    */
   public onExit?(): void;
+  public onSuspend?(): void;
+  public onResume?(): void;
+  public onEnterPrepared?(): void;
 }
 
 /**
@@ -108,6 +111,28 @@ export class SceneManager {
  */
   public getCurrentScene(): Scene | null {
     return this.currentScene;
+  }
+
+  /** 候选已完成异步准备；同步激活失败时原场景仍有完整运行态可恢复。 */
+  public changePreparedScene(scene: Scene, commit: () => void): void {
+    if (this.isTransitioning || !scene.onEnterPrepared) throw new Error('场景尚未准备好');
+    const previous = this.currentScene;
+    scene._setGame(this.game);
+    let activated = false;
+    try {
+      previous?.onSuspend?.();
+      activated = true;
+      scene.onEnterPrepared();
+      commit();
+    } catch (error) {
+      try { if (activated) scene.onExit?.(); }
+      finally { previous?.onResume?.(); }
+      throw error;
+    }
+    this.currentScene = scene;
+    // 提交后的旧资源释放失败不能再销毁已经提交的目标场景。
+    try { previous?.onExit?.(); }
+    catch (error) { console.error('旧场景资源释放失败', error); }
   }
 
   /** 过渡期间需要完整清屏，因此主循环需要读取这个状态。 */

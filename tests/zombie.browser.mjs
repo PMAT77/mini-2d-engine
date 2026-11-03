@@ -146,16 +146,19 @@ try {
     await page.keyboard.down('g'); await page.evaluate(() => window.fixture.tick(1, .3)); await page.keyboard.up('g');
     assert.equal(await page.evaluate(() => window.fixture.scene.getEnemySystem().snapshot()[0].state), 'chase', 'G exposes the player in the same frame');
     const clientPoint = async (x,y) => page.evaluate(([x,y]) => { const f=window.fixture, v=f.scene.displayedView, r=f.game.renderer.ctx.canvas.getBoundingClientRect(); return {x:r.left+(x-v.x)*r.width/v.width,y:r.top+(y-v.y)*r.height/v.height}; }, [x,y]);
-    let point = await clientPoint(640,750); await page.mouse.move(point.x,point.y); await page.evaluate(() => window.fixture.tick(1,0));
+    const targetPoint = async () => { const p = await page.evaluate(() => window.exposedZombie.getCenter()); return clientPoint(p.x, p.y); };
+    let point = await targetPoint(); await page.mouse.move(point.x,point.y); await page.mouse.down({ button: 'right' }); await page.evaluate(() => window.fixture.tick(1,0));
     assert.equal(await page.locator('[data-crosshair="root"]').getAttribute('data-crosshair-target'), '1');
     await page.evaluate(() => { window.fixture.addEnemy('runner',1200,750,Math.PI); window.fixture.tick(1,0); });
     point = await clientPoint(1200,750); await page.mouse.move(point.x,point.y); await page.evaluate(() => window.fixture.tick(1,0));
     assert.equal(await page.locator('[data-crosshair="root"]').getAttribute('data-crosshair-target'), '0', 'hidden enemies do not reveal themselves through the reticle');
+    await page.mouse.up({ button: 'right' });
     await page.keyboard.press('F2'); await page.getByRole('tab', { name: '画面', exact: true }).click();
     const zoom = page.locator('[data-debug-field="graphics.camera.zoom"]'); await zoom.fill('1.2'); await zoom.press('Enter'); await page.keyboard.press('F2');
     await page.evaluate(() => { window.fixture.scene.camera.shake(12,.5,.7); window.fixture.tick(1,0); });
-    point = await clientPoint(640,750); await page.mouse.move(point.x,point.y); await page.evaluate(() => window.fixture.tick(1,0));
+    point = await targetPoint(); await page.mouse.move(point.x,point.y); await page.mouse.down({ button: 'right' }); await page.evaluate(() => window.fixture.tick(1,0));
     assert.equal(await page.locator('[data-crosshair="root"]').getAttribute('data-crosshair-target'), '1', 'recognized target feedback survives zoom and camera shake');
+    await page.mouse.up({ button: 'right' });
     const wall = await page.evaluate(() => {
       const f=window.fixture,p=f.scene.getPlayer(); p.x=1000-24.5;p.y=750-24.5;
       const z=f.addEnemy('shambler',1075,750,0); f.tick(1,0); f.scene.updatePerception(.3); f.scene.draw(f.game.renderer.ctx);

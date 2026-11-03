@@ -8,6 +8,7 @@ import { MEMORY_TILE_ORDER, type TerrainMemory } from "./TerrainMemory";
 import { TERRAIN_OUTLINE_RGB, TerrainOutlineCache } from "./TerrainOutlineCache";
 import type { PerceptionLight, TerrainSource, VisionDebugLayer, VisionObserver } from "./VisionTypes";
 import type { VisionRules } from "./VisionRules";
+import type { EnvironmentPerception } from '../core/EnvironmentLighting';
 
 const UNKNOWN_COLOR = "#05070a";
 const WATER_TYPES = new Set<TileTypeId>([
@@ -38,6 +39,8 @@ function memoryColor(type: TileTypeId): string {
  * 即使遮蔽边缘有少量像素溢出，隐藏实体也不会被画出来。
  */
 export class PerceptionRenderer {
+  private environment?: EnvironmentPerception;
+  setEnvironment(environment: EnvironmentPerception | undefined): void { this.environment = environment ? { ...environment } : undefined; }
   readonly map: TileMap;
   readonly terrain: TerrainSource;
   readonly rules: VisionRules;
@@ -152,6 +155,7 @@ export class PerceptionRenderer {
     if (smokeCtx && this.smokeCover) { smokeCtx.clearRect(0, 0, this.smokeCover.width, this.smokeCover.height); smokeCtx.drawImage(this.overlay, 0, 0); }
     // 3. 近身感知孔洞：硬墙遮挡，按 nearRevealAlpha 压暗而非完全去掉。
     if (wantsNear) this.punchNear(observer, cameraX, cameraY);
+    if (wantsLight && (this.environment?.naturalRange ?? 0) > 0) this.punchDaylight(observer, cameraX, cameraY);
 
     // 4. 照明孔洞：光到达、且观察者能看见的区域完全露出。
     if (wantsLight) for (const light of lights) this.punchLight(observer, light, cameraX, cameraY);
@@ -369,7 +373,7 @@ export class PerceptionRenderer {
     ctx.setTransform(this.scale, 0, 0, this.scale,
       -cameraX * this.scale, -cameraY * this.scale);
     ctx.fillStyle = "#fff";
-    ctx.fill(this.map.getGroundContour(cameraX, cameraY, viewWidth, viewHeight), "evenodd");
+    this.map.fillGround(ctx, cameraX, cameraY, viewWidth, viewHeight);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
@@ -435,6 +439,20 @@ export class PerceptionRenderer {
     ctx.globalCompositeOperation = "source-over";
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.punchScratch(1);
+  }
+
+  private punchDaylight(observer: VisionObserver, cameraX: number, cameraY: number): void {
+    const ctx = this.scratchCtx;
+    const radius = Math.min(observer.maxObservationRange, this.environment?.naturalRange ?? 0);
+    if (!ctx || !this.scratch || radius <= 0) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    ctx.clearRect(0, 0, this.scratch.width, this.scratch.height);
+    ctx.setTransform(this.scale, 0, 0, this.scale, -cameraX * this.scale, -cameraY * this.scale);
+    const gradient = ctx.createRadialGradient(observer.x, observer.y, Math.max(0, radius - 20), observer.x, observer.y, radius);
+    gradient.addColorStop(0, '#fff'); gradient.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = gradient;
+    ctx.beginPath(); ctx.arc(observer.x, observer.y, radius, 0, Math.PI * 2); ctx.fill();
+    this.carveGroundShadowQuads(ctx, this.shadowQuads(observer.x, observer.y, radius + 20), cameraX, cameraY);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); this.punchScratch(1);
   }
 
   private fillLight(ctx: CanvasRenderingContext2D, light: PerceptionLight): void {
@@ -531,15 +549,16 @@ export class PerceptionRenderer {
     shadowCtx.setTransform(this.scale, 0, 0, this.scale,
       -cameraX * this.scale, -cameraY * this.scale);
     shadowCtx.fillStyle = "#000";
+    shadowCtx.beginPath();
     for (const quad of quads) {
-      shadowCtx.beginPath();
       shadowCtx.moveTo(quad[0], quad[1]);
       shadowCtx.lineTo(quad[2], quad[3]);
       shadowCtx.lineTo(quad[4], quad[5]);
       shadowCtx.lineTo(quad[6], quad[7]);
       shadowCtx.closePath();
-      shadowCtx.fill();
     }
+    // One union fill prevents antialiased shared edges becoming bright rays at daylight contrast.
+    shadowCtx.fill();
     // 只保留地面上的阴影：墙/矿顶面不参与，避免墙顶出现深色三角。
     shadowCtx.setTransform(1, 0, 0, 1, 0, 0);
     shadowCtx.globalCompositeOperation = "destination-in";

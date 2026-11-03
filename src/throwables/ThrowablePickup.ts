@@ -9,11 +9,10 @@ export function drawThrowable(ctx: CanvasRenderingContext2D, type: ThrowableId, 
 }
 export class ThrowablePickup implements InteractablePickup {
   private static nextId = 0;
-  readonly id = `throwable-${++ThrowablePickup.nextId}`;
   readonly kind = 'throwable' as const;
   readonly pickupConfig;
   private collected = false;
-  constructor(readonly x: number, readonly y: number, readonly item: ThrowableId) {
+  constructor(readonly x: number, readonly y: number, readonly item: ThrowableId, readonly id = 'throwable-' + ++ThrowablePickup.nextId) {
     this.pickupConfig = { ...VACCINE_PICKUP_CONFIG, displayName: THROWABLE_ITEMS[item].name };
   }
   getPickupAnchor() { return { x: this.x + 10, y: this.y + 10 }; }

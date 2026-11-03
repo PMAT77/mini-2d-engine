@@ -6,11 +6,10 @@ import { drawHeldWeapon } from './WeaponVisuals';
 
 export class DroppedWeaponPickup implements InteractablePickup {
   private static nextId = 0;
-  readonly id = `dropped-weapon-${++DroppedWeaponPickup.nextId}`;
   readonly kind = 'weapon' as const;
   readonly pickupConfig;
   private collected = false;
-  constructor(readonly x: number, readonly y: number, readonly weapon: DroppedWeapon) {
+  constructor(readonly x: number, readonly y: number, readonly weapon: DroppedWeapon, readonly id = 'dropped-weapon-' + ++DroppedWeaponPickup.nextId) {
     this.pickupConfig = { ...VACCINE_PICKUP_CONFIG, displayName: weapon.name };
   }
   getPickupAnchor() { return { x: this.x + 10, y: this.y + 10 }; }

@@ -1,6 +1,10 @@
 import { Bounds, Collider, ColliderPose, Contact, CONTACT_TOLERANCE, Point, Polygon, collide, isAxisAlignedRectangle, isRotationInvariant, overlapsBounds, primitiveSeparation, transformCollider } from "./Collider";
 
-export interface CollisionObstacle { collider: Collider; col: number; row: number; }
+export interface CollisionObstacle {
+  collider: Collider; col: number; row: number;
+  ownerId?: string;
+  onProjectileHit?: (impact: import('../combat/CombatTypes').BulletImpact) => void;
+}
 export interface CollisionWorld { getCollisionObstacles(bounds: Bounds): CollisionObstacle[]; }
 export interface MotionResult { collider: Collider; contacts: Contact[]; rotationBlocked: boolean; exhausted: boolean; }
 export interface ShapeCastHit { fraction: number; obstacle: CollisionObstacle; normal: Point; }

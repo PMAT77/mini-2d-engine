@@ -1,0 +1,59 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P1-E 动态墙体验证</title>
+<style>body{margin:0;background:#101715;color:#dce6df;font:14px/1.5 system-ui}header{padding:16px 24px}h1{font-size:21px;margin:0 0 6px}p{margin:0;color:#a9bbb0}nav{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}button{background:#243a2e;color:inherit;border:1px solid #597363;padding:7px 12px;font:inherit;cursor:pointer}canvas{display:block;width:min(960px,100vw);height:auto}output{display:block;color:#ebcf93}</style>
+<header><h1>P1-E · 动态墙体技术验证</h1><p>左侧玩家与右侧丧尸共用实际碰撞系统；墙体同时进入弹道、视线、光照和导航查询。</p>
+<nav><button id="build">注册／重建墙体</button><button id="remove">移除墙体</button><button id="move">双方向前移动</button><button id="shoot">射击（伤害 10）</button><button id="reset">重置位置</button></nav><output id="status"></output></header>
+<canvas width="960" height="600" aria-label="动态墙体测试地图"></canvas>
+<script type="module">
+import { TileMap } from '/src/map/TileMap.ts';
+import { rectangleCollider } from '/src/physics/Collider.ts';
+import { ActorCollisionWorld } from '/src/physics/ActorCollisionWorld.ts';
+import { Player } from '/src/objects/Player.ts';
+import { EnemySystem } from '/src/enemies/EnemySystem.ts';
+import { Bullet } from '/src/objects/Bullet.ts';
+import { NavigationScheduler } from '/src/navigation/NavigationScheduler.ts';
+import { LightSource } from '/src/core/LightSource.ts';
+import { LightingSystem } from '/src/core/LightingSystem.ts';
+import { Vector2 } from '/src/math/Vector2.ts';
+import { hasLineOfSight } from '/src/vision/SightGeometry.ts';
+const canvas = document.querySelector('canvas'), ctx = canvas.getContext('2d');
+const surface = document.createElement('canvas'); surface.width = 960; surface.height = 600; const paint = surface.getContext('2d');
+const dpr = devicePixelRatio || 1; canvas.width = 960*dpr; canvas.height = 600*dpr;
+const map = new TileMap(24, 20, {seed:42,generateWater:false}); map.tiles.forEach(r=>r.fill('default')); map.tileHp.forEach(r=>r.fill(0)); map.invalidateNavigation();
+const actors = new ActorCollisionWorld(map), player = new Player(250-24.5,300-24.5), enemies = new EnemySystem(map,actors,42);
+actors.register('player',player); const enemy = enemies.add('shambler',{x:700,y:300},Math.PI);
+player.currentRotation = Math.PI;
+const lighting = new LightingSystem(); lighting.initialize(960,600); lighting.setAmbientLight('#252c32');
+const light = new LightSource(new Vector2(250,300),850,'#fff4e8',1,0); light.groundOnly = true; lighting.addLightSource(light);
+const terrain = {position:{x:-1200,y:-1000},color:'#cbd8e0',intensity:.16,shadowLength:30,softness:2};
+lighting.setTerrainLight(terrain);
+let hp=0, hits=0, active=false, release=()=>{};
+function reset(){player.x=250-24.5;player.y=300-24.5;enemy.x=700-enemy.getSize()/2;enemy.y=300-enemy.getSize()/2;actors.sync();render()}
+function build(){hp=30;active=true;release=map.registerSolid('prototype-wall',[rectangleCollider(450,150,40,300)],impact=>{hp-=impact.damage;hits++;if(hp<=0){active=false;release()}});render()}
+function remove(){release();active=false;hp=0;render()}
+function move(){
+ for(const [id,actor,dx] of [['player',player,500],[enemy.id,enemy,-500]]){
+   const before=actor.getCollider(), after=actors.resolve(id,before,{x:dx,y:0}).collider;
+   actor.x+=after.pose.x-before.pose.x;actor.y+=after.pose.y-before.pose.y;actors.sync();
+ } render();
+}
+function shoot(){const bullet=new Bullet(new Vector2(300,300),new Vector2(5000,0),10);bullet.update(.12,map);bullet.update(.12,map);render()}
+function route(){const nav=new NavigationScheduler(map),r=nav.request({id:'proof',start:{x:250,y:300},goal:{x:700,y:300},radius:23});for(let i=0;i<1000&&r.status==='pending';i++)nav.update(1/30);return r}
+function render(){
+ paint.fillStyle='#62736a';paint.fillRect(0,0,960,600);paint.strokeStyle='#718078';paint.lineWidth=1;
+ for(let x=0;x<960;x+=50){paint.beginPath();paint.moveTo(x,0);paint.lineTo(x,600);paint.stroke()}
+ for(let y=0;y<600;y+=50){paint.beginPath();paint.moveTo(0,y);paint.lineTo(960,y);paint.stroke()}
+ if(active){paint.fillStyle='#9c8057';paint.fillRect(450,150,40,300);paint.strokeStyle='#d6b77f';paint.strokeRect(450.5,150.5,39,299)}
+ paint.save();map.clipGround(paint,0,0,960,600);player.draw(paint);enemy.draw(paint);paint.restore();
+ lighting.prepareLightingMask(0,0,map);lighting.applyLighting(paint);
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.drawImage(surface,0,0);
+ document.querySelector('#status').textContent=`墙体 HP ${hp} · 真实命中 ${hits} 次 · 视线${hasLineOfSight(map,250,300,700,300)?'畅通':'被阻挡'} · 导航版本 ${map.getNavigationRevision()}`;
+}
+window.fixture={map,player,enemy,actors,lighting,light,canvas,build,remove,move,shoot,reset,route,render,
+ state:()=>({hp,hits,active,player:player.getCollider().pose.x,enemy:enemy.getCenter().x}),
+ terrain(active){lighting.setTerrainLight(active?terrain:null);render()},
+ pixel(x,y){return [...lighting.shadowCtx.getImageData(x,y,1,1).data]},
+};
+for(const [id,fn] of Object.entries({build,remove,move,shoot,reset})) document.querySelector('#'+id).onclick=fn;
+build();
+</script></html>

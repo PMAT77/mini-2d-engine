@@ -90,6 +90,7 @@ function mergePolygons(polygons: Vertex[][]): Vertex[][] {
 
 /** Static water in tile coordinates; only the requested cells are scaled for physics. */
 export class WaterTerrain {
+  private highlightImages = new Map<Lake, HTMLCanvasElement>();
   readonly lakes: Lake[] = [];
   private tiles = new Map<number, WaterTile>();
   private scaled = new Map<number, WaterCell>();
@@ -158,6 +159,7 @@ export class WaterTerrain {
     this.scale = size;
     this.scaled.clear();
     this.images.clear();
+    this.highlightImages.clear();
   }
 
   getCell(col: number, row: number, size: number): WaterCell | undefined {
@@ -226,5 +228,31 @@ export class WaterTerrain {
       if (clippedWidth > 0 && clippedHeight > 0) ctx.drawImage(image, left - x, top - y, clippedWidth, clippedHeight,
         left - cameraX, top - cameraY, clippedWidth, clippedHeight);
     }
+  }
+
+  /** Stable, sparse glints clipped by the exact cached lake alpha; no per-frame pixel reads. */
+  drawHighlights(ctx: CanvasRenderingContext2D, cameraX: number, cameraY: number, width: number, height: number, size: number, intensity: number): void {
+    if (intensity <= 0) return;
+    this.ensureScale(size);
+    ctx.save(); ctx.globalAlpha *= intensity;
+    for (const lake of this.lakes) {
+      const b = lake.bounds, x = b.x * size - 4, y = b.y * size - 4, w = Math.ceil(b.width * size) + 8, h = Math.ceil(b.height * size) + 8;
+      if (x > cameraX + width || y > cameraY + height || x + w < cameraX || y + h < cameraY) continue;
+      let image = this.highlightImages.get(lake);
+      if (!image) {
+        const water = this.images.get(lake); if (!water) continue;
+        image = document.createElement('canvas'); image.width = w; image.height = h;
+        const paint = image.getContext('2d')!, random = seededRandom(Math.round(lake.center.x * 8191 + lake.center.y * 131071));
+        paint.strokeStyle = '#fff'; paint.lineWidth = 1.4; paint.beginPath();
+        const count = Math.min(400, Math.ceil(w * h / 2200));
+        for (let i = 0; i < count; i++) { const px = random() * w, py = random() * h, length = 5 + random() * 19;
+          paint.moveTo(px, py); paint.lineTo(px + length * .8, py + length * .6); }
+        paint.stroke(); paint.globalCompositeOperation = 'destination-in'; paint.drawImage(water, 0, 0);
+        this.highlightImages.set(lake, image);
+      }
+      const left = Math.max(x, cameraX), top = Math.max(y, cameraY), cw = Math.min(x + w, cameraX + width) - left, ch = Math.min(y + h, cameraY + height) - top;
+      if (cw > 0 && ch > 0) ctx.drawImage(image, left - x, top - y, cw, ch, left - cameraX, top - cameraY, cw, ch);
+    }
+    ctx.restore();
   }
 }

@@ -1,4 +1,12 @@
 {
+  "dayNight": {
+    "mode": "auto",
+    "groundColor": "#596057",
+    "wallColor": "#747870",
+    "day": { "ambientColor": "#E9E5D9", "ambientIntensity": 0.72, "sunColor": "#FFE9CA", "sunIntensity": 0.24, "shadowScale": 0.65, "shadowOpacity": 0.85, "softnessScale": 0.08, "edgeIntensity": 0.10, "waterHighlight": 0.08, "metalHighlight": 0.04, "hazeOpacity": 0.015, "artificialWeight": 0.30 },
+    "dusk": { "ambientColor": "#91A4C4", "ambientIntensity": 0.40, "sunColor": "#FFB36B", "sunIntensity": 0.38, "shadowScale": 2.2, "shadowOpacity": 0.95, "softnessScale": 0.12, "edgeIntensity": 0.18, "waterHighlight": 0.12, "metalHighlight": 0.07, "hazeOpacity": 0.025, "artificialWeight": 0.65 },
+    "night": { "ambientColor": "#879FBE", "ambientIntensity": 0.28, "sunColor": "#FFB36B", "sunIntensity": 0, "shadowScale": 0, "shadowOpacity": 0, "softnessScale": 0.12, "edgeIntensity": 0, "waterHighlight": 0.04, "metalHighlight": 0.03, "hazeOpacity": 0.025, "artificialWeight": 1 }
+  },
   "camera": {
     "zoom": 1
   },

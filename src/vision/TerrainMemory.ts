@@ -1,5 +1,6 @@
 import { TILE_TYPES, TileTypeId } from '../map/TileType';
 import type { TerrainSource } from './VisionTypes';
+import type { ExplorationState } from '../campaign/CampaignState';
 
 /** 稳定的字符串枚举索引；不能把 TileTypeId 直接当 Uint8Array 的下标。 */
 export const MEMORY_TILE_ORDER: readonly TileTypeId[] = [
@@ -54,6 +55,30 @@ export class TerrainMemory {
 
   isCaptured(col: number, row: number): boolean {
     return this.inBounds(col, row) && this.captured[row * this.cols + col] === 1;
+  }
+
+  snapshot(): ExplorationState['observedTiles'] {
+    const result: ExplorationState['observedTiles'] = [];
+    this.captured.forEach((value, index) => {
+      if (value) result.push({ col: index % this.cols, row: Math.floor(index / this.cols),
+        tileTypeId: MEMORY_TILE_ORDER[this.types[index]], damageStage: this.damage[index] });
+    });
+    return result;
+  }
+  restore(tiles: ExplorationState['observedTiles']): void {
+    const seen = new Set<number>();
+    for (const t of tiles) {
+      const key = t.row * this.cols + t.col;
+      if (!this.inBounds(t.col, t.row) || !TILE_INDEX.has(t.tileTypeId) || !Number.isInteger(t.damageStage)
+        || t.damageStage < 0 || t.damageStage > 3 || seen.has(key)) throw new Error('地形记忆快照无效');
+      seen.add(key);
+    }
+    this.types.fill(MEMORY_UNKNOWN_TILE); this.damage.fill(0); this.captured.fill(0);
+    for (const t of tiles) {
+      const i = t.row * this.cols + t.col;
+      this.types[i] = TILE_INDEX.get(t.tileTypeId)!; this.damage[i] = t.damageStage; this.captured[i] = 1;
+    }
+    this.revision++;
   }
 
   get(col: number, row: number): MemoryTile | null {

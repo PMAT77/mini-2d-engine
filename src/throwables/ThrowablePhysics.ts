@@ -15,7 +15,7 @@ export function launchThrowable(id: number, kind: ThrowableId, origin: Point, ta
   const dx = target.x - origin.x, dy = target.y - origin.y, d = Math.hypot(dx, dy);
   const range = Math.min(d, C.maxDistance), time = .45 + .45 * range / C.maxDistance;
   const scale = d > 0 ? range / d / time : 0;
-  return { id, kind, ...origin, vx: dx * scale, vy: dy * scale, z: C.releaseHeight,
+  return { id, kind, x: origin.x, y: origin.y, vx: dx * scale, vy: dy * scale, z: C.releaseHeight,
     vz: (.5 * C.gravity * time * time - C.releaseHeight) / time, rotation: 0,
     fuse, landed: false, resting: false, smokeAge: -1, dead: false };
 }

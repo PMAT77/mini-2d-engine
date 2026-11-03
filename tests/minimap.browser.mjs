@@ -30,11 +30,16 @@ try {
     // Let the one outstanding animation frame finish before controlled rendering.
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
 
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
       const sameColor = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
       const bright = pixel => pixel[0] >= 200 && pixel[1] >= 200 && pixel[2] >= 200;
       const game = window.minimapGame;
       const scene = game.sceneManager.getCurrentScene(), screen = game.renderer.ctx;
+      // This case measures the original night exploration footprint. Daylight deliberately
+      // reveals a larger region, so start with fresh night memory instead of reusing noon.
+      const { PerceptionSystem } = await import('/src/vision/PerceptionSystem.ts');
+      scene.setEnvironmentPreview(960); scene.setAmbientLight('rgba(214,226,240,0.35)');
+      scene.perception = new PerceptionSystem({ map: scene.map, terrain: scene.map, rules: scene.visionRules });
       scene.handleResize();
       const hud = scene.minimap, layout = hud.getLayout();
       // A few simulated frames let perception, exploration and the marker store settle.

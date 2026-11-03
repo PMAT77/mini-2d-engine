@@ -17,6 +17,7 @@ export class GoldPickup extends GameObject {
   constructor(private startX: number, private startY: number, private targetX: number, private targetY: number) {
     super(startX, startY);
   }
+  getRestPosition(): Point { return { x: this.targetX, y: this.targetY }; }
 
   update(delta: number): void {
     if (!Number.isFinite(delta) || delta < 0) return;

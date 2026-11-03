@@ -17,6 +17,8 @@ export class LightSource {
   shadowTerrain = false;
   /** 只照亮地面和水域：有高度的地形顶面不参与该光源，避免灯光“爬上”墙顶。 */
   groundOnly = false;
+  /** Rendering only: daylight reduces contrast without changing logical illumination. */
+  visualWeight = 1;
 
   /**
    * 构造函数

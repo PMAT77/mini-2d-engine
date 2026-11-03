@@ -2,6 +2,8 @@ import { LightSource } from "./LightSource";
 import type { ConeLight } from "./ConeLight";
 import type { ShadowEdge, TileMap } from "../map/TileMap";
 import { getTileType } from "../map/TileType";
+import { appendDirectionalShadow, type DirectionalLight } from './DirectionalShadow';
+import type { EnvironmentState } from './EnvironmentLighting';
 
 const TAU = Math.PI * 2;
 const RGB_RE = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i;
@@ -108,6 +110,12 @@ function hashFloat(hash: number, value: number): number {
 }
 
 export class LightingSystem {
+  private directionalLight: DirectionalLight | null = null;
+  private solarChunks = new Map<string, { canvas: HTMLCanvasElement; signature: string }>();
+  private solarMap?: TileMap;
+  private solarMask?: HTMLCanvasElement;
+  private directionalBuilds = 0;
+  private surfaceResponse?: HTMLCanvasElement;
   private lightSources: LightSource[] = [];
   private terrainLight: TerrainLight | null = null;
   private terrainShadowCanvas: HTMLCanvasElement | null = null;
@@ -193,22 +201,32 @@ export class LightingSystem {
     this.lightSources = this.lightSources.filter(source => source !== light);
     this.shadowCaches.delete(light);
   }
-  clearAllLights(): void { this.lightSources = []; this.terrainLight = null; this.shadowCaches = new WeakMap(); this.clearEnvironmentCache(); }
-  setAmbientLight(color: string): void { this.ambientLight = color; this.ambientFill = undefined; }
+  clearAllLights(): void { this.lightSources = []; this.terrainLight = null; this.directionalLight = null; this.shadowCaches = new WeakMap(); this.clearEnvironmentCache(); this.solarChunks.clear(); this.solarMap = undefined; }
+  setAmbientLight(color: string): void { if (color === this.ambientLight) return; this.ambientLight = color; this.ambientFill = undefined; }
+  setDirectionalLight(light: DirectionalLight | null): void {
+    if (light && (![light.direction.x, light.direction.y, light.intensity, light.shadowLength, light.shadowOpacity, light.softness].every(Number.isFinite)
+      || Math.hypot(light.direction.x, light.direction.y) <= 0 || light.intensity < 0 || light.intensity > 1 || light.shadowLength < 0
+      || light.shadowOpacity < 0 || light.shadowOpacity > 1 || light.softness < 0 || !/^#[a-f\d]{6}$/i.test(light.color))) throw new Error('太阳方向光参数无效');
+    const magnitude = light ? Math.hypot(light.direction.x, light.direction.y) : 1;
+    this.directionalLight = light ? { ...light, direction: { x: light.direction.x / magnitude, y: light.direction.y / magnitude } } : null;
+  }
   setTerrainLight(light: TerrainLight | null): void {
     if (light && (![light.position.x, light.position.y, light.intensity, light.shadowLength, light.softness].every(Number.isFinite)
       || light.intensity < 0 || light.intensity > 1 || light.shadowLength < 0 || light.softness < 0
       || !/^#[a-f\d]{6}$/i.test(light.color))) throw new Error("地形光源需要有限坐标、六位十六进制颜色、0–1 强度和非负投影尺寸");
+    if (!light && this.terrainLight) this.clearEnvironmentCache();
     this.terrainLight = light ? { ...light, position: { ...light.position } } : null;
   }
-  getLightCount(): number { return this.lightSources.length + (this.terrainLight ? 1 : 0); }
+  getLightCount(): number { return this.lightSources.length + (this.terrainLight ? 1 : 0) + (this.directionalLight && this.directionalLight.intensity > 0 ? 1 : 0); }
   update(delta: number): void { this.lightSources.forEach(light => light.update(delta)); }
 
   /** Diagnostics for the F3 panel and performance tests. */
-  getStats(): { lightsDrawn: number; spriteRebuilds: number; softShadowBuilds: number; terrainShadowRasterizations: number; environmentChunks: number; environmentCacheBytes: number } {
+  getStats(): { lightsDrawn: number; spriteRebuilds: number; softShadowBuilds: number; terrainShadowRasterizations: number; environmentChunks: number; environmentCacheBytes: number; directionalShadowRasterizations: number; directionalChunks: number } {
     let bytes = 0;
     for (const { canvas } of this.environmentChunks.values()) bytes += canvas.width * canvas.height * 4;
-    return { ...this.stats, environmentChunks: this.environmentChunks.size, environmentCacheBytes: bytes };
+    for (const { canvas } of this.solarChunks.values()) bytes += canvas.width * canvas.height * 4;
+    return { ...this.stats, environmentChunks: this.environmentChunks.size, environmentCacheBytes: bytes,
+      directionalShadowRasterizations: this.directionalBuilds, directionalChunks: this.solarChunks.size };
   }
 
   private clearEnvironmentCache(): void {
@@ -217,10 +235,64 @@ export class LightingSystem {
     this.environmentMap = undefined;
   }
 
+  /** Cache colourless world-aligned solar occlusion, independently of continuously changing colour. */
+  private prepareDirectionalLight(cameraX: number, cameraY: number, map?: TileMap): void {
+    const light = this.directionalLight, ctx = this.shadowCtx!;
+    if (!light || light.intensity <= 0) return;
+    const width = this.shadowCanvas!.width, height = this.shadowCanvas!.height;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = light.intensity;
+    ctx.fillStyle = light.color; ctx.fillRect(0, 0, width, height); ctx.restore();
+    if (!map || light.shadowLength <= 0 || light.shadowOpacity <= 0) return;
+    if (this.solarMap !== map) { this.solarChunks.clear(); this.solarMap = map; }
+    const span = ENVIRONMENT_CHUNK_SIZE, length = Math.round(light.shadowLength), softness = Math.round(light.softness * 2) / 2;
+    const padding = Math.ceil((length + softness * 3 + map.tileSize * 2 + 4) / 2) * 2, pixels = span + padding * 2;
+    const left = Math.floor(cameraX / span), top = Math.floor(cameraY / span);
+    const right = Math.floor((cameraX + width) / span), bottom = Math.floor((cameraY + height) / span);
+    this.solarMask ??= document.createElement('canvas');
+    if (this.solarMask.width !== Math.ceil(width / 2)) this.solarMask.width = Math.ceil(width / 2);
+    if (this.solarMask.height !== Math.ceil(height / 2)) this.solarMask.height = Math.ceil(height / 2);
+    const mask = this.solarMask.getContext('2d')!;
+    mask.setTransform(1, 0, 0, 1, 0, 0); mask.globalCompositeOperation = 'source-over'; mask.globalAlpha = 1;
+    mask.clearRect(0, 0, this.solarMask.width, this.solarMask.height);
+    for (let row = top; row <= bottom; row++) for (let col = left; col <= right; col++) {
+      const key = `${col},${row}`, x = col * span - padding, y = row * span - padding, size = map.tileSize;
+      let signature = `${length}|${softness}|${light.direction.x},${light.direction.y}|${size}|${map.getSolidGeometryRevision()}|`;
+      for (let r = Math.floor(y / size); r <= Math.ceil((y + pixels) / size); r++) for (let c = Math.floor(x / size); c <= Math.ceil((x + pixels) / size); c++) {
+        const tile = map.tiles[r]?.[c]; signature += tile && getTileType(tile).blocksLight ? tile === 'wall' ? 'W' : 'M' : '.';
+      }
+      let chunk = this.solarChunks.get(key);
+      if (!chunk || chunk.signature !== signature) {
+        const raw = document.createElement('canvas'); raw.width = raw.height = pixels / 2;
+        const paint = raw.getContext('2d')!; paint.setTransform(.5, 0, 0, .5, -x / 2, -y / 2);
+        paint.fillStyle = '#fff'; paint.beginPath();
+        for (const edge of map.getShadowEdges(x + pixels / 2, y + pixels / 2, pixels * Math.SQRT1_2)) {
+          const dx = edge.bx - edge.ax, dy = edge.by - edge.ay, norm = Math.hypot(dx, dy);
+          const c = Math.floor(((edge.ax + edge.bx) / 2 - dy / norm * .25) / size);
+          const r = Math.floor(((edge.ay + edge.by) / 2 + dx / norm * .25) / size);
+          const tile = map.tiles[r]?.[c], heightScale = tile && tile !== 'wall' && getTileType(tile).blocksLight ? .6 : 1;
+          appendDirectionalShadow(paint, edge, light.direction, length * heightScale);
+        }
+        paint.fill();
+        const canvas = chunk?.canvas ?? document.createElement('canvas'); canvas.width = canvas.height = pixels / 2;
+        const target = canvas.getContext('2d')!; target.filter = `blur(${softness / 2}px)`; target.drawImage(raw, 0, 0); target.filter = 'none';
+        chunk = { canvas, signature }; this.directionalBuilds++;
+      }
+      this.solarChunks.delete(key); this.solarChunks.set(key, chunk);
+      mask.drawImage(chunk.canvas, padding / 2, padding / 2, span / 2, span / 2,
+        (col * span - cameraX) / 2, (row * span - cameraY) / 2, span / 2, span / 2);
+    }
+    const limit = (right - left + 3) * (bottom - top + 3);
+    while (this.solarChunks.size > limit) { const key = this.solarChunks.keys().next().value!; this.solarChunks.get(key)!.canvas.width = 0; this.solarChunks.delete(key); }
+    mask.globalCompositeOperation = 'source-in'; mask.fillStyle = this.ambientComposite() ?? '#000';
+    mask.fillRect(0, 0, this.solarMask.width, this.solarMask.height); mask.globalCompositeOperation = 'source-over';
+    ctx.save(); ctx.translate(-cameraX, -cameraY); map.clipGround(ctx, cameraX, cameraY, width, height);
+    ctx.translate(cameraX, cameraY); ctx.globalAlpha = light.shadowOpacity; ctx.drawImage(this.solarMask, 0, 0, width, height); ctx.restore();
+  }
+
   /** Exact local occupancy signature also observes direct public tile-array edits. */
   private environmentSignature(map: TileMap, x: number, y: number, pixels: number): string {
     const light = this.terrainLight!, size = map.tileSize;
-    let signature = `${this.ambientLight}|${light.color}|${light.intensity}|${light.position.x},${light.position.y}|${light.shadowLength}|${light.softness}|${size}|`;
+    let signature = `${this.ambientLight}|${light.color}|${light.intensity}|${light.position.x},${light.position.y}|${light.shadowLength}|${light.softness}|${size}|${map.getSolidGeometryRevision()}|`;
     const left = Math.floor(x / size) - 2, top = Math.floor(y / size) - 2;
     const right = Math.ceil((x + pixels) / size) + 2, bottom = Math.ceil((y + pixels) / size) + 2;
     for (let row = top; row <= bottom; row++) for (let col = left; col <= right; col++) {
@@ -317,19 +389,12 @@ export class LightingSystem {
     return maxX > minX && maxY > minY ? { x: minX, y: minY, width: maxX - minX, height: maxY - minY } : null;
   }
 
-  /** Protect full-resolution terrain tops after any shadow filtering. Context uses world coordinates. */
-  private clipGround(ctx: CanvasRenderingContext2D, ground: Path2D): void {
-    // The contour already contains the viewport rectangle plus every solid top, cached across
-    // frames and invalidated by tile edits, so per-light polygon queries disappear.
-    ctx.clip(ground, "evenodd");
-  }
-
   /**
    * Half-resolution ground silhouette used as an alpha mask. Clipping a full-resolution
    * upscale through the contour forces a software path mask (several ms at 1080p), while
    * masking the already half-resolution accum buffer is a cheap `destination-in`.
    */
-  private groundMask(ground: Path2D, cameraX: number, cameraY: number, rect: PixelRect): CanvasRenderingContext2D | null {
+  private groundMask(ground: Path2D, cameraX: number, cameraY: number, rect: PixelRect, map: TileMap): CanvasRenderingContext2D | null {
     const width = this.accumCanvas?.width ?? 0, height = this.accumCanvas?.height ?? 0;
     if (width <= 0 || height <= 0) return null;
     if (!this.groundMaskCanvas) {
@@ -352,7 +417,7 @@ export class LightingSystem {
     // The contour is world-space; map it into the half-resolution camera frame.
     ctx.setTransform(1 / scale, 0, 0, 1 / scale, -cameraX / scale, -cameraY / scale);
     ctx.fillStyle = "#fff";
-    ctx.fill(ground, "evenodd");
+    map.fillGround(ctx, cameraX, cameraY, this.shadowCanvas!.width, this.shadowCanvas!.height, ground);
     ctx.restore();
     return ctx;
   }
@@ -425,7 +490,7 @@ export class LightingSystem {
           shadowCtx.globalAlpha = 1;
           // Shadows are authored in world space; the frame buffer is in camera space.
           shadowCtx.translate(-cameraX, -cameraY);
-          if (ground) shadowCtx.clip(ground, "evenodd");
+          if (ground) map.clipGround(shadowCtx, cameraX, cameraY, width, height, ground);
           shadowCtx.imageSmoothingEnabled = true;
           // Source is half resolution: map both rects back to world space (x2).
           shadowCtx.drawImage(canvas, sx, sy, ex - sx, ey - sy,
@@ -707,6 +772,7 @@ export class LightingSystem {
 
     const spriteBuildsBefore = this.spriteBuildsTotal;
     if (!environmentDrawn) this.prepareTerrainLight(cameraX, cameraY, map, ground);
+    this.prepareDirectionalLight(cameraX, cameraY, map);
     mark = this.markProfile("terrainLight", mark);
 
     // Every light paints into the same scratch buffer, so start from a clean one and
@@ -739,7 +805,7 @@ export class LightingSystem {
       if (ex <= sx || ey <= sy) continue;
       const scratchRect = { x: sx, y: sy, width: ex - sx, height: ey - sy };
 
-      const intensity = light.getIntensity();
+      const intensity = light.getIntensity() * Math.max(0, Math.min(2, light.visualWeight));
       const sprite = this.lightSprite(light, radius);
       let edges: ShadowEdge[] = [];
       if (map) edges = map.getShadowEdges(pos.x, pos.y, radius + light.getSourceRadius());
@@ -778,7 +844,7 @@ export class LightingSystem {
         full.globalAlpha = 1;
         full.save();
         full.translate(-cameraX, -cameraY);
-        if (!light.shadowTerrain && !light.groundOnly && ground) this.clipGround(full, ground);
+        if (!light.shadowTerrain && !light.groundOnly && ground) map!.clipGround(full, cameraX, cameraY, width, height, ground);
         full.globalCompositeOperation = "destination-out";
         full.fillStyle = "black";
         LightingSystem.drawShadows(full, edges, pos.x, pos.y, radius);
@@ -864,7 +930,7 @@ export class LightingSystem {
         lightCtx.translate(-cameraX, -cameraY);
         // Ground-only lights are clipped once, when the whole accumulation buffer is
         // composited; clipping every such light here was a redundant full-path clip.
-        if (!light.shadowTerrain && !light.groundOnly && ground) this.clipGround(lightCtx, ground);
+        if (!light.shadowTerrain && !light.groundOnly && ground) map!.clipGround(lightCtx, cameraX, cameraY, width, height, ground);
         lightCtx.globalCompositeOperation = "destination-out";
         lightCtx.fillStyle = "black";
         if (soft) {
@@ -922,7 +988,7 @@ export class LightingSystem {
         // Mask the half-resolution accumulation before it is upscaled: clipping the
         // full-resolution blit through the contour costs several ms at 1080p, while a
         // `destination-in` on the small buffer is a fraction of that.
-        const mask = this.groundMask(ground, cameraX, cameraY, dirty);
+        const mask = this.groundMask(ground, cameraX, cameraY, dirty, map!);
         if (mask) {
           accum.save();
           accum.setTransform(1, 0, 0, 1, 0, 0);
@@ -943,7 +1009,7 @@ export class LightingSystem {
         // Fallback for environments without an offscreen canvas: full-resolution clip.
         // The contour is world-space: clip through it, then return to camera space for the blit.
         ctx.translate(-cameraX, -cameraY);
-        ctx.clip(ground, "evenodd");
+        map!.clipGround(ctx, cameraX, cameraY, width, height, ground);
         ctx.translate(cameraX, cameraY);
       }
       ctx.drawImage(this.accumCanvas, dirty.x, dirty.y, dirty.width, dirty.height,
@@ -1032,5 +1098,30 @@ export class LightingSystem {
     ctx.globalCompositeOperation = "multiply";
     ctx.drawImage(this.shadowCanvas, 0, 0);
     ctx.restore();
+  }
+
+  drawSurfaceResponse(ctx: CanvasRenderingContext2D, map: TileMap, x: number, y: number, state: EnvironmentState): void {
+    if (state.waterHighlight <= 0 && state.metalHighlight <= 0) return;
+    const width = ctx.canvas.width, height = ctx.canvas.height;
+    const bounds = map.getSurfaceHighlightBounds(x, y, width, height); if (!bounds) return;
+    const sx = Math.floor((bounds.x - x) / 2), sy = Math.floor((bounds.y - y) / 2);
+    const w = Math.ceil((bounds.x + bounds.width - x) / 2) - sx, h = Math.ceil((bounds.y + bounds.height - y) / 2) - sy;
+    this.surfaceResponse ??= document.createElement('canvas');
+    const canvas = this.surfaceResponse;
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    const paint = canvas.getContext('2d')!;
+    paint.setTransform(1, 0, 0, 1, 0, 0); paint.globalCompositeOperation = 'source-over'; paint.clearRect(0, 0, canvas.width, canvas.height);
+    paint.setTransform(.5, 0, 0, .5, 0, 0); map.drawSurfaceHighlights(paint, x + sx * 2, y + sy * 2, w * 2, h * 2, state);
+    paint.setTransform(1, 0, 0, 1, 0, 0);
+    if (state.sunIntensity <= 0) {
+      // Artificial-light accumulator already contains exact soft occlusion and the ground mask.
+      paint.globalCompositeOperation = 'destination-in';
+      if (this.accumCanvas) paint.drawImage(this.accumCanvas, sx, sy, w, h, 0, 0, w, h); else paint.clearRect(0, 0, canvas.width, canvas.height);
+    } else if (this.solarMask && this.directionalLight) {
+      paint.globalCompositeOperation = 'destination-out'; paint.globalAlpha = state.shadowOpacity;
+      paint.drawImage(this.solarMask, sx, sy, w, h, 0, 0, w, h); paint.globalAlpha = 1;
+    }
+    paint.globalCompositeOperation = 'source-over'; ctx.drawImage(canvas, sx * 2, sy * 2, w * 2, h * 2);
   }
 }

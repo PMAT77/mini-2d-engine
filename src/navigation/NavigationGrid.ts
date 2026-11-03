@@ -1,5 +1,7 @@
 import type { TileMap } from '../map/TileMap';
-import { circleCollider } from '../physics/Collider';
+import { circleCollider, collide } from '../physics/Collider';
+import type { Collider } from '../physics/Collider';
+import { castCollider } from '../physics/Motion';
 import type { Point } from '../physics/Collider';
 
 export interface NavPoint extends Point { key: number; }
@@ -11,7 +13,7 @@ export class NavigationGrid {
   private nodes = new Map<number, boolean>();
   private edges = new Map<string, number>();
   readonly revision: number;
-  constructor(readonly map: TileMap, readonly radius: number) {
+  constructor(readonly map: TileMap, readonly radius: number, private readonly proposed: readonly Collider[] = []) {
     if (!Number.isFinite(radius) || radius <= 0) throw new Error('导航半径必须为正有限数');
     this.revision = map.getNavigationRevision();
   }
@@ -23,7 +25,8 @@ export class NavigationGrid {
   walkable(p: Point): boolean {
     if (!this.contains(p)) return false;
     const body = circleCollider(p.x, p.y, this.radius);
-    return this.map.isShapeWalkable(body) && this.map.getShapeSpeedFactor(body) > 0;
+    return this.map.isShapeWalkable(body) && !this.proposed.some(collider => collide(body, collider).some(c => c.depth > 1e-7))
+      && this.map.getShapeSpeedFactor(body) > 0;
   }
   point(key: number): NavPoint {
     const tile = this.map.tileSize;
@@ -41,6 +44,8 @@ export class NavigationGrid {
     if (!this.walkable(a) || !this.walkable(b)) return Infinity;
     const dx = b.x - a.x, dy = b.y - a.y;
     if (this.map.castShape(circleCollider(a.x, a.y, this.radius), { x: dx, y: dy })) return Infinity;
+    if (this.proposed.length && castCollider({ getCollisionObstacles: () => this.proposed.map(collider => ({ collider, col: -1, row: -1 })) },
+      circleCollider(a.x, a.y, this.radius), { x: dx, y: dy })) return Infinity;
     const length = Math.hypot(dx, dy), count = Math.max(1, Math.ceil(length / (this.map.tileSize / 4)));
     let total = 0;
     for (let i = 0; i <= count; i++) {

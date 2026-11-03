@@ -2,6 +2,8 @@ import type { Player } from '../objects/Player';
 import type { PlayerDamageResult } from '../combat/PlayerDamage';
 import { InfectionController } from './InfectionController';
 import { ConsumableInventory } from './ConsumableInventory';
+import { parsePersistentPlayer } from '../campaign/CampaignState';
+import type { PersistentPlayerState } from '../campaign/CampaignState';
 export interface VaccineUseContext { paused: boolean; rolling: boolean; reloading: boolean; interacting: boolean; actionInput: boolean; source?: 'gameplay' | 'backpack'; }
 export interface SurvivalSnapshot { alive: boolean; infected: boolean; vaccines: number; infectionRemainder: number; }
 
@@ -43,6 +45,11 @@ export class PlayerSurvivalSystem {
     this.inventory.consumeVaccine(); this.infection.clear(); return true;
   }
   resetLife(): void { this.player.resetLifeState(); this.infection.clear(); }
+  restore(value: PersistentPlayerState): void {
+    const state = parsePersistentPlayer(value);
+    this.infection.restore(state.infection.infected, state.infection.remainderSeconds);
+    this.inventory.restore(state.consumables);
+  }
   snapshot(): SurvivalSnapshot { return { alive: this.player.isAlive(), infected: this.infection.isInfected(), vaccines: this.inventory.getVaccines(), infectionRemainder: this.infection.getRemainder() }; }
   dispose(): void { this.infection.clear(); this.inventory.clear(); }
 }

@@ -23,8 +23,12 @@ import { drawCharacterShadow } from "../animation2d/render/CharacterCanvasRender
 import type { RollPose } from "./RollPose";
 import { PlayerPunchController } from '../combat/PlayerPunchController';
 import { sampleBoxingPose } from './animation/PlayerPunchClip';
+import { parsePersistentPlayer, parsePersistentFirearm } from '../campaign/CampaignState';
+import type { PersistentPlayerState, PersistentFirearm, Pose } from '../campaign/CampaignState';
 
 interface WeaponState {
+  instanceId: string;
+  definitionId: string;
   slot: WeaponSlot;
   name: string;
   kind: WeaponKind;
@@ -63,6 +67,13 @@ interface WeaponState {
 
 /** 地面武器保存独立快照，丢弃不补弹，也不丢失枪械参数。 */
 export type DroppedWeapon = Readonly<WeaponState & { slot: 'primary' | 'secondary' }>;
+
+export function captureFirearm(weapon: DroppedWeapon): PersistentFirearm {
+  return { instanceId: weapon.instanceId, definitionId: weapon.definitionId,
+    attributes: { damage: weapon.damage, fireIntervalSeconds: weapon.fireRate, bulletSpeed: weapon.bulletSpeed,
+      knockbackImpulse: weapon.knockbackImpulse, magazineCapacity: weapon.magazineSize, reloadSeconds: weapon.reloadDuration },
+    magazineAmmo: weapon.magazineAmmo, chambered: weapon.chambered, reserveAmmo: weapon.reserveAmmo };
+}
 
 const WEAPON_SWAP_DURATION = 0.28;
 /** 装填比整匣更换更慢：每发耗时按缺弹比例换算。 */
@@ -365,6 +376,7 @@ export class Player extends Entities {
   // 弹药与换弹状态按槽各自保存，切枪时通过 accessor 读写当前槽，进度不会丢失。
   private readonly weapons: Record<WeaponSlot, WeaponState> = {
     primary: {
+      instanceId: 'starter-primary', definitionId: 'prototype-primary',
       slot: "primary", name: "冲锋枪", kind: "firearm",
       damage: 16, fireRate: 0.075, bulletSpeed: 2800, knockbackImpulse: 200,
       magazineSize: 30, magazineAmmo: 30, chambered: true, reserveAmmo: null,
@@ -373,6 +385,7 @@ export class Player extends Entities {
       reloadSound: "/audio/weapons/Reload/Type_5/Pistol_Reload_Type_5_Full.wav", reloadRate: 2,
     },
     secondary: {
+      instanceId: 'starter-secondary', definitionId: 'prototype-secondary',
       slot: "secondary", name: "格洛克手枪", kind: "firearm",
       damage: 10, fireRate: 0.2, bulletSpeed: 2600, knockbackImpulse: 280,
       magazineSize: 6, magazineAmmo: 6, chambered: true, reserveAmmo: null,
@@ -381,6 +394,7 @@ export class Player extends Entities {
       reloadSound: "/audio/weapons/Reload/Type_1/Pistol_Reload_Type_1_Full.wav", reloadRate: 2,
     },
     melee: {
+      instanceId: 'starter-melee', definitionId: 'unarmed',
       slot: "melee", name: "空手", kind: "empty",
       damage: 0, fireRate: 0.2, bulletSpeed: 0, knockbackImpulse: 0,
       magazineSize: 0, magazineAmmo: 0, chambered: false, reserveAmmo: null,
@@ -1571,6 +1585,54 @@ export class Player extends Entities {
   }
 
   hasWeapon(slot: WeaponSlot): boolean { return slot === 'melee' || this.ownedFirearms.has(slot); }
+
+  capturePersistentCore() {
+    const capture = (slot: 'primary' | 'secondary') => this.hasWeapon(slot)
+      ? captureFirearm({ ...this.weapons[slot], slot }) : null;
+    return { hp: this.health, baseMaxHp: this.maxHealth, stamina: this.stamina, baseMaxStamina: this.sprint.maxStamina,
+      exhausted: this.exhausted, staminaRegenDelaySeconds: this.staminaRegenDelay, gold: this.gold,
+      weapons: { primary: capture('primary'), secondary: capture('secondary'), activeSlot: this.activeSlot, lastFirearmSlot: this.lastFirearmSlot },
+      recovery: { rollCooldownSeconds: this.rollCooldownLeft, fireCooldownSeconds: this.fireCooldown, meleeGraceSeconds: this.meleeGrace } };
+  }
+
+  createPersistentFirearm(value: PersistentFirearm): DroppedWeapon {
+    const state = parsePersistentFirearm(value);
+    const slot = state.definitionId === 'prototype-primary' ? 'primary'
+      : state.definitionId === 'prototype-secondary' ? 'secondary' : null;
+    if (!slot) throw new Error('未知枪械定义: ' + state.definitionId);
+    const a = state.attributes;
+    return { ...this.weapons[slot], slot, instanceId: state.instanceId, definitionId: state.definitionId,
+      damage: a.damage, fireRate: a.fireIntervalSeconds, bulletSpeed: a.bulletSpeed, knockbackImpulse: a.knockbackImpulse,
+      magazineSize: a.magazineCapacity, reloadDuration: a.reloadSeconds, magazineAmmo: state.magazineAmmo,
+      chambered: state.chambered, reserveAmmo: state.reserveAmmo,
+      isReloading: false, reloadRemaining: 0, reloadTotal: 0, reloadBase: 0, reloadMode: null };
+  }
+
+  /** 配置先应用，再恢复真实资源；不重演伤害、补弹、拾取或死亡事件。 */
+  restorePersistentState(value: PersistentPlayerState, pose: Pose): void {
+    const state = parsePersistentPlayer(value);
+    if (![pose.position.x, pose.position.y, pose.facing].every(Number.isFinite)) throw new Error('玩家姿态无效');
+    const primary = state.weapons.primary && this.createPersistentFirearm(state.weapons.primary);
+    const secondary = state.weapons.secondary && this.createPersistentFirearm(state.weapons.secondary);
+    if ((primary && primary.slot !== 'primary') || (secondary && secondary.slot !== 'secondary')) throw new Error('枪械定义与槽位不符');
+    this.cancelPunch(); this.cancelReload();
+    this.ownedFirearms.clear();
+    for (const weapon of [primary, secondary]) if (weapon) { this.weapons[weapon.slot] = { ...weapon }; this.ownedFirearms.add(weapon.slot); }
+    this.activeSlot = state.weapons.activeSlot; this.lastFirearmSlot = state.weapons.lastFirearmSlot;
+    this.maxHealth = state.baseMaxHp; this.health = state.hp; this.lifeState = state.hp > 0 ? 'alive' : 'dead';
+    this.sprint.maxStamina = state.baseMaxStamina; this.stamina = state.stamina;
+    this.exhausted = state.exhausted; this.releasedAfterExhaustion = false; this.staminaRegenDelay = state.staminaRegenDelaySeconds;
+    this.gold = state.gold; this.rollCooldownLeft = state.recovery.rollCooldownSeconds;
+    this.fireCooldown = state.recovery.fireCooldownSeconds; this.meleeGrace = state.recovery.meleeGraceSeconds;
+    this.autoReload = state.preferences.autoReload; this.defaultReloadMode = state.preferences.defaultReloadMode;
+    this.x = pose.position.x; this.y = pose.position.y; this.currentRotation = pose.facing + Math.PI;
+    this.velocity.set(0, 0); this.stopVelocity.set(0, 0); this.sprinting = false;
+    this.sprintTime = this.movementTime = this.stopTime = this.rollTimeLeft = this.weaponSwapTime = 0;
+    this.perfectDodgeTimeLeft = this.perfectDodgeStaminaReward = 0; this.perfectDodgeRewarded = false;
+    this.rollActive = false; this.rollSpeed = 0; this.pointerAim = undefined; this.isShooting = false;
+    this.deathCause = this.deathEvent = null; this.damageEvents = []; this.bullets = [];
+    this.muzzleFlashTime = this.shotPoseTime = this.hitReactTime = 0; this.throwableHeld = false;
+  }
 
   dropWeapon(slot: WeaponSlot): DroppedWeapon | null {
     if (!this.isAlive() || slot === 'melee' || !this.hasWeapon(slot)) return null;

@@ -422,7 +422,7 @@ export class PlayerDebugPanel {
       return group?.[control.key] ?? 0;
     }
     if (control.domain === 'graphics') {
-      return (this.options.getGraphics() as unknown as Record<string, Record<string, number | string>>)[control.group][control.key];
+      return [control.group, ...control.key.split('.')].reduce((value, key) => (value as Record<string, unknown>)[key], this.options.getGraphics() as unknown) as number | string;
     }
     const audio = this.options.getAudio() as unknown as Record<string, unknown>;
     return control.group ? (audio[control.group] as Record<string, number>)[control.key] : audio.master as number;
@@ -437,7 +437,9 @@ export class PlayerDebugPanel {
     }
     if (control.domain === 'graphics') {
       const next = cloneGraphicsConfig(this.options.getGraphics());
-      (next as unknown as Record<string, Record<string, number | string>>)[control.group][control.key] = value;
+      const keys = [control.group, ...control.key.split('.')], leaf = keys.pop()!;
+      const target = keys.reduce((entry, key) => (entry as Record<string, unknown>)[key], next as unknown) as Record<string, unknown>;
+      target[leaf] = value;
       this.options.setGraphics(next);
       return;
     }
